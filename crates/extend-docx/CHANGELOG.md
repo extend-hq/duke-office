@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- Use the Rust allocator for ZIP decompression so debug WebAssembly builds link on current stable Rust.
+
 ## 0.2.1
 
 - Move the Rust parser to the Extend Office workspace and render native charts through its shared `extend-office-charts` crate.
