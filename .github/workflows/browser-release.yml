@@ -1,0 +1,41 @@
+name: Release browser package
+on:
+  push:
+    tags: ['charts-browser-v*']
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+      - name: Check version and browser distribution
+        run: |
+          git merge-base --is-ancestor HEAD origin/main
+          version=$(node -p "require('./package.json').version")
+          test "$GITHUB_REF_NAME" = "charts-browser-v$version"
+          npm run check:browser
+      - name: Publish the browser tarball
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          archive=$(npm pack --silent)
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes "Browser distribution of the Office chart renderer."
+          fi
+          mkdir -p "$RUNNER_TEMP/existing"
+          if gh release download "$GITHUB_REF_NAME" --pattern "$archive" --dir "$RUNNER_TEMP/existing"; then
+            cmp "$archive" "$RUNNER_TEMP/existing/$archive"
+          else
+            gh release upload "$GITHUB_REF_NAME" "$archive"
+          fi

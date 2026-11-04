@@ -1680,4 +1680,3 @@ impl std::ops::DerefMut for SharedParagraphStyle {
         std::sync::Arc::make_mut(&mut self.0)
     }
 }
-

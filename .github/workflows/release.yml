@@ -43,7 +43,7 @@ jobs:
 
   verify:
     needs: plan
-    if: github.event_name != 'pull_request' && needs.plan.outputs.pending == 'true'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && needs.plan.outputs.pending == 'true')
     uses: ./.github/workflows/check.yml
 
   publish:
@@ -51,8 +51,8 @@ jobs:
     if: >-
       github.repository == 'extend-hq/extend-office' &&
       github.ref == 'refs/heads/main' &&
-      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)) &&
-      needs.plan.outputs.pending == 'true'
+      ((github.event_name == 'push' && needs.plan.outputs.pending == 'true') ||
+      (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
     runs-on: ubuntu-latest
     environment: crates-io
     permissions:

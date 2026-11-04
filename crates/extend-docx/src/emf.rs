@@ -501,7 +501,7 @@ impl<'a> Converter<'a> {
             return None;
         }
         for triple in control_points.chunks(3) {
-            write!(d, 
+            write!(d,
                 "C{} {} {} {} {} {}",
                 fmt(triple[0].0),
                 fmt(triple[0].1),
