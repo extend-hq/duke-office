@@ -202,7 +202,7 @@ checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
 
 [[package]]
 name = "extend-docx"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "arc-swap",
  "base64",
@@ -226,7 +226,7 @@ dependencies = [
 
 [[package]]
 name = "extend-docx-wasm"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "extend-docx",
  "js-sys",

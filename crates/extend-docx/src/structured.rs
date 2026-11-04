@@ -1,4 +1,8 @@
+mod list_labels;
+
 use std::collections::HashSet;
+
+use list_labels::{ListDefinitions, StoryLists};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -132,6 +136,9 @@ pub struct ParagraphDetails {
     pub style_id: String,
     pub heading_level: Option<HeadingLevel>,
     pub numbering: Option<ParagraphNumbering>,
+    /// Visible list marker, separate from the text addressed by source offsets.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub list_label: Option<String>,
     pub field_instructions: Vec<String>,
     pub inlines: Vec<ParagraphInline>,
 }
@@ -477,7 +484,8 @@ fn paragraph_field_instructions(xml: &str) -> Vec<String> {
         .collect()
 }
 
-struct Extractor {
+struct Extractor<'a> {
+    lists: ListDefinitions<'a>,
     document_id: String,
     part_name: String,
     story: String,
@@ -485,7 +493,7 @@ struct Extractor {
     review: Option<RevisionCollector>,
 }
 
-impl Extractor {
+impl Extractor<'_> {
     fn block(
         &self,
         id: String,
@@ -560,28 +568,39 @@ impl Extractor {
 
     fn story_nodes(&mut self, nodes: &[DocNode], parent: Option<&str>) -> Vec<DocumentBlock> {
         let moves = self.review.as_mut().map(|r| std::mem::take(&mut r.moves));
-        let blocks = self.nodes(nodes, parent);
+        let blocks = self.nodes(nodes, parent, &mut StoryLists::default());
         if let (Some(review), Some(moves)) = (&mut self.review, moves) {
             review.moves = moves;
         }
         blocks
     }
 
-    fn nodes(&mut self, nodes: &[DocNode], parent: Option<&str>) -> Vec<DocumentBlock> {
+    fn nodes(
+        &mut self,
+        nodes: &[DocNode],
+        parent: Option<&str>,
+        lists: &mut StoryLists,
+    ) -> Vec<DocumentBlock> {
         nodes
             .iter()
             .enumerate()
             .map(|(index, node)| {
                 let fallback = indexed_path(parent.unwrap_or("document"), [("/", index)]);
                 match node {
-                    DocNode::Paragraph(p) => self.paragraph(p, &fallback, parent),
-                    DocNode::Table(t) => self.table(t, &fallback, parent),
+                    DocNode::Paragraph(p) => self.paragraph(p, &fallback, parent, lists),
+                    DocNode::Table(t) => self.table(t, &fallback, parent, lists),
                 }
             })
             .collect()
     }
 
-    fn paragraph(&mut self, p: &ParagraphNode, fallback: &str, parent: Option<&str>) -> DocumentBlock {
+    fn paragraph(
+        &mut self,
+        p: &ParagraphNode,
+        fallback: &str,
+        parent: Option<&str>,
+        lists: &mut StoryLists,
+    ) -> DocumentBlock {
         let id = p.block_id.as_deref().unwrap_or(fallback);
         let style = p.style.as_ref();
         let style_id = style.and_then(|s| s.style_id.as_deref()).unwrap_or("");
@@ -726,6 +745,7 @@ impl Extractor {
             style_id: style_id.into(),
             heading_level: style.and_then(|s| s.heading_level),
             numbering: style.and_then(|s| s.numbering.clone()),
+            list_label: lists.label(p, &self.lists),
             field_instructions,
             inlines: inline,
         };
@@ -739,7 +759,13 @@ impl Extractor {
         block
     }
 
-    fn table(&mut self, table: &TableNode, fallback: &str, parent: Option<&str>) -> DocumentBlock {
+    fn table(
+        &mut self,
+        table: &TableNode,
+        fallback: &str,
+        parent: Option<&str>,
+        lists: &mut StoryLists,
+    ) -> DocumentBlock {
         let id = table.block_id.as_deref().unwrap_or(fallback);
         if let (Some(review), Some(xml)) = (&mut self.review, &table.source_xml) {
             let source = SourceRef {
@@ -767,16 +793,17 @@ impl Extractor {
             let mut column_index = row.style.as_ref().and_then(|s| s.grid_before).unwrap_or(0);
             for (ci, cell) in row.cells.iter().enumerate() {
                 let cell_id = indexed_path(&row_id, [("/cell/", ci)]);
+                lists.break_paragraph_flow();
                 let content = cell
                     .nodes
                     .iter()
                     .enumerate()
                     .map(|(ni, node)| match node {
                         TableCellContentNode::Paragraph(p) => {
-                            self.paragraph(p, &indexed_path(&cell_id, [("/", ni)]), Some(&cell_id))
+                            self.paragraph(p, &indexed_path(&cell_id, [("/", ni)]), Some(&cell_id), lists)
                         }
                         TableCellContentNode::Table(t) => {
-                            self.table(t, &indexed_path(&cell_id, [("/", ni)]), Some(&cell_id))
+                            self.table(t, &indexed_path(&cell_id, [("/", ni)]), Some(&cell_id), lists)
                         }
                     })
                     .collect::<Vec<_>>();
@@ -824,6 +851,7 @@ impl Extractor {
                 children.extend(cells);
             }
         }
+        lists.break_paragraph_flow();
         self.block(
             id.to_string(),
             BlockType::Table,
@@ -836,6 +864,9 @@ impl Extractor {
 }
 
 fn block_has_visible_text(block: &DocumentBlock) -> bool {
+    if matches!(&block.details, BlockDetails::Paragraph(details) if details.list_label.is_some()) {
+        return true;
+    }
     block.content.chars().any(|c| {
         !c.is_whitespace() && !matches!(c, '\u{200b}' | '\u{feff}' | '\u{00ad}')
     })
@@ -917,6 +948,7 @@ fn extract(
         .clone()
         .unwrap_or_else(|| "unsaved".into());
     let mut extractor = Extractor {
+        lists: ListDefinitions::new(model.metadata.numbering_definitions.as_ref()),
         document_id: document_id.clone(),
         part_name: source_part(model, "document"),
         story: "body".into(),
@@ -1122,6 +1154,7 @@ mod inplace_block_cleanup_tests {
     fn invisible_containers_flatten_objects_and_repair_only_parent_links() {
         use super::*;
         let extractor = Extractor {
+            lists: ListDefinitions::new(None),
             document_id: "document".into(), part_name: "part".into(),
             story: "body".into(), include_words: false, review: None,
         };

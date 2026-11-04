@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.2
+
+- Return visible outline and list markers as paragraph `listLabel` metadata while preserving source text offsets.
+
 ## 0.2.1
 
 - Move the Rust parser to the Extend Office workspace and render native charts through its shared `extend-office-charts` crate.
