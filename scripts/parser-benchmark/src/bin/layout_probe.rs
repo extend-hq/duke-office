@@ -2,26 +2,26 @@ use std::mem::{align_of, size_of};
 
 fn formatting_diagnostics() -> serde_json::Value {
     let xml = r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:rPr><w:b/><w:rFonts w:ascii="serif"/></w:rPr><w:t>First</w:t></w:r><w:r><w:rPr><w:b/><w:rFonts w:ascii="serif"/></w:rPr><w:t>Second</w:t></w:r></w:p></w:body></w:document>"#;
-    let package = extend_docx::create_minimal_docx_package(Some(xml));
-    let mut model = extend_docx::build_doc_model(&package);
-    let blocks = extend_docx::extract_document_blocks(&model);
+    let package = rust_docx::create_minimal_docx_package(Some(xml));
+    let mut model = rust_docx::build_doc_model(&package);
+    let blocks = rust_docx::extract_document_blocks(&model);
     let block_json = serde_json::to_value(&blocks).unwrap();
-    let round_trip: extend_docx::StructuredDocument =
+    let round_trip: rust_docx::StructuredDocument =
         serde_json::from_value(block_json.clone()).unwrap();
     let typed_raw_round_trip =
         round_trip == blocks && serde_json::to_value(&round_trip).unwrap() == block_json;
     let mut extended = block_json.clone();
     extended["blocks"][0]["details"]["extension"] =
         serde_json::json!({"nested": [null, true, {"value": 7}]});
-    let imported: extend_docx::StructuredDocument = serde_json::from_value(extended.clone()).unwrap();
+    let imported: rust_docx::StructuredDocument = serde_json::from_value(extended.clone()).unwrap();
     let imported_extensions_retained = serde_json::to_value(imported).unwrap() == extended;
-    let extend_docx::DocNode::Paragraph(paragraph) = &mut model.nodes[0] else {
+    let rust_docx::DocNode::Paragraph(paragraph) = &mut model.nodes[0] else {
         panic!("expected paragraph");
     };
-    let extend_docx::ParagraphChildNode::Text(first) = &paragraph.children[0] else {
+    let rust_docx::ParagraphChildNode::Text(first) = &paragraph.children[0] else {
         panic!("expected text");
     };
-    let extend_docx::ParagraphChildNode::Text(second) = &paragraph.children[1] else {
+    let rust_docx::ParagraphChildNode::Text(second) = &paragraph.children[1] else {
         panic!("expected text");
     };
     let first_style = first.style.as_deref().unwrap();
@@ -36,14 +36,14 @@ fn formatting_diagnostics() -> serde_json::Value {
         == serde_json::to_value(first_style).unwrap();
     let original_style = serde_json::to_value(first_style).unwrap();
     let original_provenance = serde_json::to_value(&paragraph.source_run_provenance).unwrap();
-    let extend_docx::ParagraphChildNode::Text(first) = &mut paragraph.children[0] else {
+    let rust_docx::ParagraphChildNode::Text(first) = &mut paragraph.children[0] else {
         unreachable!();
     };
     let style = first.style.as_mut().unwrap();
     style.bold = Some(false);
     style.font_family = Some("monospace".into());
     let changed_style = serde_json::to_value(style).unwrap();
-    let extend_docx::ParagraphChildNode::Text(second) = &paragraph.children[1] else {
+    let rust_docx::ParagraphChildNode::Text(second) = &paragraph.children[1] else {
         unreachable!();
     };
     let sibling_unchanged =
@@ -79,17 +79,17 @@ fn main() {
             }));
         };
     }
-    record!("core.TextStyle", extend_docx::TextStyle);
-    record!("core.TextRunNode", extend_docx::TextRunNode);
-    record!("core.ImageRunNode", extend_docx::ImageRunNode);
-    record!("core.FormFieldRunNode", extend_docx::FormFieldRunNode);
-    record!("core.ParagraphChildNode", extend_docx::ParagraphChildNode);
-    record!("core.ParagraphNode", extend_docx::ParagraphNode);
-    record!("core.TableNode", extend_docx::TableNode);
-    record!("core.DocNode", extend_docx::DocNode);
+    record!("core.TextStyle", rust_docx::TextStyle);
+    record!("core.TextRunNode", rust_docx::TextRunNode);
+    record!("core.ImageRunNode", rust_docx::ImageRunNode);
+    record!("core.FormFieldRunNode", rust_docx::FormFieldRunNode);
+    record!("core.ParagraphChildNode", rust_docx::ParagraphChildNode);
+    record!("core.ParagraphNode", rust_docx::ParagraphNode);
+    record!("core.TableNode", rust_docx::TableNode);
+    record!("core.DocNode", rust_docx::DocNode);
     record!(
         "core.ParagraphSourceTextPatchRun",
-        extend_docx::ParagraphSourceTextPatchRun
+        rust_docx::ParagraphSourceTextPatchRun
     );
     record!("oxide.RunProperties", office_oxide::docx::RunProperties);
     record!("oxide.Run", office_oxide::docx::Run);

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { gunzipSync } from "node:zlib";
-import { loadOfficeCharts } from "@extend-ai/extend-office-charts";
+import { loadOfficeCharts } from "@extend-ai/rust-office-charts";
 import { sourceDigest } from "./source-digest.mjs";
 import payload from "./generated/payload.js";
 
@@ -23,7 +23,7 @@ const xml = `<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/
 
 const renderer = await loadOfficeCharts();
 const require = createRequire(import.meta.url);
-assert.equal(await require("@extend-ai/extend-office-charts").loadOfficeCharts(), renderer);
+assert.equal(await require("@extend-ai/rust-office-charts").loadOfficeCharts(), renderer);
 const options = { width: 320, height: 200, interactive: true, spreadsheetDefaults: true };
 const cached = renderer.renderChart(xml, options);
 assert.match(cached, /<svg\b/);

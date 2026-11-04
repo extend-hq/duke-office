@@ -14,7 +14,7 @@ function rustSources(dir) {
 
 export function sourceDigest() {
   const files = ["Cargo.toml", "Cargo.lock", "browser/build.mjs", "browser/source-digest.mjs"];
-  for (const crate of ["extend-office-charts", "extend-office-charts-wasm"]) {
+  for (const crate of ["rust-office-charts", "rust-office-charts-wasm"]) {
     files.push(`crates/${crate}/Cargo.toml`, ...rustSources(`crates/${crate}/src`));
   }
   const hash = createHash("sha256");

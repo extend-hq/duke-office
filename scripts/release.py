@@ -19,7 +19,7 @@ def cargo(*args):
 
 def fetch(url):
     request = urllib.request.Request(
-        url, headers={"User-Agent": "extend-office-release (github.com/extend-hq/extend-office)"}
+        url, headers={"User-Agent": "rust-office-release (github.com/extend-hq/rust-office)"}
     )
     with urllib.request.urlopen(request, timeout=40) as response:
         return response.read()

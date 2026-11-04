@@ -62,7 +62,7 @@ python3 scripts/parser-benchmark/word_reference_benchmark.py run \
   --site output/report/word-structured --repeats 5
 ```
 
-The preparation step validates source identities and snapshots the selected executable. Timing preparation snapshots the freshly built binary and hashes the Rust sources and dependency manifests. The run refuses a mismatched binary, changed sources, or an incomplete reference cohort. Historical records retain `docx-core` as the engine identifier for the package now named `extend-docx`.
+The preparation step validates source identities and snapshots the selected executable. Timing preparation snapshots the freshly built binary and hashes the Rust sources and dependency manifests. The run refuses a mismatched binary, changed sources, or an incomplete reference cohort. Historical records retain `docx-core` as the engine identifier for the package now named `rust-docx`.
 
 Capture can resume only from receipts matching the exporter and artifact hashes. A changed capture profile requires preparation again. Keep prior accepted reports and receipts; never relabel retained timings as a fresh run. The report identifies retained-output rescoring, partial fresh measurements, and completed fresh measurements separately.
 
@@ -82,12 +82,12 @@ This comparison uses 25 documents from the beginning of the fixed DOCX manifest,
 
 | Parser | Median ms | p95 ms | Word body recall | Word body F1 | Source image payload recall |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| extend-docx | 0.530 | 6.880 | 99.949% | 99.952% | 100.000% |
+| rust-docx | 0.530 | 6.880 | 99.949% | 99.952% | 100.000% |
 | docx-rs | 1.089 | 6.606 | 99.939% | 99.947% | 92.308% |
 | office_oxide | 0.680 | 3.668 | 99.937% | 99.946% | 92.308% |
 | undoc | 1.084 | 11.990 | 99.949% | 96.999% | 100.000% |
 
-The local parser has the lowest median in this sample; office_oxide has the lowest p95. Image payload counts are 52/52 for extend-docx and undoc, and 48/52 for the other two parsers. These image scores use original source payloads, not Word rendering.
+The local parser has the lowest median in this sample; office_oxide has the lowest p95. Image payload counts are 52/52 for rust-docx and undoc, and 48/52 for the other two parsers. These image scores use original source payloads, not Word rendering.
 
 Direct table and hyperlink references are available for 24 documents. Native resolved-formatting capture completed for 10 documents under the three-second budget, so those formatting scores describe that subset only. Word-saved structural references and body-text references cover all 25 documents. Parser, scoring, and reference-error counts are zero; unavailable native fields retain their separate coverage counts.
 
@@ -97,11 +97,11 @@ The reference application was Microsoft Word 16.106.1, build 16.106.26021521. Th
 
 The raw explicit-formatting metrics compare one reference feature per positively marked XML run against adapter output that coalesces adjacent formatted runs. Different run boundaries can therefore fail exact matching even when the same text has the same formatting. Inherited formatting also produces valid output spans absent from an explicit-only reference.
 
-An offline character-position audit of the same 25 saved exports found that extend-docx retained all 19,437 explicitly bold characters and all 17,265 explicitly italic characters. This is positive-markup recall, not full resolved-formatting precision. It does not treat the absence of explicit markup as proof that text should be unformatted. Word-resolved precision and recall remain limited to the ten completed captures.
+An offline character-position audit of the same 25 saved exports found that rust-docx retained all 19,437 explicitly bold characters and all 17,265 explicitly italic characters. This is positive-markup recall, not full resolved-formatting precision. It does not treat the absence of explicit markup as proof that text should be unformatted. Word-resolved precision and recall remain limited to the ten completed captures.
 
-The same audit found identical header/footer paragraph multisets for extend-docx: the global ordered-text deficits were caused by different part ordering. This establishes content presence, not correct section placement. The five exact table-text mismatches retained all literal text and added symbol glyphs omitted by the XML extractor. All five unmatched textbox paragraphs also retain their literal text; extra output still needs separate evaluation.
+The same audit found identical header/footer paragraph multisets for rust-docx: the global ordered-text deficits were caused by different part ordering. This establishes content presence, not correct section placement. The five exact table-text mismatches retained all literal text and added symbol glyphs omitted by the XML extractor. All five unmatched textbox paragraphs also retain their literal text; extra output still needs separate evaluation.
 
-The native hyperlink check has reference and adapter limitations. Of 31 unmatched extend-docx text anchors, 29 correspond to `PAGEREF` fields with the `\h` switch omitted by the captured hyperlink collection, one belongs to a textbox outside the reference story, and one combines adjacent links. Microsoft documents that [the `PAGEREF` hyperlink switch creates a link](https://support.microsoft.com/en-us/word/field-codes-pageref-field). Nested overlapping links also require an explicit effective-span policy. These findings do not establish corrected hyperlink precision: destinations and positions must be compared under the same rules for all four parsers.
+The native hyperlink check has reference and adapter limitations. Of 31 unmatched rust-docx text anchors, 29 correspond to `PAGEREF` fields with the `\h` switch omitted by the captured hyperlink collection, one belongs to a textbox outside the reference story, and one combines adjacent links. Microsoft documents that [the `PAGEREF` hyperlink switch creates a link](https://support.microsoft.com/en-us/word/field-codes-pageref-field). Nested overlapping links also require an explicit effective-span policy. These findings do not establish corrected hyperlink precision: destinations and positions must be compared under the same rules for all four parsers.
 
 Run the supplemental checks without opening Word or running the parsers again:
 

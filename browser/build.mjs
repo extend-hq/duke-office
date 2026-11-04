@@ -12,7 +12,7 @@ const rustflags = [
   `--remap-path-prefix=${homedir()}=/home/builder`,
   `--remap-path-prefix=${root}=.`,
 ].join("\x1f");
-const crate = resolve(root, "crates/extend-office-charts-wasm");
+const crate = resolve(root, "crates/rust-office-charts-wasm");
 const output = resolve(root, "browser/generated");
 mkdirSync(output, { recursive: true });
 const build = spawnSync(
