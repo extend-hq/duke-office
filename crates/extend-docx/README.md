@@ -111,7 +111,7 @@ Measured **November 2, 2026**, on a seeded **1,000-document DOCX corpus**. Laten
 | office_oxide | 1,000/1,000 | 0.750 ms | 5.380 ms | 99.917% | 99.926% |
 | undoc | 1,000/1,000 | 1.130 ms | 14.260 ms | 99.988% | 99.975% |
 
-![Native DOCX median and p95 latency for all four libraries](https://raw.githubusercontent.com/extend-hq/react-docx/185025994fb74825506ff024c37fe67283d6fc6a/docs/readme-assets/docx-core-optimized-20261102-latency-docx-summary.png)
+![Native DOCX median and p95 latency for all four libraries](https://raw.githubusercontent.com/extend-hq/extend-office/main/docs/readme-assets/docx-core-optimized-20261102-latency-docx-summary.png)
 
 Extend-docx has the lowest median and p95 in this run. Its median is 10.3% lower than office_oxide's; this does **not** establish a 5× speedup. Undoc has the highest five-gram text F1, while extend-docx has the highest ordered-text F1.
 
@@ -121,7 +121,7 @@ Each document has five warm samples, each averaging 1–20 parses. Timings inclu
 
 The same 999 successful inputs appear for every library. Each point is one document's median latency. Complexity counts come from the source reference and are shared across parsers. Logarithmic axes retain zero complexity counts.
 
-![DOCX latency scatter plots by input size, source paragraph count, and source feature count](https://raw.githubusercontent.com/extend-hq/react-docx/185025994fb74825506ff024c37fe67283d6fc6a/docs/readme-assets/docx-core-optimized-20261102-latency-docx-scatter.png)
+![DOCX latency scatter plots by input size, source paragraph count, and source feature count](https://raw.githubusercontent.com/extend-hq/extend-office/main/docs/readme-assets/docx-core-optimized-20261102-latency-docx-scatter.png)
 
 ### Feature recall on 1,000 DOCX inputs
 
@@ -206,17 +206,17 @@ Each cell is **body-text F1 · median / p95 milliseconds**. Accuracy and latency
 | DOCM | 100.000% · 0.183 / 2.380 | 100.000% · 0.259 / 1.856 | 100.000% · 0.148 / 0.899 | 100.000% · 0.084 / 2.571 |
 | DOTM | 100.000% · 0.566 / 1.130 | 100.000% · 1.657 / 2.648 | 100.000% · 0.627 / 1.704 | 100.000% · 0.716 / 3.455 |
 
-![Native median and p95 latency across DOCX, DOC, DOT, DOTX, DOCM, and DOTM](https://raw.githubusercontent.com/extend-hq/react-docx/185025994fb74825506ff024c37fe67283d6fc6a/docs/readme-assets/docx-core-optimized-20261102-latency-overview.png)
+![Native median and p95 latency across DOCX, DOC, DOT, DOTX, DOCM, and DOTM](https://raw.githubusercontent.com/extend-hq/extend-office/main/docs/readme-assets/docx-core-optimized-20261102-latency-overview.png)
 
 </details>
 
 ### Reproducibility and detailed results
 
-- [Measured revisions, timing protocol, validation, and paired optimization results](https://github.com/extend-hq/react-docx/blob/185025994fb74825506ff024c37fe67283d6fc6a/docs/benchmarks-optimized-20261102.md)
-- [Word capture/scoring methods, coverage, and unresolved reference limitations](https://github.com/extend-hq/react-docx/blob/185025994fb74825506ff024c37fe67283d6fc6a/docs/word-reference-benchmarks.md)
-- [Source-reference accuracy aggregates](https://github.com/extend-hq/react-docx/blob/185025994fb74825506ff024c37fe67283d6fc6a/crates/extend-docx/benchmarks/optimized-20261102/accuracy.json), [latency summary](https://github.com/extend-hq/react-docx/blob/185025994fb74825506ff024c37fe67283d6fc6a/crates/extend-docx/benchmarks/optimized-20261102/latency.json), and [anonymous scatter data](https://github.com/extend-hq/react-docx/blob/185025994fb74825506ff024c37fe67283d6fc6a/crates/extend-docx/benchmarks/optimized-20261102/latency.csv)
-- [Word-reference aggregate precision, recall, F1, and coverage for every measured category](https://github.com/extend-hq/react-docx/blob/185025994fb74825506ff024c37fe67283d6fc6a/crates/extend-docx/benchmarks/word-reference-20261103/summary.json)
-- [Per-format distribution and complexity charts](https://github.com/extend-hq/react-docx/blob/185025994fb74825506ff024c37fe67283d6fc6a/crates/extend-docx/README.md#per-format-charts) and [historical npm 0.13.0 results](https://github.com/extend-hq/react-docx/blob/185025994fb74825506ff024c37fe67283d6fc6a/docs/benchmarks-0.13.0.md)
+- [Measured revisions, timing protocol, validation, and paired optimization results](https://github.com/extend-hq/extend-office/blob/main/docs/benchmarks-optimized-20261102.md)
+- [Word capture/scoring methods, coverage, and unresolved reference limitations](https://github.com/extend-hq/extend-office/blob/main/docs/word-reference-benchmarks.md)
+- [Source-reference accuracy aggregates](https://github.com/extend-hq/extend-office/blob/main/crates/extend-docx/benchmarks/optimized-20261102/accuracy.json), [latency summary](https://github.com/extend-hq/extend-office/blob/main/crates/extend-docx/benchmarks/optimized-20261102/latency.json), and [anonymous scatter data](https://github.com/extend-hq/extend-office/blob/main/crates/extend-docx/benchmarks/optimized-20261102/latency.csv)
+- [Word-reference aggregate precision, recall, F1, and coverage for every measured category](https://github.com/extend-hq/extend-office/blob/main/crates/extend-docx/benchmarks/word-reference-20261103/summary.json)
+- [Per-format distribution and complexity charts](https://github.com/extend-hq/react-docx/blob/185025994fb74825506ff024c37fe67283d6fc6a/crates/extend-docx/README.md#per-format-charts) and [historical npm 0.13.0 results](https://github.com/extend-hq/extend-office/blob/main/docs/benchmarks-0.13.0.md)
 
 These are retained completed runs, not new measurements of a documentation release. Source revisions and executable hashes identify each measured build. Historical records use the internal engine identifier `docx-core`; chart and table labels use the published crate name **extend-docx**. Public data contains aggregate counts and anonymous numeric points, without source documents or extracted text.
 
@@ -225,49 +225,49 @@ These are retained completed runs, not new measurements of a documentation relea
 <details>
 <summary>DOCX — seeded corpus: latency distribution and complexity</summary>
 
-![DOCX — seeded corpus native latency distribution and complexity comparisons](https://raw.githubusercontent.com/extend-hq/react-docx/185025994fb74825506ff024c37fe67283d6fc6a/docs/readme-assets/docx-core-optimized-20261102-latency-docx.png)
+![DOCX — seeded corpus native latency distribution and complexity comparisons](https://raw.githubusercontent.com/extend-hq/extend-office/main/docs/readme-assets/docx-core-optimized-20261102-latency-docx.png)
 
 </details>
 
 <details>
 <summary>DOC: latency distribution and complexity</summary>
 
-![DOC native latency distribution and complexity comparisons](https://raw.githubusercontent.com/extend-hq/react-docx/185025994fb74825506ff024c37fe67283d6fc6a/docs/readme-assets/docx-core-optimized-20261102-latency-doc.png)
+![DOC native latency distribution and complexity comparisons](https://raw.githubusercontent.com/extend-hq/extend-office/main/docs/readme-assets/docx-core-optimized-20261102-latency-doc.png)
 
 </details>
 
 <details>
 <summary>DOT: latency distribution and complexity</summary>
 
-![DOT native latency distribution and complexity comparisons](https://raw.githubusercontent.com/extend-hq/react-docx/185025994fb74825506ff024c37fe67283d6fc6a/docs/readme-assets/docx-core-optimized-20261102-latency-dot.png)
+![DOT native latency distribution and complexity comparisons](https://raw.githubusercontent.com/extend-hq/extend-office/main/docs/readme-assets/docx-core-optimized-20261102-latency-dot.png)
 
 </details>
 
 <details>
 <summary>DOTX: latency distribution and complexity</summary>
 
-![DOTX native latency distribution and complexity comparisons](https://raw.githubusercontent.com/extend-hq/react-docx/185025994fb74825506ff024c37fe67283d6fc6a/docs/readme-assets/docx-core-optimized-20261102-latency-dotx.png)
+![DOTX native latency distribution and complexity comparisons](https://raw.githubusercontent.com/extend-hq/extend-office/main/docs/readme-assets/docx-core-optimized-20261102-latency-dotx.png)
 
 </details>
 
 <details>
 <summary>DOCM: latency distribution and complexity</summary>
 
-![DOCM native latency distribution and complexity comparisons](https://raw.githubusercontent.com/extend-hq/react-docx/185025994fb74825506ff024c37fe67283d6fc6a/docs/readme-assets/docx-core-optimized-20261102-latency-docm.png)
+![DOCM native latency distribution and complexity comparisons](https://raw.githubusercontent.com/extend-hq/extend-office/main/docs/readme-assets/docx-core-optimized-20261102-latency-docm.png)
 
 </details>
 
 <details>
 <summary>DOTM: latency distribution and complexity</summary>
 
-![DOTM native latency distribution and complexity comparisons](https://raw.githubusercontent.com/extend-hq/react-docx/185025994fb74825506ff024c37fe67283d6fc6a/docs/readme-assets/docx-core-optimized-20261102-latency-dotm.png)
+![DOTM native latency distribution and complexity comparisons](https://raw.githubusercontent.com/extend-hq/extend-office/main/docs/readme-assets/docx-core-optimized-20261102-latency-dotm.png)
 
 </details>
 
 <details>
 <summary>DOCX — additional regression cohort: latency distribution and complexity</summary>
 
-![DOCX — additional regression cohort native latency distribution and complexity comparisons](https://raw.githubusercontent.com/extend-hq/react-docx/185025994fb74825506ff024c37fe67283d6fc6a/docs/readme-assets/docx-core-optimized-20261102-latency-docx-regressions.png)
+![DOCX — additional regression cohort native latency distribution and complexity comparisons](https://raw.githubusercontent.com/extend-hq/extend-office/main/docs/readme-assets/docx-core-optimized-20261102-latency-docx-regressions.png)
 
 </details>
 

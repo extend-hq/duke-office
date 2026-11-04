@@ -2,3 +2,8 @@
 node_modules/
 .DS_Store
 *.tgz
+
+output/
+**/target/
+__pycache__/
+.python-deps/
