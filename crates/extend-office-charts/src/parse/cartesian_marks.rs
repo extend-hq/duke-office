@@ -359,17 +359,14 @@ pub(super) fn draw(
         let mut indices: BTreeSet<u32> = by_index.keys().copied().collect();
         if !scatter && zero {
             // A long run of absent cache indices can be represented by its endpoints.
-            let count = node
-                .children()
-                .filter(|n| chart_node(*n, "val") || chart_node(*n, "cat"))
-                .flat_map(|ch| ch.descendants())
-                .filter(|n| chart_node(*n, "ptCount"))
-                .filter_map(|n| n.attribute("val")?.parse::<u32>().ok())
-                .max()
-                .unwrap_or(0);
-            if count > 0 {
+            let last = if colors.use_cached_point_count {
+                super::cached_point_count(node).checked_sub(1)
+            } else {
+                indices.last().copied()
+            };
+            if let Some(last) = last {
                 indices.insert(0);
-                indices.insert(count - 1);
+                indices.insert(last);
             }
             let mut prior = None;
             for i in indices.clone() {

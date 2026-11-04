@@ -3016,7 +3016,8 @@ fn render_cartesian_chart(
     context: &NodeParseContext<'_, '_>,
     companions: Option<&ChartCompanionParts>,
 ) -> Option<String> {
-    let plot = root.child("chart")?.child("plotArea")?;
+    let chart = root.child("chart")?;
+    let plot = chart.child("plotArea")?;
     let mut groups = plot
         .children
         .iter()
@@ -3067,6 +3068,24 @@ fn render_cartesian_chart(
         }
         palette
     });
+    let xml = std::str::from_utf8(xml).ok()?;
+    let automatic_title = chart
+        .child("title")
+        .is_some_and(|title| title.child("tx").is_none())
+        && !matches!(
+            chart
+                .child("autoTitleDeleted")
+                .and_then(|node| node.attr("val")),
+            Some("1" | "true")
+        )
+        && group.children_named("ser").count() == 1;
+    let data = automatic_title
+        .then(|| {
+            let mut data = extend_office_charts::parse_chart_xml(xml)?;
+            data.title = data.series.first()?.name.clone();
+            Some(data)
+        })
+        .flatten();
     let options = extend_office_charts::RenderOptions {
         width: Some(frame.width as f64 / 9525.),
         height: Some(frame.height as f64 / 9525.),
@@ -3077,12 +3096,12 @@ fn render_cartesian_chart(
         style_xml: companions.and_then(|parts| parts.style_xml.as_deref()),
         color_style_xml: companions.and_then(|parts| parts.colors_xml.as_deref()),
         theme_override_xml: companions.and_then(|parts| parts.theme_override_xml.as_deref()),
+        data: data.as_ref(),
         legacy_defaults: context.legacy_chart_defaults,
         interactive: true,
         ..Default::default()
     };
-    extend_office_charts::render_chart(std::str::from_utf8(xml).ok()?, &options)
-        .map(|chart| chart.svg)
+    extend_office_charts::render_chart(xml, &options).map(|chart| chart.svg)
 }
 
 fn parse_chart_part(

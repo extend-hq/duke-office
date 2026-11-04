@@ -247,6 +247,17 @@ impl<'a> Group<'a> {
     }
 }
 
+fn cached_point_count(series: Node) -> u32 {
+    series
+        .children()
+        .filter(|n| ["cat", "val", "yVal"].iter().any(|key| chart_node(*n, key)))
+        .flat_map(|channel| channel.descendants())
+        .filter(|n| chart_node(*n, "ptCount"))
+        .filter_map(|n| n.attribute("val")?.parse().ok())
+        .max()
+        .unwrap_or(0)
+}
+
 fn groups<'a>(plot: Node<'a, 'a>, data: &ChartData) -> Option<Vec<Group<'a>>> {
     let mut out = Vec::new();
     let axes_by_id: HashMap<_, _> = plot
@@ -1094,20 +1105,9 @@ pub(super) fn render(
                 }
             }
         }
-        for ser in g.node.children().filter(|n| chart_node(*n, "ser")) {
-            for channel in ser.children().filter(|n| {
-                ["cat", "val", "yVal"]
-                    .iter()
-                    .any(|name| chart_node(*n, name))
-            }) {
-                if let Some(total) = channel
-                    .descendants()
-                    .find(|n| chart_node(*n, "ptCount"))
-                    .and_then(|n| n.attribute("val"))
-                    .and_then(|v| v.parse::<u32>().ok())
-                {
-                    count = count.max(total as u64);
-                }
+        if colors.use_cached_point_count {
+            for ser in g.node.children().filter(|n| chart_node(*n, "ser")) {
+                count = count.max(u64::from(cached_point_count(ser)));
             }
         }
         let (x, y) = g.ranges(series);

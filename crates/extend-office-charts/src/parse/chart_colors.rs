@@ -201,6 +201,7 @@ pub(super) struct ChartColors {
     legacy_defaults: bool,
     pub(crate) interactive: bool,
     pub(super) spreadsheet_defaults: bool,
+    pub(super) use_cached_point_count: bool,
     servers: paint::PaintServers,
     palette: Palette,
     #[cfg(feature = "extended-charts")]
@@ -364,6 +365,7 @@ impl ChartColors {
         Self {
             interactive: options.interactive,
             spreadsheet_defaults: options.spreadsheet_defaults,
+            use_cached_point_count: options.data.is_none(),
             legacy_defaults,
             series,
             servers,

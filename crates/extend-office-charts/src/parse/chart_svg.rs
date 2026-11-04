@@ -129,7 +129,19 @@ pub(super) fn format_value(value: f64, code: Option<&str>) -> String {
     }
     let (integer, fraction) = code.split_once('.').unwrap_or((code, ""));
     if integer == "#,##0" && fraction.len() <= 12 && fraction.bytes().all(|c| c == b'0') {
-        let mut label = format!("{value:.precision$}", precision = fraction.len());
+        let precision = fraction.len();
+        // Chart labels round decimal midpoints away from zero.
+        let midpoint = value
+            .to_string()
+            .split_once('.')
+            .is_some_and(|(_, digits)| digits.len() == precision + 1 && digits.ends_with('5'));
+        let rounded = if midpoint {
+            let scale = 10_f64.powi(precision as i32);
+            ((value.abs() * scale).floor() + 1.).copysign(value) / scale
+        } else {
+            value
+        };
+        let mut label = format!("{rounded:.precision$}");
         let digits_start = usize::from(label.starts_with('-'));
         let mut end = label.find('.').unwrap_or(label.len());
         while end > digits_start + 3 {
