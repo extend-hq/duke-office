@@ -1,6 +1,6 @@
 [package]
 name = "extend-docx-wasm"
-version = "0.2.2"
+version = "0.2.3"
 edition.workspace = true
 license.workspace = true
 description = "WebAssembly bindings for the extend-docx parser and serializer"
@@ -16,7 +16,7 @@ name = "docx_wasm"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-extend-docx = { version = "=0.2.2", path = "../extend-docx" }
+extend-docx = { version = "=0.2.3", path = "../extend-docx" }
 serde.workspace = true
 serde_json = { workspace = true, features = ["float_roundtrip"] }
 wasm-bindgen = "0.2"
