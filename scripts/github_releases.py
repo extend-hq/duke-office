@@ -1,9 +1,14 @@
 """Create a GitHub release for each published workspace crate."""
 
+import hashlib
+import io
 import json
 from pathlib import Path
 import subprocess
+import tarfile
 import tempfile
+
+from release import fetch, published_checksum
 
 
 def main():
@@ -11,8 +16,8 @@ def main():
         ["cargo", "metadata", "--locked", "--format-version=1", "--no-deps"],
         text=True,
     ))
-    revision = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     artifacts = Path(workspace["target_directory"]) / "package"
+    artifacts.mkdir(parents=True, exist_ok=True)
     for package in workspace["packages"]:
         if package["publish"] == []:
             continue
@@ -26,9 +31,18 @@ def main():
         if existing.returncode == 0:
             print(f"Release exists: {tag}", flush=True)
             continue
-        artifact = artifacts / f"{name}-{version}.crate"
-        if not artifact.is_file():
-            raise FileNotFoundError(artifact)
+        checksum = published_checksum(name, version)
+        if checksum is None:
+            raise RuntimeError(f"Publish {name} {version} to crates.io first")
+        filename = f"{name}-{version}.crate"
+        data = fetch(f"https://static.crates.io/crates/{name}/{filename}")
+        if hashlib.sha256(data).hexdigest() != checksum:
+            raise RuntimeError(f"Registry checksum mismatch for {filename}")
+        with tarfile.open(fileobj=io.BytesIO(data), mode="r:gz") as archive:
+            metadata = archive.extractfile(f"{name}-{version}/.cargo_vcs_info.json")
+            revision = json.load(metadata)["git"]["sha1"]
+        artifact = artifacts / filename
+        artifact.write_bytes(data)
         notes = (
             f"{name} {version} by Extend.\n\n"
             f"{package['description']}\n\n"
