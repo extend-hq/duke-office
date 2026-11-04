@@ -21,3 +21,12 @@ jobs:
         with:
           node-version: 24
       - run: node browser/check.mjs
+  wasm-stable:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+      - run: cargo build --workspace --locked --target wasm32-unknown-unknown

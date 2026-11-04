@@ -1,8 +1,12 @@
 # Changelog
 
-## 0.2.2
+## 0.2.3
 
 - Return visible outline and list markers as paragraph `listLabel` metadata while preserving source text offsets.
+
+## 0.2.2
+
+- Use the Rust allocator for ZIP decompression so debug WebAssembly builds link on current stable Rust.
 
 ## 0.2.1
 

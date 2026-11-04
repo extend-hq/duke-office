@@ -1,6 +1,6 @@
 [package]
 name = "extend-docx"
-version = "0.2.2"
+version = "0.2.3"
 edition.workspace = true
 license.workspace = true
 description = "Rust parser, document model, and serializer for DOCX and legacy Word documents"
@@ -23,7 +23,7 @@ serde_json.workspace = true
 serde_bytes.workspace = true
 miniz_oxide.workspace = true
 memchr = "2"
-zlib-rs = "0.6.8"
+zlib-rs = { version = "0.6.8", default-features = false, features = ["std"] }
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-case"] }
 quick-xml = "0.42"
 base64 = "0.22"
