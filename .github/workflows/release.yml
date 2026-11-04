@@ -1,0 +1,72 @@
+name: Release crates
+on:
+  pull_request:
+    branches: [main]
+    paths: &release-paths
+      - 'crates/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'scripts/release.py'
+      - '.github/workflows/release.yml'
+      - '.github/workflows/check.yml'
+  push:
+    branches: [main]
+    paths: *release-paths
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Verify the release without uploading packages
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  queue: max
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      pending: ${{ steps.plan.outputs.pending }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.93.1
+      - id: plan
+        run: python3 scripts/release.py dry-run
+
+  verify:
+    needs: plan
+    if: github.event_name != 'pull_request' && needs.plan.outputs.pending == 'true'
+    uses: ./.github/workflows/check.yml
+
+  publish:
+    needs: [plan, verify]
+    if: >-
+      github.repository == 'extend-hq/extend-office' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && !inputs.dry_run)) &&
+      needs.plan.outputs.pending == 'true'
+    runs-on: ubuntu-latest
+    environment: crates-io
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30
+        with:
+          toolchain: 1.93.1
+      - uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9
+        id: registry
+      - run: python3 scripts/release.py publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ steps.registry.outputs.token }}

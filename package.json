@@ -1,0 +1,39 @@
+{
+  "name": "@extend-ai/extend-office-charts",
+  "version": "0.1.0",
+  "description": "Render Office Open XML Cartesian charts to SVG with WebAssembly",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/extend-hq/extend-office.git"
+  },
+  "main": "./browser/index.cjs",
+  "module": "./browser/index.js",
+  "types": "./browser/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./browser/index.d.ts",
+        "default": "./browser/index.js"
+      },
+      "require": {
+        "types": "./browser/index.d.cts",
+        "default": "./browser/index.cjs"
+      }
+    },
+    "./office_charts_bg.wasm": "./browser/generated/office_charts_bg.wasm",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "browser/index.*",
+    "browser/generated/*.wasm",
+    "browser/generated/*.js",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build:browser": "node browser/build.mjs",
+    "check:browser": "node browser/check.mjs"
+  },
+  "sideEffects": false
+}

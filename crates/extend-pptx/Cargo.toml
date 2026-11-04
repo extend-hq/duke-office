@@ -1,0 +1,24 @@
+[package]
+name = "extend-pptx"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Parse PowerPoint PPTX and legacy PPT presentations into a structured model"
+readme = "README.md"
+keywords = ["powerpoint", "pptx", "ppt", "ooxml", "parser"]
+categories = ["parser-implementations"]
+
+[lib]
+name = "pptx_core"
+
+[dependencies]
+extend-office-charts = { version = "0.1.0", path = "../extend-office-charts", default-features = false }
+cfb.workspace = true
+flate2.workspace = true
+quick-xml.workspace = true
+serde.workspace = true
+serde_bytes.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+zip.workspace = true
