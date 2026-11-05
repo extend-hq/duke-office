@@ -655,10 +655,10 @@ fn apply_shape_effects(
             "a:softEdge" => {
                 let radius = blur_radius(xml, "rad")?;
                 let erosion = radius;
-                let deviation = radius / 2.0;
+                let deviation = radius / 3.0;
                 let _ = write!(
                     defs,
-                    r##"<filter id="picture-soft-edge" filterUnits="userSpaceOnUse" {} color-interpolation-filters="sRGB"><feMorphology in="SourceAlpha" operator="erode" radius="{erosion}" result="inset"/><feGaussianBlur in="inset" stdDeviation="{deviation}" result="soft"/><feComposite in="SourceGraphic" in2="soft" operator="in"/></filter>"##,
+                    r##"<filter id="picture-soft-edge" filterUnits="userSpaceOnUse" {} color-interpolation-filters="sRGB"><feComponentTransfer in="SourceAlpha" result="binary"><feFuncA type="linear" slope="255"/></feComponentTransfer><feMorphology in="binary" operator="erode" radius="{erosion}" result="inset"/><feGaussianBlur in="inset" stdDeviation="{deviation}" result="soft"/><feComposite in="SourceGraphic" in2="soft" operator="in"/></filter>"##,
                     source_bounds.attributes()
                 );
                 source = format!(r##"<g filter="url(#picture-soft-edge)">{source}</g>"##);
@@ -689,7 +689,12 @@ fn apply_shape_effects(
                 bounds = bounds.union(effect_bounds);
             }
             "a:outerShdw" | "a:reflection" => {
-                let deviation = blur_radius(xml, "blurRad")? / 2.0;
+                let deviation = blur_radius(xml, "blurRad")?
+                    / if effect.tag_name == "a:outerShdw" {
+                        3.0
+                    } else {
+                        2.0
+                    };
                 let rotate_with_shape = !get_attribute_ref(xml, "rotWithShape")
                     .is_some_and(|value| matches!(value, "0" | "false" | "off"));
                 let transformed = if rotate_with_shape {

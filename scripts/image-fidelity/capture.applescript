@@ -14,8 +14,9 @@ on run argv
             set update links at open of settings to false
             try
                 open file name (item 1 of argv) read only true add to recent files false confirm conversions false
-                set openedDocument to active document
-                if posix full name of openedDocument is not item 1 of argv then error "Opened document identity mismatch"
+                set candidateDocument to active document
+                if posix full name of candidateDocument is not item 1 of argv then error "Opened document identity mismatch"
+                set openedDocument to candidateDocument
                 output's setObject:version forKey:"wordVersion"
                 output's setObject:(count shapes of openedDocument) forKey:"floatingShapeCount"
                 output's setObject:(count inline shapes of openedDocument) forKey:"inlineShapeCount"

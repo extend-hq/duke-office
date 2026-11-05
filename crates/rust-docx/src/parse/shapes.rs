@@ -473,6 +473,20 @@ impl DrawingAffine {
         (a * x + c * y + e, b * x + d * y + f)
     }
 
+    fn without_scale(self) -> Option<(Self, f64, f64)> {
+        let [a, b, c, d, e, f] = self.0;
+        let scale_x = a.hypot(b);
+        let scale_y = c.hypot(d);
+        if !scale_x.is_finite() || !scale_y.is_finite() || scale_x == 0.0 || scale_y == 0.0 {
+            return None;
+        }
+        Some((
+            Self([a / scale_x, b / scale_x, c / scale_y, d / scale_y, e, f]),
+            scale_x,
+            scale_y,
+        ))
+    }
+
     fn frame(x: f64, y: f64, width: f64, height: f64, xml: &str) -> Option<Self> {
         let rotation = get_attribute(xml, "rot")
             .map(|raw| raw.parse::<f64>().ok())
@@ -521,7 +535,11 @@ fn drawing_group_transform_xml(group: &str) -> Option<&str> {
         .and_then(|properties| crate::xml::direct_child_tag(properties, "a:xfrm"))
 }
 
-fn affine_group_matrix(xml: &str, frame: Option<(f64, f64)>) -> Option<DrawingAffine> {
+fn affine_group_matrix(
+    xml: &str,
+    frame: Option<(f64, f64)>,
+    parent: Option<DrawingAffine>,
+) -> Option<DrawingAffine> {
     let child_offset = crate::xml::direct_child_tag(xml, "a:chOff")?;
     let child_extent = crate::xml::direct_child_tag(xml, "a:chExt")?;
     let child_x = parse_integer_attribute(child_offset, "x")? as f64 / 9525.0;
@@ -545,6 +563,26 @@ fn affine_group_matrix(xml: &str, frame: Option<(f64, f64)>) -> Option<DrawingAf
         .any(|value| value <= 0.0)
     {
         return None;
+    }
+    if let Some(parent) = parent {
+        // Group resizing scales the frame before its local rotation, without introducing shear.
+        let (mut orientation, scale_x, scale_y) = parent.without_scale()?;
+        orientation.0[4] = 0.0;
+        orientation.0[5] = 0.0;
+        let rotation = DrawingAffine::frame(0.0, 0.0, 0.0, 0.0, xml)?;
+        let mut matrix = orientation.compose(rotation).compose(DrawingAffine([
+            width * scale_x / child_width,
+            0.0,
+            0.0,
+            height * scale_y / child_height,
+            0.0,
+            0.0,
+        ]));
+        let center = parent.point(x + width / 2.0, y + height / 2.0);
+        let child_center = matrix.point(child_x + child_width / 2.0, child_y + child_height / 2.0);
+        matrix.0[4] = center.0 - child_center.0;
+        matrix.0[5] = center.1 - child_center.1;
+        return matrix.0.into_iter().all(f64::is_finite).then_some(matrix);
     }
     let scale_x = width / child_width;
     let scale_y = height / child_height;
@@ -571,24 +609,25 @@ fn collect_affine_grouped_drawings<'a>(
     for range in crate::xml::extract_direct_child_tag_ranges(xml) {
         let child = &xml[range.start..range.end];
         match range.tag_name.as_str() {
-            "pic:pic" | "wps:wsp" => output.push(GroupedDrawing {
-                xml: child,
-                picture: range.tag_name == "pic:pic",
-                transform: DrawingGroupTransform {
-                    scale_x: 1.0 / 9525.0,
-                    scale_y: 1.0 / 9525.0,
-                    origin_x: 0.0,
-                    origin_y: 0.0,
-                    integer_origin: Some((0, 0)),
-                },
-                affine: Some(matrix),
-                bitmap_fill_supported: true,
-            }),
+            "pic:pic" | "wps:wsp" => {
+                let (orientation, scale_x, scale_y) = matrix.without_scale()?;
+                output.push(GroupedDrawing {
+                    xml: child,
+                    picture: range.tag_name == "pic:pic",
+                    transform: DrawingGroupTransform {
+                        scale_x: scale_x / 9525.0,
+                        scale_y: scale_y / 9525.0,
+                        origin_x: 0.0,
+                        origin_y: 0.0,
+                        integer_origin: Some((0, 0)),
+                    },
+                    affine: Some(orientation),
+                    bitmap_fill_supported: true,
+                });
+            }
             "wpg:grpSp" => {
-                let child_matrix = matrix.compose(affine_group_matrix(
-                    drawing_group_transform_xml(child)?,
-                    None,
-                )?);
+                let child_matrix =
+                    affine_group_matrix(drawing_group_transform_xml(child)?, None, Some(matrix))?;
                 if !child_matrix.0.into_iter().all(f64::is_finite) {
                     return None;
                 }
@@ -869,6 +908,7 @@ pub fn render_standalone_word_shape_svg(
             let matrix = affine_group_matrix(
                 drawing_group_transform_xml(&group_xml)?,
                 Some((layout_width, layout_height)),
+                None,
             )?;
             let mut grouped = Vec::new();
             if collect_affine_grouped_drawings(&group_xml, matrix, 0, &mut grouped).is_none() {
@@ -1271,6 +1311,18 @@ fn render_grouped_picture_svg_element(
     };
     let width_px = size(ext_x_px as f64 * scale_x);
     let height_px = size(ext_y_px as f64 * scale_y);
+    let scaled_picture;
+    let picture_xml = if precise {
+        // Paint the local rotation and effects against the resized frame.
+        scaled_picture = format!(
+            r#"<w:drawing><wp:extent cx="{:.0}" cy="{:.0}"/>{picture_xml}</w:drawing>"#,
+            width_px * 9525.0,
+            height_px * 9525.0,
+        );
+        &scaled_picture
+    } else {
+        picture_xml
+    };
     let image = super::images::parse_run_image_block(picture_xml, context)?;
     let source = escape_xml_text(image.src.as_deref()?);
     if let Some(bounds) = image.paint_bounds.as_deref() {

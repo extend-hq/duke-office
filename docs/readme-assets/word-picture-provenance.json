@@ -1,0 +1,220 @@
+{
+  "label": "Shared OfficeArt spatial kernel",
+  "inputSha256": "0e7a529d46ea9176fef1b8338de31f416905df4e28c56d77462862fb01967dbb",
+  "nativePdfSha256": "116eb17fef6cf4d1c87486cfb2725ebe07f1012e71246ef323114c850b610b81",
+  "wordVersion": "16.106.1",
+  "dpi": 96,
+  "regionPx": {
+    "x": 48,
+    "y": 48,
+    "width": 336,
+    "height": 336
+  },
+  "caseCount": 40,
+  "statuses": {
+    "blank-native-reference": 1,
+    "compared": 39
+  },
+  "referenceReceipt": "word-cairo-reference.json",
+  "referenceRasterizer": "Microsoft Word save as PDF; existing native PDF rasterized with Poppler Cairo at96dpi",
+  "measuredAt": "2026-11-05",
+  "candidate": "Native Rust OfficeArt 0.1.1 SVG rendered in Chromium",
+  "medianInkIntersectionOverUnion": 0.9983860585609599,
+  "medianColorAgreementWithin16OnInkUnion": 1.0,
+  "meanColorAgreementWithin16OnInkUnion": 0.9400842599580082,
+  "casesAtOrAbove96Percent": 37,
+  "limitations": [
+    "Bounded synthetic matrix, not universal Word parity",
+    "Soft-edge raster-resolution behavior remains approximate",
+    "Blank native blur and missing SVG alternative remain divergences"
+  ],
+  "referenceRasterizerReceipt": {
+    "floatingShapeCount": 40,
+    "status": "ok",
+    "wordVersion": "16.106.1",
+    "inlineShapeCount": 0,
+    "capturedAt": "2026-11-05T19:33:30.755041+00:00",
+    "wordBundleVersion": "16.106.26021521",
+    "wordShortVersion": "16.106.1",
+    "documentSha256": "0e7a529d46ea9176fef1b8338de31f416905df4e28c56d77462862fb01967dbb",
+    "pdfSha256": "116eb17fef6cf4d1c87486cfb2725ebe07f1012e71246ef323114c850b610b81",
+    "pageCount": 40,
+    "dpi": 96,
+    "exportMethod": "Microsoft Word save as PDF; existing native PDF rasterized with Poppler Cairo at96dpi",
+    "pages": [
+      {
+        "path": "word-cairo-pages/page-01.png",
+        "sha256": "424b521391959cb9988ffc16dc0b35e8d33a7e13ea22ea52ddaab7fc01deca28"
+      },
+      {
+        "path": "word-cairo-pages/page-02.png",
+        "sha256": "ce57e12c9f6b6f5d85b5996e5fed559218478f3334846bc6641dbf6970fd4993"
+      },
+      {
+        "path": "word-cairo-pages/page-03.png",
+        "sha256": "b61b005bacecc8fda78e247e459b8d8759923db72b922d6951b179dc4f56aea7"
+      },
+      {
+        "path": "word-cairo-pages/page-04.png",
+        "sha256": "6c089ed34bfd1ff0d6ba4f8aacd97bedf6d120fa3798cf77688518d0acbc7e23"
+      },
+      {
+        "path": "word-cairo-pages/page-05.png",
+        "sha256": "c12ca8d06efca389ef6c62ae3d3505e784a8f2b62b579f242010b6eba2ca2823"
+      },
+      {
+        "path": "word-cairo-pages/page-06.png",
+        "sha256": "9f061c0f42a2fbcefba9344490e4441cf21be13de8d408332c55d72111b4eb05"
+      },
+      {
+        "path": "word-cairo-pages/page-07.png",
+        "sha256": "8a5587b665763ed54e59320ccaa733296b147a5431a223c525732f5a17df6886"
+      },
+      {
+        "path": "word-cairo-pages/page-08.png",
+        "sha256": "1e431dfbd6e55b5f5879d4441f0c988417514aa43e4a56cad172636037fc0492"
+      },
+      {
+        "path": "word-cairo-pages/page-09.png",
+        "sha256": "c89413e1c2add0a468b25501fbcf37d2ce5eb9b14fcc50cc574afd3230f2dd84"
+      },
+      {
+        "path": "word-cairo-pages/page-10.png",
+        "sha256": "f03beabcf9c4bcb3079a540fd24663f19105ce4b5e54818551b3c79ca5d3b385"
+      },
+      {
+        "path": "word-cairo-pages/page-11.png",
+        "sha256": "0b2088c0bc7a8097d404ea534d108038b99a8a7515d088c9c2a6e44ebacf35c3"
+      },
+      {
+        "path": "word-cairo-pages/page-12.png",
+        "sha256": "e0001bfd81c8e63086ba29e8ca86d512774cd39b5e5af41f2f50637d324ca861"
+      },
+      {
+        "path": "word-cairo-pages/page-13.png",
+        "sha256": "4ad0081daa772f722bd13e7b7e899b2874fb6eb31faa2e9cae93ec63bae0f960"
+      },
+      {
+        "path": "word-cairo-pages/page-14.png",
+        "sha256": "2dc2c1f93bfdd975ca1087f096f4c2c000c4ed776a7b875192bca950804f8c7c"
+      },
+      {
+        "path": "word-cairo-pages/page-15.png",
+        "sha256": "9a027447b99c2957cbb72275e04a06385e0cc80391d0693c4defdfc385d38526"
+      },
+      {
+        "path": "word-cairo-pages/page-16.png",
+        "sha256": "74d5d6cfc09f7d75aa38af0811e3a25345de2b2930bda7a5e82ac17bc4c65f22"
+      },
+      {
+        "path": "word-cairo-pages/page-17.png",
+        "sha256": "cf58b0e44121f6ea8a9c42b0671fca5dd767e93038986216e8d5259496ffc591"
+      },
+      {
+        "path": "word-cairo-pages/page-18.png",
+        "sha256": "a6c4540edd118f0a212e6de17f4e003d5c1a747ccd6686f8ab7faffc9d9b8737"
+      },
+      {
+        "path": "word-cairo-pages/page-19.png",
+        "sha256": "21eda1a2d4f53656cb6a788f2ee96e89e21cd69ea4c302fac896524fb445980d"
+      },
+      {
+        "path": "word-cairo-pages/page-20.png",
+        "sha256": "d01165c31cf633ef31a55d7f4f2d249b208d2197c82357787a980a51d492d1ba"
+      },
+      {
+        "path": "word-cairo-pages/page-21.png",
+        "sha256": "142ecaa5d3a88764e5e7e18797c46e990568b4b26110a29b3b8a1e12cf094961"
+      },
+      {
+        "path": "word-cairo-pages/page-22.png",
+        "sha256": "4176f2fd937d5447f0843fbf62386d155698bdbcd88d9daab9837cfd3849c1b8"
+      },
+      {
+        "path": "word-cairo-pages/page-23.png",
+        "sha256": "f88874a5c2564d6d83e297a94088abdb7fb624b4074cd7fae2e96c4ddd2c7ad1"
+      },
+      {
+        "path": "word-cairo-pages/page-24.png",
+        "sha256": "354bf96b3dc535bc6a3a114622b3ab9a0390017f5ba9a3b1337b00eff7310a6d"
+      },
+      {
+        "path": "word-cairo-pages/page-25.png",
+        "sha256": "140d9658edd6e1ae8e9c1843fcd1ba4e88ecd84ff10dd2a67c7a7146f013fae8"
+      },
+      {
+        "path": "word-cairo-pages/page-26.png",
+        "sha256": "a3d78a15565b179131449d15181e3c3c7d2d3feac543de419292390acb632722"
+      },
+      {
+        "path": "word-cairo-pages/page-27.png",
+        "sha256": "aa2c48f422d3e703de68dafdbed398f94543a3d7edccb307be9163b0a1573044"
+      },
+      {
+        "path": "word-cairo-pages/page-28.png",
+        "sha256": "fced67c45a593a1e24c93e8545b53eb4a152253c1083b399989b71600ff6a793"
+      },
+      {
+        "path": "word-cairo-pages/page-29.png",
+        "sha256": "80d1a4b5ac21ea6d7cdc85796b648e2ad1341cc75fd5d0dae17dce0c00ecb419"
+      },
+      {
+        "path": "word-cairo-pages/page-30.png",
+        "sha256": "531b9eadc0c9a1b92d0406865ec51bd1ec21773f6bbc2c0b81ec28b3d3250932"
+      },
+      {
+        "path": "word-cairo-pages/page-31.png",
+        "sha256": "32d697362a2d613013c95b02977c009b97231f13d42c89c2548a51d6cac34b45"
+      },
+      {
+        "path": "word-cairo-pages/page-32.png",
+        "sha256": "ccb9334e465374c705ee1dc38f3ee6f8b201144be9d60fce7d94440ee8511660"
+      },
+      {
+        "path": "word-cairo-pages/page-33.png",
+        "sha256": "b8280a7b28d55f11f8e94bfb3d923565e3f1f02c729cac6d6218079824d766d5"
+      },
+      {
+        "path": "word-cairo-pages/page-34.png",
+        "sha256": "ec0233b710f7f6efaa5c70257d3f9683e96979f29415c1807e4623ec4b150b41"
+      },
+      {
+        "path": "word-cairo-pages/page-35.png",
+        "sha256": "aac9f7d9876b04bca0b57f35ef809a68788278359a95780846b6e9474821cdc6"
+      },
+      {
+        "path": "word-cairo-pages/page-36.png",
+        "sha256": "696e6a88e75ee0ed3da9656527065447f76c029e5b5f5c88e0514ffad9302cd3"
+      },
+      {
+        "path": "word-cairo-pages/page-37.png",
+        "sha256": "b03907fe4e2bddb6da11bc5716a1832f2fcd169bf8aa03cd79e60788172c61ec"
+      },
+      {
+        "path": "word-cairo-pages/page-38.png",
+        "sha256": "4a3f8fa1461efbc87010b2cb6ef71c60dfb17701807e5d1adb3a75934993579b"
+      },
+      {
+        "path": "word-cairo-pages/page-39.png",
+        "sha256": "74d5d6cfc09f7d75aa38af0811e3a25345de2b2930bda7a5e82ac17bc4c65f22"
+      },
+      {
+        "path": "word-cairo-pages/page-40.png",
+        "sha256": "cf58b0e44121f6ea8a9c42b0671fca5dd767e93038986216e8d5259496ffc591"
+      }
+    ],
+    "rasterizedAt": "2026-11-05T20:13:38.490246+00:00",
+    "sourceReceipt": "word-reference.json",
+    "sourceReceiptSha256": "dc201c92fd50d3fd64aed4be42f9a35b9c5c9e1ad7b829336e00af22de71a044",
+    "rasterizerCommand": [
+      "pdftocairo",
+      "-png",
+      "-r",
+      "96",
+      "artifacts/word-image-parity-20261105/word-reference.pdf",
+      "artifacts/word-image-parity-20261105/word-cairo-pages/page"
+    ],
+    "rasterizerVersion": "pdftocairo version 26.04.0\nCopyright 2005-2026 The Poppler Developers - http://poppler.freedesktop.org\nCopyright 1996-2011, 2022 Glyph & Cog, LLC",
+    "rasterizerBackend": "cairo"
+  }
+}

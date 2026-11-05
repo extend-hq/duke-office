@@ -45,6 +45,7 @@ def metrics(reference, candidate):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--reference-directory', type=Path, required=True)
+    parser.add_argument('--reference-receipt', default='word-reference.json')
     parser.add_argument('--candidate-directory', type=Path, required=True)
     parser.add_argument('--candidate-pattern', default='page-{page:02d}.png')
     parser.add_argument('--output', type=Path, required=True)
@@ -55,17 +56,24 @@ def main():
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     manifest = json.loads((reference_dir / 'manifest.json').read_text())
-    receipt = json.loads((reference_dir / 'word-reference.json').read_text())
+    receipt = json.loads((reference_dir / args.reference_receipt).read_text())
     if manifest['documentSha256'] != receipt['documentSha256']:
         raise ValueError('Native receipt and fixture manifest identify different input bytes')
+    if digest(reference_dir / manifest['document']) != manifest['documentSha256']:
+        raise ValueError('Input document digest does not match the fixture manifest')
+    if digest(reference_dir / 'word-reference.pdf') != receipt['pdfSha256']:
+        raise ValueError('Native PDF digest does not match the receipt')
     bounds = manifest['comparisonRegionPx']
     region = (bounds['x'], bounds['y'], bounds['x'] + bounds['width'], bounds['y'] + bounds['height'])
     expected_size = (manifest['pageSizePx']['width'], manifest['pageSizePx']['height'])
     references = {row['path']: row['sha256'] for row in receipt['pages']}
+    page_paths = {int(Path(row['path']).stem.rsplit('-', 1)[1]): row['path'] for row in receipt['pages']}
+    if len(page_paths) != len(receipt['pages']):
+        raise ValueError('Native receipt contains duplicate page numbers')
     rows, cards = [], []
     for case in manifest['cases']:
         name, page = case['id'], case['page']
-        ref_path = reference_dir / f'word-pages/page-{page:02d}.png'
+        ref_path = reference_dir / page_paths[page]
         relative = str(ref_path.relative_to(reference_dir))
         if digest(ref_path) != references[relative]:
             raise ValueError(f'Native reference digest mismatch at page {page}')
@@ -107,9 +115,12 @@ def main():
         cards.append(card + '</p></article>')
         rows.append(row)
     result = dict(label=args.label, inputSha256=manifest['documentSha256'], nativePdfSha256=receipt['pdfSha256'], wordVersion=receipt['wordVersion'], dpi=manifest['dpi'], regionPx=bounds, caseCount=len(rows), statuses={status: sum(row['status'] == status for row in rows) for status in sorted({row['status'] for row in rows})}, cases=rows)
+    result['referenceReceipt'] = args.reference_receipt
+    result['referenceRasterizer'] = receipt.get('exportMethod')
     (output / 'comparison.json').write_text(json.dumps(result, indent=2) + '\n')
     html = '<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Word picture appearance comparison</title><style>body{font:14px system-ui;margin:24px;background:#f5f5f3;color:#19212b}h1{font-size:28px}article{background:white;padding:18px;margin:16px 0;border:1px solid #ddd;border-radius:8px}h2{font-size:17px;margin:0 0 12px}.images{display:flex;gap:12px;flex-wrap:wrap}figure{margin:0}img{width:336px;height:336px;border:1px solid #eee}figcaption{font-size:12px;color:#59616a;margin-top:5px}p{max-width:1000px;line-height:1.5}</style>'
     html += f'<h1>Word vs {escape(args.label)}</h1><p>Word {escape(receipt["wordVersion"])} · {len(rows)} cases · 96 dpi. Fixed page coordinates are preserved. No per-image resizing or alignment correction is applied. Ink overlap uses non-white pixels; color agreement uses the same union with a 16-level channel tolerance. Blank native output is reported separately and is not evidence of successful image support. The unavailable SVG alternative is a deliberate robustness case.</p>'
+    html += f'<p>Reference: {escape(receipt.get("exportMethod", args.reference_receipt))}</p>'
     html += ''.join(cards) + '</html>'
     (output / 'report.html').write_text(html)
     print(json.dumps({key: result[key] for key in ('label', 'caseCount', 'statuses')}))
