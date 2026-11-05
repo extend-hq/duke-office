@@ -201,87 +201,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "00d174d5400e5e8fd687ad1049e2f578285fa914201b1af7e8b112a4546bd826"
 
 [[package]]
-name = "extend-docx"
-version = "0.2.3"
-dependencies = [
- "arc-swap",
- "base64",
- "base64-simd",
- "extend-office-charts",
- "itoa",
- "libdeflater",
- "memchr",
- "miniz_oxide 0.8.9",
- "quick-xml 0.42.0",
- "rayon",
- "regex",
- "roxmltree",
- "serde",
- "serde_bytes",
- "serde_json",
- "sha2",
- "unicode-segmentation",
- "zlib-rs",
-]
-
-[[package]]
-name = "extend-docx-wasm"
-version = "0.2.3"
-dependencies = [
- "extend-docx",
- "js-sys",
- "serde",
- "serde_json",
- "wasm-bindgen",
- "wasm-bindgen-test",
-]
-
-[[package]]
-name = "extend-office-charts"
-version = "0.1.1"
-dependencies = [
- "base64",
- "miniz_oxide 0.8.9",
- "roxmltree",
- "serde",
-]
-
-[[package]]
-name = "extend-office-charts-wasm"
-version = "0.1.1"
-dependencies = [
- "extend-office-charts",
- "serde",
- "serde_json",
- "wasm-bindgen",
-]
-
-[[package]]
-name = "extend-pptx"
-version = "0.1.0"
-dependencies = [
- "cfb",
- "extend-office-charts",
- "flate2",
- "quick-xml 0.37.5",
- "serde",
- "serde_bytes",
- "serde_json",
- "thiserror",
- "zip",
-]
-
-[[package]]
-name = "extend-pptx-wasm"
-version = "0.1.0"
-dependencies = [
- "extend-pptx",
- "serde",
- "serde-wasm-bindgen",
- "wasm-bindgen",
-]
-
-[[package]]
 name = "find-msvc-tools"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -606,6 +525,87 @@ name = "roxmltree"
 version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
+
+[[package]]
+name = "rust-docx"
+version = "0.2.3"
+dependencies = [
+ "arc-swap",
+ "base64",
+ "base64-simd",
+ "itoa",
+ "libdeflater",
+ "memchr",
+ "miniz_oxide 0.8.9",
+ "quick-xml 0.42.0",
+ "rayon",
+ "regex",
+ "roxmltree",
+ "rust-office-charts",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sha2",
+ "unicode-segmentation",
+ "zlib-rs",
+]
+
+[[package]]
+name = "rust-docx-wasm"
+version = "0.2.3"
+dependencies = [
+ "js-sys",
+ "rust-docx",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-test",
+]
+
+[[package]]
+name = "rust-office-charts"
+version = "0.1.1"
+dependencies = [
+ "base64",
+ "miniz_oxide 0.8.9",
+ "roxmltree",
+ "serde",
+]
+
+[[package]]
+name = "rust-office-charts-wasm"
+version = "0.1.1"
+dependencies = [
+ "rust-office-charts",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+]
+
+[[package]]
+name = "rust-pptx"
+version = "0.1.0"
+dependencies = [
+ "cfb",
+ "flate2",
+ "quick-xml 0.37.5",
+ "rust-office-charts",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "thiserror",
+ "zip",
+]
+
+[[package]]
+name = "rust-pptx-wasm"
+version = "0.1.0"
+dependencies = [
+ "rust-pptx",
+ "serde",
+ "serde-wasm-bindgen",
+ "wasm-bindgen",
+]
 
 [[package]]
 name = "rustversion"

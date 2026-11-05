@@ -11,7 +11,7 @@ BENCHMARK = Path(__file__).resolve().parent
 def parser_version():
     with (BENCHMARK / 'Cargo.lock').open('rb') as lock:
         packages = tomllib.load(lock)['package']
-    return next(package['version'] for package in packages if package['name'] == 'extend-docx')
+    return next(package['version'] for package in packages if package['name'] == 'rust-docx')
 
 
 def source_identity(harness=BENCHMARK):
@@ -19,7 +19,7 @@ def source_identity(harness=BENCHMARK):
         ['cargo', 'metadata', '--format-version', '1', '--locked',
          '--manifest-path', str(harness / 'Cargo.toml')]
     ))
-    names = {'extend-docx', 'extend-office-charts', harness.name}
+    names = {'rust-docx', 'rust-office-charts', harness.name}
     hashes = {}
     for package in metadata['packages']:
         if package['name'] not in names:

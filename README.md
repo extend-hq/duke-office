@@ -1,24 +1,26 @@
-# Extend Office
+# Rust Office
 
-[![CI](https://github.com/extend-hq/extend-office/actions/workflows/check.yml/badge.svg)](https://github.com/extend-hq/extend-office/actions/workflows/check.yml) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+by Extend
+
+[![CI](https://github.com/extend-hq/rust-office/actions/workflows/check.yml/badge.svg)](https://github.com/extend-hq/rust-office/actions/workflows/check.yml) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Rust libraries for parsing Word documents and PowerPoint presentations, and rendering Office charts. The chart renderer is shared by [React DOCX](https://github.com/extend-hq/react-docx), [React PPTX](https://github.com/extend-hq/react-pptx) and [React XLSX](https://github.com/extend-hq/react-xlsx). React XLSX uses DukeSheets to read workbooks and resolve worksheet values.
 
-| Crate | Purpose | Version | Downloads | API docs |
-| --- | --- | --- | --- | --- |
-| [extend-office-charts](crates/extend-office-charts) | Render Office chart definitions to SVG | [![extend-office-charts version](https://img.shields.io/crates/v/extend-office-charts.svg)](https://crates.io/crates/extend-office-charts) | [![extend-office-charts downloads](https://img.shields.io/crates/d/extend-office-charts.svg)](https://crates.io/crates/extend-office-charts) | [![extend-office-charts documentation](https://docs.rs/extend-office-charts/badge.svg)](https://docs.rs/extend-office-charts) |
-| [extend-office-charts-wasm](crates/extend-office-charts-wasm) | Render Office charts in the browser | [![extend-office-charts-wasm version](https://img.shields.io/crates/v/extend-office-charts-wasm.svg)](https://crates.io/crates/extend-office-charts-wasm) | [![extend-office-charts-wasm downloads](https://img.shields.io/crates/d/extend-office-charts-wasm.svg)](https://crates.io/crates/extend-office-charts-wasm) | [![extend-office-charts-wasm documentation](https://docs.rs/extend-office-charts-wasm/badge.svg)](https://docs.rs/extend-office-charts-wasm) |
-| [extend-docx](crates/extend-docx) | Parse Word documents into a structured document model | [![extend-docx version](https://img.shields.io/crates/v/extend-docx.svg)](https://crates.io/crates/extend-docx) | [![extend-docx downloads](https://img.shields.io/crates/d/extend-docx.svg)](https://crates.io/crates/extend-docx) | [![extend-docx documentation](https://docs.rs/extend-docx/badge.svg)](https://docs.rs/extend-docx) |
-| [extend-docx-wasm](crates/extend-docx-wasm) | WebAssembly bindings for the Word parser | [![extend-docx-wasm version](https://img.shields.io/crates/v/extend-docx-wasm.svg)](https://crates.io/crates/extend-docx-wasm) | [![extend-docx-wasm downloads](https://img.shields.io/crates/d/extend-docx-wasm.svg)](https://crates.io/crates/extend-docx-wasm) | [![extend-docx-wasm documentation](https://docs.rs/extend-docx-wasm/badge.svg)](https://docs.rs/extend-docx-wasm) |
-| [extend-pptx](crates/extend-pptx) | Parse PowerPoint presentations into a structured slide model | [![extend-pptx version](https://img.shields.io/crates/v/extend-pptx.svg)](https://crates.io/crates/extend-pptx) | [![extend-pptx downloads](https://img.shields.io/crates/d/extend-pptx.svg)](https://crates.io/crates/extend-pptx) | [![extend-pptx documentation](https://docs.rs/extend-pptx/badge.svg)](https://docs.rs/extend-pptx) |
-| [extend-pptx-wasm](crates/extend-pptx-wasm) | WebAssembly bindings for the PowerPoint parser | [![extend-pptx-wasm version](https://img.shields.io/crates/v/extend-pptx-wasm.svg)](https://crates.io/crates/extend-pptx-wasm) | [![extend-pptx-wasm downloads](https://img.shields.io/crates/d/extend-pptx-wasm.svg)](https://crates.io/crates/extend-pptx-wasm) | [![extend-pptx-wasm documentation](https://docs.rs/extend-pptx-wasm/badge.svg)](https://docs.rs/extend-pptx-wasm) |
+| Crate | Purpose | Version | Downloads | API docs | Release |
+| --- | --- | --- | --- | --- | --- |
+| [rust-office-charts](crates/rust-office-charts) | Render Office chart definitions to SVG | [![rust-office-charts version](https://img.shields.io/crates/v/rust-office-charts.svg)](https://crates.io/crates/rust-office-charts) | [![rust-office-charts downloads](https://img.shields.io/crates/d/rust-office-charts.svg)](https://crates.io/crates/rust-office-charts) | [![rust-office-charts documentation](https://docs.rs/rust-office-charts/badge.svg)](https://docs.rs/rust-office-charts) | [0.1.1](https://github.com/extend-hq/rust-office/releases/tag/rust-office-charts-v0.1.1) |
+| [rust-office-charts-wasm](crates/rust-office-charts-wasm) | Render column and line charts in the browser | [![rust-office-charts-wasm version](https://img.shields.io/crates/v/rust-office-charts-wasm.svg)](https://crates.io/crates/rust-office-charts-wasm) | [![rust-office-charts-wasm downloads](https://img.shields.io/crates/d/rust-office-charts-wasm.svg)](https://crates.io/crates/rust-office-charts-wasm) | [![rust-office-charts-wasm documentation](https://docs.rs/rust-office-charts-wasm/badge.svg)](https://docs.rs/rust-office-charts-wasm) | [0.1.1](https://github.com/extend-hq/rust-office/releases/tag/rust-office-charts-wasm-v0.1.1) |
+| [rust-docx](crates/rust-docx) | Parse Word documents into a structured document model | [![rust-docx version](https://img.shields.io/crates/v/rust-docx.svg)](https://crates.io/crates/rust-docx) | [![rust-docx downloads](https://img.shields.io/crates/d/rust-docx.svg)](https://crates.io/crates/rust-docx) | [![rust-docx documentation](https://docs.rs/rust-docx/badge.svg)](https://docs.rs/rust-docx) | [0.2.3](https://github.com/extend-hq/rust-office/releases/tag/rust-docx-v0.2.3) |
+| [rust-docx-wasm](crates/rust-docx-wasm) | WebAssembly bindings for the Word parser | [![rust-docx-wasm version](https://img.shields.io/crates/v/rust-docx-wasm.svg)](https://crates.io/crates/rust-docx-wasm) | [![rust-docx-wasm downloads](https://img.shields.io/crates/d/rust-docx-wasm.svg)](https://crates.io/crates/rust-docx-wasm) | [![rust-docx-wasm documentation](https://docs.rs/rust-docx-wasm/badge.svg)](https://docs.rs/rust-docx-wasm) | [0.2.3](https://github.com/extend-hq/rust-office/releases/tag/rust-docx-wasm-v0.2.3) |
+| [rust-pptx](crates/rust-pptx) | Parse PowerPoint presentations into a structured slide model | [![rust-pptx version](https://img.shields.io/crates/v/rust-pptx.svg)](https://crates.io/crates/rust-pptx) | [![rust-pptx downloads](https://img.shields.io/crates/d/rust-pptx.svg)](https://crates.io/crates/rust-pptx) | [![rust-pptx documentation](https://docs.rs/rust-pptx/badge.svg)](https://docs.rs/rust-pptx) | [0.1.0](https://github.com/extend-hq/rust-office/releases/tag/rust-pptx-v0.1.0) |
+| [rust-pptx-wasm](crates/rust-pptx-wasm) | WebAssembly bindings for the PowerPoint parser | [![rust-pptx-wasm version](https://img.shields.io/crates/v/rust-pptx-wasm.svg)](https://crates.io/crates/rust-pptx-wasm) | [![rust-pptx-wasm downloads](https://img.shields.io/crates/d/rust-pptx-wasm.svg)](https://crates.io/crates/rust-pptx-wasm) | [![rust-pptx-wasm documentation](https://docs.rs/rust-pptx-wasm/badge.svg)](https://docs.rs/rust-pptx-wasm) | [0.1.0](https://github.com/extend-hq/rust-office/releases/tag/rust-pptx-wasm-v0.1.0) |
 
 ## Packages, benchmarks, and chart accuracy
 
 Expand a package for its usage, measured results, and detailed reports.
 
 <details>
-<summary><strong>extend-office-charts — native chart rendering and Word comparisons</strong></summary>
+<summary><strong>rust-office-charts — native chart rendering and Word comparisons</strong></summary>
 
 The gallery compares **157 chart drawings** with Microsoft Word for Mac. It includes 110 charts from a chart family atlas, 40 additional map configurations, and seven charts from an independent Open XML SDK document. Viewer **0.14.0** produced a native chart image for **155 of 157**. The two volume-stock combinations produced no image.
 
@@ -46,23 +48,23 @@ Measured November 4, 2026 using the React DOCX 0.14.0 release. These are retaine
 </details>
 
 <details>
-<summary><strong>extend-office-charts-wasm — chart WebAssembly bindings</strong></summary>
+<summary><strong>rust-office-charts-wasm — chart WebAssembly bindings</strong></summary>
 
-The default build includes two-dimensional bar, line, area, and scatter charts. Enable `extended-charts` for the other chart families supported by the Rust renderer. See the [crate guide](crates/extend-office-charts-wasm/README.md). The [Word comparison](docs/chart-comparisons.md) measures the React DOCX integration; it does not measure standalone WASM loading or throughput.
+The default build includes two-dimensional bar, line, area, and scatter charts. Enable `extended-charts` for the other chart families supported by the Rust renderer. See the [crate guide](crates/rust-office-charts-wasm/README.md). The [Word comparison](docs/chart-comparisons.md) measures the React DOCX integration; it does not measure standalone WASM loading or throughput.
 
 </details>
 
 <details>
-<summary><strong>@extend-ai/extend-office-charts — browser package</strong></summary>
+<summary><strong>@extend-ai/rust-office-charts — browser package</strong></summary>
 
-In the browser package, import `loadOfficeCharts` from `@extend-ai/extend-office-charts` for two-dimensional bar, line, area and scatter charts, or from `@extend-ai/extend-office-charts/full` to also load the Rust pie, bubble, radar, stock, 3D, surface and ChartEx renderers. Both expose `(await loadOfficeCharts()).renderChart(chartXml, options)`. Unsupported layouts can return `null`; support for a chart family alone does not establish Excel fidelity.
+In the browser package, import `loadOfficeCharts` from `@extend-ai/rust-office-charts` for two-dimensional bar, line, area and scatter charts, or from `@extend-ai/rust-office-charts/full` to also load the Rust pie, bubble, radar, stock, 3D, surface and ChartEx renderers. Both expose `(await loadOfficeCharts()).renderChart(chartXml, options)`. Unsupported layouts can return `null`; support for a chart family alone does not establish Excel fidelity.
 
 The retained [Word gallery](docs/chart-comparisons.md) records the React DOCX 0.14.0 integration. Browser package versions and entry points have their own release history.
 
 </details>
 
 <details>
-<summary><strong>extend-docx — parser latency, accuracy, and feature recall</strong></summary>
+<summary><strong>rust-docx — parser latency, accuracy, and feature recall</strong></summary>
 
 The native parser builds an editable document model and structured blocks with source references. Timings cover native parsing and extraction; browser loading, layout, pagination, and editing are outside their scope.
 
@@ -72,16 +74,16 @@ Measured **November 2, 2026**, on a seeded **1,000-document DOCX corpus**. Laten
 
 | Parser | Parsed | Median | p95 | Body-text F1 | Ordered-text F1 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| extend-docx | 1,000/1,000 | 0.673 ms | 5.080 ms | 99.983% | 99.995% |
+| rust-docx | 1,000/1,000 | 0.673 ms | 5.080 ms | 99.983% | 99.995% |
 | docx-rs | 999/1,000 | 1.193 ms | 9.499 ms | 99.740% | 99.747% |
 | office_oxide | 1,000/1,000 | 0.750 ms | 5.380 ms | 99.917% | 99.926% |
 | undoc | 1,000/1,000 | 1.130 ms | 14.260 ms | 99.988% | 99.975% |
 
 ![Native DOCX median and p95 latency for all four libraries](docs/readme-assets/docx-core-optimized-20261102-latency-docx-summary.png)
 
-Extend-docx has the lowest median and p95 in this run. Its median is 10.3% lower than office_oxide's; this does **not** establish a 5× speedup. Undoc has the highest five-gram text F1, while extend-docx has the highest ordered-text F1.
+Rust-docx has the lowest median and p95 in this run. Its median is 10.3% lower than office_oxide's; this does **not** establish a 5× speedup. Undoc has the highest five-gram text F1, while rust-docx has the highest ordered-text F1.
 
-Each document has five warm samples, each averaging 1–20 parses. Timings include parsing and native model/IR construction; extend-docx also projects structured blocks. File reads, process startup, JSON serialization, object destruction, and reference generation are excluded. The p95 is across document medians. Results come from a shared development machine and the libraries retain different amounts of structure.
+Each document has five warm samples, each averaging 1–20 parses. Timings include parsing and native model/IR construction; rust-docx also projects structured blocks. File reads, process startup, JSON serialization, object destruction, and reference generation are excluded. The p95 is across document medians. Results come from a shared development machine and the libraries retain different amounts of structure.
 
 ### Latency by document size and complexity
 
@@ -93,7 +95,7 @@ The same 999 successful inputs appear for every library. Each point is one docum
 
 These are **recall checks against an independent source-XML extractor**, not universal accuracy or Word rendering scores. Image occurrences match retained payload bytes and multiplicity. Literal table/span checks allow additional output characters; exact-anchor checks remain separately available. Positive explicit-formatting recall does not establish precision or inherited-style correctness.
 
-| Check | Expected units | extend-docx | docx-rs | office_oxide | undoc |
+| Check | Expected units | rust-docx | docx-rs | office_oxide | undoc |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Images · payload-matched occurrences | 1,069 | 100.000% | 97.381% | 95.603% | 97.568% |
 | Explicit bold · aligned characters | 680,435 | 100.000% | 94.577% | 99.948% | 98.016% |
@@ -110,35 +112,35 @@ Measured **November 3, 2026**, on **25 documents** selected from the start of th
 
 | Parser | Median / p95 | Word body recall | Word body F1 | Source image payloads |
 | --- | ---: | ---: | ---: | ---: |
-| extend-docx | 0.530 / 6.880 ms | 99.949% | 99.952% | 52/52 · 100.000% |
+| rust-docx | 0.530 / 6.880 ms | 99.949% | 99.952% | 52/52 · 100.000% |
 | docx-rs | 1.089 / 6.606 ms | 99.939% | 99.947% | 48/52 · 92.308% |
 | office_oxide | 0.680 / 3.668 ms | 99.937% | 99.946% | 48/52 · 92.308% |
 | undoc | 1.084 / 11.990 ms | 99.949% | 96.999% | 52/52 · 100.000% |
 
-Extend-docx has the lowest median in this sample; office_oxide has the lowest p95. Body F1 here pools ordered character counts; it is a different metric and cohort from the macro-averaged source-XML scores above.
+Rust-docx has the lowest median in this sample; office_oxide has the lowest p95. Body F1 here pools ordered character counts; it is a different metric and cohort from the macro-averaged source-XML scores above.
 
-These are retained completed runs; source revisions and executable hashes identify the measured builds. See the [complete benchmark report](docs/docx-benchmarks.md) for every feature check, other Word formats, per-format charts, timing methodology, and reference limitations. [Benchmark tooling](scripts/parser-benchmark/README.md) · [Source-reference data](crates/extend-docx/benchmarks/optimized-20261102/accuracy.json) · [Word-reference data](crates/extend-docx/benchmarks/word-reference-20261103/summary.json).
-
-</details>
-
-<details>
-<summary><strong>extend-docx-wasm — Word parser WebAssembly bindings</strong></summary>
-
-Exposes document parsing, model construction, structured extraction, and serialization to JavaScript. [React DOCX](https://github.com/extend-hq/react-docx) packages these bindings for browsers. See the [crate guide](crates/extend-docx-wasm/README.md) and [WASM benchmark workflow](scripts/parser-benchmark/README.md#webassembly-comparisons). The native parser timings above do not measure browser or JavaScript bridge latency.
+These are retained completed runs; source revisions and executable hashes identify the measured builds. See the [complete benchmark report](docs/docx-benchmarks.md) for every feature check, other Word formats, per-format charts, timing methodology, and reference limitations. [Benchmark tooling](scripts/parser-benchmark/README.md) · [Source-reference data](crates/rust-docx/benchmarks/optimized-20261102/accuracy.json) · [Word-reference data](crates/rust-docx/benchmarks/word-reference-20261103/summary.json).
 
 </details>
 
 <details>
-<summary><strong>extend-pptx — PowerPoint parsing</strong></summary>
+<summary><strong>rust-docx-wasm — Word parser WebAssembly bindings</strong></summary>
 
-Parses OOXML and legacy PowerPoint presentations into slides, shapes, text, charts, and embedded assets. Install with `cargo add extend-pptx`; the Rust library target is `pptx_core`. See the [crate guide](crates/extend-pptx/README.md). No PowerPoint parser benchmark is published here yet.
+Exposes document parsing, model construction, structured extraction, and serialization to JavaScript. [React DOCX](https://github.com/extend-hq/react-docx) packages these bindings for browsers. See the [crate guide](crates/rust-docx-wasm/README.md) and [WASM benchmark workflow](scripts/parser-benchmark/README.md#webassembly-comparisons). The native parser timings above do not measure browser or JavaScript bridge latency.
 
 </details>
 
 <details>
-<summary><strong>extend-pptx-wasm — PowerPoint WebAssembly bindings</strong></summary>
+<summary><strong>rust-pptx — PowerPoint parsing</strong></summary>
 
-Exposes `detect_presentation_format` and `parse_presentation` for `Uint8Array` inputs. See the [crate guide](crates/extend-pptx-wasm/README.md) for build and initialization instructions. No separate WASM benchmark is published here yet.
+Parses OOXML and legacy PowerPoint presentations into slides, shapes, text, charts, and embedded assets. Install with `cargo add rust-pptx`; the Rust library target is `rust_pptx`. See the [crate guide](crates/rust-pptx/README.md). No PowerPoint parser benchmark is published here yet.
+
+</details>
+
+<details>
+<summary><strong>rust-pptx-wasm — PowerPoint WebAssembly bindings</strong></summary>
+
+Exposes `detect_presentation_format` and `parse_presentation` for `Uint8Array` inputs. See the [crate guide](crates/rust-pptx-wasm/README.md) for build and initialization instructions. No separate WASM benchmark is published here yet.
 
 </details>
 

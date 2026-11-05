@@ -7,6 +7,7 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - 'scripts/release.py'
+      - 'scripts/github_releases.py'
       - '.github/workflows/release.yml'
       - '.github/workflows/check.yml'
   push:
@@ -49,14 +50,14 @@ jobs:
   publish:
     needs: [plan, verify]
     if: >-
-      github.repository == 'extend-hq/extend-office' &&
+      github.repository == 'extend-hq/rust-office' &&
       github.ref == 'refs/heads/main' &&
       ((github.event_name == 'push' && needs.plan.outputs.pending == 'true') ||
       (github.event_name == 'workflow_dispatch' && !inputs.dry_run))
     runs-on: ubuntu-latest
     environment: crates-io
     permissions:
-      contents: read
+      contents: write
       id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -70,3 +71,6 @@ jobs:
       - run: python3 scripts/release.py publish
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.registry.outputs.token }}
+      - run: python3 scripts/github_releases.py
+        env:
+          GH_TOKEN: ${{ github.token }}

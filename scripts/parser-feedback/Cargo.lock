@@ -137,7 +137,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
 
 [[package]]
-name = "extend-docx"
+name = "rust-docx"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33cc456f0659350d0301dddb02827fddf38171b11a5597571ca6ff23018c364f"
@@ -145,7 +145,7 @@ dependencies = [
  "arc-swap",
  "base64",
  "base64-simd",
- "extend-office-charts",
+ "rust-office-charts",
  "itoa",
  "libdeflater",
  "memchr",
@@ -163,7 +163,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "extend-office-charts"
+name = "rust-office-charts"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e9ee00cce14edabf1c29f03013b6fb4acb2355b11c253d0bb1a1a61e9cfec2be"
@@ -266,7 +266,7 @@ checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 name = "parser-feedback"
 version = "0.1.0"
 dependencies = [
- "extend-docx",
+ "rust-docx",
  "flate2",
  "serde",
  "serde_json",

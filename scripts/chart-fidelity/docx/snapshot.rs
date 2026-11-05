@@ -37,9 +37,9 @@ fn visit(node: &Value, drawings: &mut Vec<Value>, refs: &mut Vec<Value>) {
 
 fn main() -> Result<(), Box<dyn Error>> {
     let bytes = std::fs::read(std::env::args_os().nth(1).ok_or("document path required")?)?;
-    let package = extend_docx::parse_docx(&bytes)?;
-    let model = extend_docx::build_doc_model(&package);
-    let structured = extend_docx::extract_document_blocks(&model);
+    let package = rust_docx::parse_docx(&bytes)?;
+    let model = rust_docx::build_doc_model(&package);
+    let structured = rust_docx::extract_document_blocks(&model);
     let mut drawings = vec![];
     let mut refs = vec![];
     visit(&serde_json::to_value(&model)?, &mut drawings, &mut refs);

@@ -112,7 +112,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('world', type=Path)
     parser.add_argument('states', type=Path)
-    parser.add_argument('--out', type=Path, default=Path('crates/extend-office-charts/src/parse/chartex/map_atlas'))
+    parser.add_argument('--out', type=Path, default=Path('crates/rust-office-charts/src/parse/chartex/map_atlas'))
     args = parser.parse_args()
     args.out.mkdir(parents=True, exist_ok=True)
     groups = [list(records(args.world, 'countries', False)), list(records(args.states, 'states', True))]
