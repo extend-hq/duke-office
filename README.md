@@ -22,7 +22,9 @@ Rust libraries for parsing Word documents and PowerPoint presentations, and rend
 Expand a package for its usage, measured results, and detailed reports.
 
 <details open>
-<summary><strong>Excel chart comparisons — 382 charts, 48 gallery examples</strong></summary>
+<summary><strong>Excel and Word chart comparisons</strong></summary>
+
+### Excel charts — 382 charts, 48 gallery examples
 
 React XLSX now renders charts through Rust and WebAssembly, including 3D shapes, modern charts, source-linked number formats, shadows and bevels. Shared Office font fallbacks include Carlito, Arimo, Tinos, Cousine, Intos and Intos Narrow.
 
@@ -41,10 +43,7 @@ The November 5, 2026 corpus run rendered **382/382 charts in 43 workbooks**, wit
 
 [Comparison method and limitations](docs/excel-chart-comparisons.md) · [All 382 measurements](docs/readme-assets/excel-chart-comparison.csv) · [Capture provenance](docs/readme-assets/excel-chart-provenance.json)
 
-</details>
-
-<details>
-<summary><strong>rust-office-charts — native chart rendering and Word comparisons</strong></summary>
+### Word charts — native chart rendering comparisons
 
 The gallery compares **157 chart drawings** with Microsoft Word for Mac. It includes 110 charts from a chart family atlas, 40 additional map configurations, and seven charts from an independent Open XML SDK document. Viewer **0.14.0** produced a native chart image for **155 of 157**. The two volume-stock combinations produced no image.
 
