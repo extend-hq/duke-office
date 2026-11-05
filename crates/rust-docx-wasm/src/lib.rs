@@ -55,7 +55,7 @@ fn value_to_doc_model(value: &JsValue) -> Result<DocModel, JsValue> {
         return doc_model_from_json(&json_str);
     }
 
-    let json = js_sys::JSON::stringify(value)
+    let json = stringify_model_value(value)
         .map_err(|error| JsValue::from_str(&format!("Failed to stringify model: {error:?}")))?;
     let json_str = json
         .as_string()
@@ -63,11 +63,22 @@ fn value_to_doc_model(value: &JsValue) -> Result<DocModel, JsValue> {
     doc_model_from_json(&json_str)
 }
 
+fn stringify_model_value(value: &JsValue) -> Result<js_sys::JsString, JsValue> {
+    let replacer = Closure::<dyn FnMut(JsValue, JsValue) -> JsValue>::new(|_: JsValue, value: JsValue| {
+        if value.is_instance_of::<js_sys::Uint8Array>() {
+            Array::from(&value).into()
+        } else {
+            value
+        }
+    });
+    js_sys::JSON::stringify_with_replacer(value, replacer.as_ref())
+}
+
 fn value_to_image_run(value: &JsValue) -> Result<ImageRunNode, JsValue> {
     let json_str = if let Some(json_str) = value.as_string() {
         json_str
     } else {
-        js_sys::JSON::stringify(value)
+        stringify_model_value(value)
             .map_err(|error| JsValue::from_str(&format!("Failed to stringify image: {error:?}")))?
             .as_string()
             .ok_or_else(|| JsValue::from_str("Image JSON must be a string"))?
