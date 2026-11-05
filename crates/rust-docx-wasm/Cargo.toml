@@ -1,6 +1,6 @@
 [package]
 name = "rust-docx-wasm"
-version = "0.2.3"
+version = "0.2.4"
 edition.workspace = true
 license.workspace = true
 description = "WebAssembly bindings for the rust-docx parser and serializer"

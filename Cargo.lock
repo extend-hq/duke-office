@@ -552,7 +552,7 @@ dependencies = [
 
 [[package]]
 name = "rust-docx-wasm"
-version = "0.2.3"
+version = "0.2.4"
 dependencies = [
  "js-sys",
  "rust-docx",
