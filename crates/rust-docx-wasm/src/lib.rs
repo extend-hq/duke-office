@@ -22,6 +22,20 @@ fn doc_model_from_json(json_str: &str) -> Result<DocModel, JsValue> {
 }
 
 #[wasm_bindgen]
+pub fn extract_document_review_wasm(model_json: &str) -> Result<String, JsValue> {
+    let model = doc_model_from_json(model_json)?;
+    serde_json::to_string(&rust_docx::extract_document_review(&model))
+        .map_err(|error| JsValue::from_str(&error.to_string()))
+}
+
+#[wasm_bindgen]
+pub fn extract_document_blocks_with_revisions_wasm(model_json: &str) -> Result<String, JsValue> {
+    let model = doc_model_from_json(model_json)?;
+    serde_json::to_string(&rust_docx::extract_document_blocks_with_revisions(&model, Default::default()))
+        .map_err(|error| JsValue::from_str(&error.to_string()))
+}
+
+#[wasm_bindgen]
 pub fn extract_document_blocks_wasm(model_json: &str) -> Result<String, JsValue> {
     let model = doc_model_from_json(model_json)?;
     serde_json::to_string(&rust_docx::extract_document_blocks(&model))

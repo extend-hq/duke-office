@@ -9,7 +9,8 @@ use crate::{
         decode_xml_entities, direct_child_tag, extract_balanced_tag_slices,
         extract_direct_child_tag_ranges, get_attribute_ref, tag_token_end,
     },
-    DocumentBlock, SourceRef, StructuredDocument, TableNode,
+    DocNode, DocumentBlock, ParagraphChildNode, ParagraphNode, SourceRef, StructuredDocument,
+    TableNode, TableRowNode,
 };
 
 /// The current block projection and the tracked changes recorded in the same source.
@@ -18,6 +19,8 @@ pub struct ReviewedDocument {
     #[serde(flatten)]
     pub document: StructuredDocument,
     pub revisions: Vec<DocumentRevision>,
+    #[serde(default)]
+    pub comments: Vec<crate::review::DocumentComment>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -82,6 +85,80 @@ pub struct DocumentRevision {
     /// Half-open UTF-16 ranges in current paragraph text. A deletion has equal endpoints.
     /// Structural targets and text which cannot be aligned safely have no endpoints.
     pub source_refs: Vec<SourceRef>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub content: Vec<DocNode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_start: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub child_end: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_index: Option<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewContent {
+    pub source_xml: String,
+    pub children: Vec<ParagraphChildNode>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewRow {
+    pub source_index: usize,
+    pub source_xml: String,
+    pub row: TableRowNode,
+}
+
+pub(crate) fn removed_fragments(xml: &str) -> Vec<&str> {
+    let mut ranges = crate::xml::extract_balanced_tag_ranges(xml, "w:del");
+    ranges.extend(crate::xml::extract_balanced_tag_ranges(xml, "w:moveFrom"));
+    ranges.sort_by_key(|r| r.start);
+    let mut end = 0;
+    ranges
+        .into_iter()
+        .filter_map(|range| {
+            if range.start < end {
+                return None;
+            }
+            end = range.end;
+            let fragment = &xml[range.start..range.end];
+            fragment.contains("<w:r").then_some(fragment)
+        })
+        .collect()
+}
+
+pub(crate) fn visible_removed_xml(xml: &str) -> String {
+    static TAGS: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"(<\/?)w:(delText|delInstrText|del|moveFrom)([ \t\r\n/>])").unwrap()
+    });
+    TAGS.replace_all(xml, |captures: &regex::Captures<'_>| {
+        let name = match &captures[2] {
+            "delText" => "t",
+            "delInstrText" => "instrText",
+            _ => "ins",
+        };
+        format!("{}w:{name}{}", &captures[1], &captures[3])
+    })
+    .into_owned()
+}
+
+pub(crate) fn fallback_content(xml: &str) -> Vec<ParagraphChildNode> {
+    let parts = Default::default();
+    let assets = Default::default();
+    let context = crate::parse::ParseContext {
+        relationships: Default::default(),
+        content_types: Default::default(),
+        parts: &parts,
+        binary_assets: &assets,
+        style_sheet: crate::parse::empty_style_sheet(),
+        warnings: Default::default(),
+    };
+    crate::parse::parse_paragraph(
+        &format!("<w:p>{}</w:p>", visible_removed_xml(xml)),
+        &context,
+    )
+    .children
 }
 
 fn children(xml: &str) -> impl Iterator<Item = (String, &str)> {
@@ -136,6 +213,7 @@ fn properties(xml: &str) -> Vec<WordProperty> {
 #[derive(Default)]
 pub(crate) struct RevisionCollector {
     pub records: Vec<DocumentRevision>,
+    next_ids: BTreeMap<String, usize>,
     // The two move ranges have distinct Word IDs and share a move name.
     pub(crate) moves: Vec<(RevisionKind, String, String)>,
 }
@@ -149,6 +227,12 @@ impl RevisionCollector {
         refs: &[SourceRef],
     ) -> usize {
         let index = self.records.len();
+        let source_id = attribute(xml, "w:id");
+        let key = format!("{}/revision/{kind:?}/{scope:?}/{}", refs[0].node_id,
+            source_id.as_deref().unwrap_or("anonymous"));
+        let next = self.next_ids.entry(key.clone()).or_default();
+        let id = format!("{key}/{next}");
+        *next += 1;
         let move_name = self
             .moves
             .iter()
@@ -156,8 +240,8 @@ impl RevisionCollector {
             .find(|(side, _, _)| *side == kind)
             .map(|(_, _, name)| name.clone());
         self.records.push(DocumentRevision {
-            id: format!("docx:{}/revision/{index}", refs[0].document_id),
-            source_id: attribute(xml, "w:id"),
+            id,
+            source_id,
             author: attribute(xml, "w:author"),
             date: attribute(xml, "w:date"),
             kind,
@@ -166,6 +250,10 @@ impl RevisionCollector {
             text: None,
             properties: None,
             source_refs: refs.to_vec(),
+            content: Vec::new(),
+            child_start: None,
+            child_end: None,
+            source_index: None,
         });
         index
     }
@@ -204,7 +292,7 @@ impl RevisionCollector {
         }
     }
 
-    pub fn paragraph(&mut self, xml: &str, block: &DocumentBlock) {
+    pub fn paragraph(&mut self, xml: &str, block: &DocumentBlock, paragraph: &ParagraphNode) {
         if !has_markup(xml) {
             return;
         }
@@ -215,6 +303,8 @@ impl RevisionCollector {
             visible: String::new(),
             quoted: String::new(),
             offset: 0,
+            child_index: 0,
+            paragraph,
         };
         p.visit(xml, false);
         let aligned = p.visible == block.content;
@@ -227,6 +317,8 @@ impl RevisionCollector {
             } else if !aligned {
                 target.start = None;
                 target.end = None;
+                revision.child_start = None;
+                revision.child_end = None;
             }
         }
     }
@@ -250,11 +342,45 @@ impl RevisionCollector {
                 self.property_changes(props, scope, targets);
             }
         }
-        for (ri, (row_xml, row)) in extract_balanced_tag_slices(xml, "w:tr")
+        let mut retained = 0;
+        for (source_index, row_xml) in extract_balanced_tag_slices(xml, "w:tr")
             .into_iter()
-            .zip(&table.rows)
             .enumerate()
         {
+            let deleted = direct_child_tag(row_xml, "w:trPr")
+                .and_then(|props| direct_child_tag(props, "w:del"))
+                .is_some();
+            if deleted {
+                let first = self.records.len();
+                if let Some(props) = direct_child_tag(row_xml, "w:trPr") {
+                    self.property_changes(props, RevisionScope::TableRow, targets);
+                }
+                for record in &mut self.records[first..] {
+                    record.source_index = Some(source_index);
+                    if record.kind == RevisionKind::Deletion {
+                        if let Some(removed) = table
+                            .review_rows
+                            .iter()
+                            .flatten()
+                            .find(|r| r.source_xml == row_xml)
+                        {
+                            let mut content = table.clone();
+                            content.rows = vec![removed.row.clone()];
+                            content.review_rows = None;
+                            content.source_xml = None;
+                            content.block_id =
+                                Some(format!("{}/removed-row/{source_index}", source.node_id));
+                            record.content.push(DocNode::Table(content));
+                        }
+                    }
+                }
+                continue;
+            }
+            let ri = retained;
+            retained += 1;
+            let Some(row) = table.rows.get(ri) else {
+                continue;
+            };
             let cells: Vec<_> = (0..row.cells.len())
                 .map(|ci| SourceRef {
                     node_id: format!("{}/row/{ri}/cell/{ci}", source.node_id),
@@ -307,6 +433,8 @@ struct ParagraphReview<'a> {
     visible: String,
     quoted: String,
     offset: usize,
+    child_index: usize,
+    paragraph: &'a ParagraphNode,
 }
 
 impl ParagraphReview<'_> {
@@ -323,6 +451,7 @@ impl ParagraphReview<'_> {
                         std::slice::from_ref(self.source),
                     );
                     let start = self.offset;
+                    let child_start = self.child_index;
                     let hidden =
                         removed || matches!(kind, RevisionKind::Deletion | RevisionKind::MoveFrom);
                     let begin = if hidden {
@@ -337,6 +466,26 @@ impl ParagraphReview<'_> {
                     );
                     revision.source_refs[0].start = Some(start);
                     revision.source_refs[0].end = Some(self.offset);
+                    revision.child_start = Some(child_start);
+                    revision.child_end = Some(self.child_index);
+                    if hidden {
+                        let children = self
+                            .paragraph
+                            .review_content
+                            .iter()
+                            .flatten()
+                            .find(|fragment| fragment.source_xml == child)
+                            .map(|fragment| fragment.children.clone())
+                            .unwrap_or_else(|| fallback_content(child));
+                        let mut content = self.paragraph.clone();
+                        content.block_id = Some(format!("{}/content", revision.id));
+                        content.children = children;
+                        content.review_content = None;
+                        content.source_xml = None;
+                        content.source_text_patch = None;
+                        content.source_run_provenance = None;
+                        revision.content.push(DocNode::Paragraph(content));
+                    }
                 }
                 "w:moveFromRangeStart"
                 | "w:moveToRangeStart"
@@ -398,10 +547,17 @@ impl ParagraphReview<'_> {
             parse_run_text(&active)
         };
         let start = self.offset;
+        let child_start = self.child_index;
         self.quoted.push_str(&text);
         if !removed {
             self.visible.push_str(&text);
             self.offset += text.encode_utf16().count();
+            self.child_index += crate::parse::parse_run_text_tokens(&active)
+                .iter()
+                .filter(|t| !t.text.is_empty() || t.note_reference.is_some())
+                .count();
+            self.child_index += extract_balanced_tag_slices(&active, "w:drawing").len()
+                + extract_balanced_tag_slices(&active, "w:pict").len();
         }
         if let Some(props) = direct_child_tag(xml, "w:rPr") {
             let target = SourceRef {
@@ -409,8 +565,13 @@ impl ParagraphReview<'_> {
                 end: Some(self.offset),
                 ..self.source.clone()
             };
+            let first = self.collector.records.len();
             self.collector
                 .property_changes(props, RevisionScope::Text, &[target]);
+            for revision in &mut self.collector.records[first..] {
+                revision.child_start = Some(child_start);
+                revision.child_end = Some(self.child_index);
+            }
         }
     }
 }

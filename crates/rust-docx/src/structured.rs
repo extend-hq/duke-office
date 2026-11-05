@@ -755,7 +755,7 @@ impl Extractor<'_> {
         };
         let mut block = self.block(id.to_string(), kind, content, details, children, parent);
         if let (Some(review), Some(xml)) = (&mut self.review, &p.source_xml) {
-            review.paragraph(xml, &block);
+            review.paragraph(xml, &block, p);
         }
         if self.include_words {
             block.words = Some(self.words(id, &block.content));
@@ -1038,7 +1038,7 @@ fn extract(
         warnings: model.metadata.warnings.clone(),
         geometry_status: "requires_layout".into(),
     };
-    ReviewedDocument { document, revisions }
+    ReviewedDocument { document, revisions, comments: if include_revisions { crate::review::extract_document_comments(model) } else { Vec::new() } }
 }
 
 #[cfg(test)]

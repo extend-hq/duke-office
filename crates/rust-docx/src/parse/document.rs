@@ -97,6 +97,7 @@ fn parse_ranges(
 fn nonempty_nodes(mut nodes: Vec<DocNode>) -> Vec<DocNode> {
     if nodes.is_empty() {
         nodes.push(DocNode::Paragraph(ParagraphNode {
+            review_content: None,
             r#type: ParagraphNodeType::Paragraph,
             block_id: None,
             children: vec![ParagraphChildNode::Text(TextRunNode {

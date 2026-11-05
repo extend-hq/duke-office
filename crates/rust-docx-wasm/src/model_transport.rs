@@ -79,9 +79,16 @@ impl Transport<'_> {
     }
 
     fn paragraph(&mut self, paragraph: &mut ParagraphNode) {
+        self.children(&mut paragraph.children);
+        if let Some(content) = &mut paragraph.review_content {
+            self.list("reviewContent", content, |this, fragment| this.children(&mut fragment.children));
+        }
+    }
+
+    fn children(&mut self, children: &mut [ParagraphChildNode]) {
         self.list(
             "children",
-            &mut paragraph.children,
+            children,
             |this, child| match child {
                 ParagraphChildNode::Image(image) => this.image(image),
                 ParagraphChildNode::FormField(field) => {
@@ -97,12 +104,17 @@ impl Transport<'_> {
     }
 
     fn table(&mut self, table: &mut TableNode) {
-        self.list("rows", &mut table.rows, |this, row| {
-            this.list("cells", &mut row.cells, |this, cell| {
-                this.list("nodes", &mut cell.nodes, |this, node| match node {
-                    TableCellContentNode::Paragraph(paragraph) => this.paragraph(paragraph),
-                    TableCellContentNode::Table(table) => this.table(table),
-                });
+        self.list("rows", &mut table.rows, Self::row);
+        if let Some(rows) = &mut table.review_rows {
+            self.list("reviewRows", rows, |this, fragment| this.at("row", |this| this.row(&mut fragment.row)));
+        }
+    }
+
+    fn row(&mut self, row: &mut rust_docx::TableRowNode) {
+        self.list("cells", &mut row.cells, |this, cell| {
+            this.list("nodes", &mut cell.nodes, |this, node| match node {
+                TableCellContentNode::Paragraph(paragraph) => this.paragraph(paragraph),
+                TableCellContentNode::Table(table) => this.table(table),
             });
         });
     }

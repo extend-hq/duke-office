@@ -2374,7 +2374,19 @@ pub(crate) fn parse_paragraph_with_table_run_style(
         .collect::<Option<Vec<_>>>()
         .map(|runs| ParagraphSourceTextPatch { runs });
 
+    let review_content = crate::revisions::removed_fragments(paragraph_xml)
+        .into_iter()
+        .map(|source| {
+            let visible = crate::revisions::visible_removed_xml(source);
+            let xml = format!("<w:p>{paragraph_properties_xml}{visible}</w:p>");
+            let content = parse_paragraph_with_table_run_style(
+                &xml, context, table_paragraph_spacing, table_run_style,
+            );
+            crate::revisions::ReviewContent { source_xml: source.to_owned(), children: content.children }
+        })
+        .collect::<Vec<_>>();
     ParagraphNode {
+        review_content: (!review_content.is_empty()).then_some(review_content),
         r#type: ParagraphNodeType::Paragraph,
         block_id: None,
         style: paragraph_style,

@@ -1019,6 +1019,8 @@ pub struct ParagraphMarkFormattingSource {
 #[serde(rename_all = "camelCase")]
 pub struct ParagraphNode {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_content: Option<Vec<crate::revisions::ReviewContent>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub block_id: Option<String>,
     #[serde(default = "default_paragraph_node_type", rename = "type")]
     pub r#type: ParagraphNodeType,
@@ -1361,6 +1363,8 @@ pub struct TableSourceTextPatch {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TableNode {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_rows: Option<Vec<crate::revisions::ReviewRow>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub block_id: Option<String>,
     #[serde(default = "default_table_node_type", rename = "type")]

@@ -949,7 +949,19 @@ pub fn parse_table(
         || cell_margin_twips.is_some()
         || !column_widths_twips.is_empty()
         || resolved_table_borders.is_some();
+    let review_rows = crate::xml::extract_balanced_tag_slices(table_xml, "w:tr")
+        .into_iter().enumerate().filter_map(|(source_index, source)| {
+            let properties = direct_table_property(source, "w:trPr")?;
+            direct_table_property(properties, "w:del")?;
+            let current_properties = crate::xml::without_direct_child_tags(properties, "w:del");
+            let visible = crate::revisions::visible_removed_xml(&source.replacen(properties, &current_properties, 1));
+            let xml = format!("<w:tbl>{}{}{visible}</w:tbl>",
+                table_properties_xml.unwrap_or_default(), table_grid_xml.unwrap_or_default());
+            let mut parsed = parse_table(&xml, context);
+            Some(crate::revisions::ReviewRow { source_index, source_xml: source.to_owned(), row: parsed.rows.pop()? })
+        }).collect::<Vec<_>>();
     TableNode {
+        review_rows: (!review_rows.is_empty()).then_some(review_rows),
         r#type: TableNodeType::Table,
         block_id: None,
         rows,

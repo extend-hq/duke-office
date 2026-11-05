@@ -7,6 +7,7 @@ pub mod model;
 pub mod package;
 pub mod parse;
 pub mod revisions;
+pub mod review;
 pub mod serialize;
 pub mod source_graph;
 pub mod structured;
@@ -21,6 +22,7 @@ pub use doc::{is_doc_format, parse_doc};
 pub use model::*;
 pub use package::*;
 pub use parse::build_doc_model;
+pub use review::{extract_document_review, DocumentReview, DocumentComment, CommentTarget};
 pub use revisions::{
     DocumentRevision, ReviewedDocument, RevisionKind, RevisionProperties, RevisionScope,
     WordProperty,
