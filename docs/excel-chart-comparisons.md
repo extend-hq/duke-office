@@ -55,3 +55,7 @@ To rebuild these documentation images from a completed local capture report:
 ```sh
 python3 scripts/chart-fidelity/excel-gallery.py "$REPORT_JSON" docs/readme-assets
 ```
+
+## Release verification
+
+React XLSX 0.20.6 uses DukeSheets 0.1.24, chart browser package 0.3.0 (Rust chart crate 0.1.3), and Office fonts 0.1.0. A second 382-chart capture with those exact packages produced byte-identical SVGs for all 382 charts. Of the raster captures, 332 were pixel-identical; the other 50 differed by at most 0.043 mean absolute RGB levels. All eleven built public-viewer checks passed again. The six-family font package contains the same 84 file payloads used for the gallery capture.

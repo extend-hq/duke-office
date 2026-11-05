@@ -289,5 +289,17 @@
         "Trendline equation and R-squared"
       ]
     ]
+  },
+  "releaseVerification": {
+    "reactXlsx": "0.20.6",
+    "workbookParser": "0.1.24",
+    "chartBrowser": "0.3.0",
+    "rustOfficeCharts": "0.1.3",
+    "officeFonts": "0.1.0",
+    "rendererWasmSha256": "f6928bd70897027da9dc193745d6d07490fc9b0d03b950ab69ab402a9b1b2cef",
+    "identicalSvgCount": 382,
+    "identicalPngPixelCount": 332,
+    "maxPngMeanAbsoluteDifference": 0.042799761168105084,
+    "publicViewerChecksPassed": 11
   }
 }
