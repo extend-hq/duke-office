@@ -1,0 +1,20 @@
+[
+  {
+    "workbook": "crazy-chart-zoo-modern.xlsx",
+    "part": "xl/charts/chartEx9.xml",
+    "types": [],
+    "layouts": [
+      "regionMap"
+    ],
+    "error": "null"
+  },
+  {
+    "workbook": "crazy-chart-zoo-modern.xlsx",
+    "part": "xl/charts/chartEx12.xml",
+    "types": [],
+    "layouts": [
+      "regionMap"
+    ],
+    "error": "null"
+  }
+]

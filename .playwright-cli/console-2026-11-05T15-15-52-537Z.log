@@ -1,0 +1,18 @@
+[      97ms] [ERROR] Failed to load resource: the server responded with a status of 500 (Internal Server Error) @ http://127.0.0.1:4189/@fs/private/tmp/react-xlsx-rust-migration-20261105/packages/react-xlsx/src/shared-chart.tsx:0
+[     105ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://127.0.0.1:4189/favicon.ico:0
+[   20518ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:4189/.vite/deps/react-dom_client.js?v=da86bc03:20356
+[   20644ms] [WARNING] `WebAssembly.instantiateStreaming` failed because your server does not serve Wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:
+ TypeError: Failed to execute 'compile' on 'WebAssembly': Incorrect response MIME type. Expected 'application/wasm'. @ http://127.0.0.1:4189/.vite/deps/@dukelib_sheets-wasm.js?v=5fa13c1c:2301
+[   20654ms] WebAssembly.instantiate(): expected magic word 00 61 73 6d, found 3c 21 64 6f @+0
+[   48728ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:4189/.vite/deps/react-dom_client.js?v=da86bc03:20356
+[   48741ms] [WARNING] `WebAssembly.instantiateStreaming` failed because your server does not serve Wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:
+ TypeError: Failed to execute 'compile' on 'WebAssembly': Incorrect response MIME type. Expected 'application/wasm'. @ http://127.0.0.1:4189/.vite/deps/@dukelib_sheets-wasm.js?v=5fa13c1c:2301
+[   48757ms] WebAssembly.instantiate(): expected magic word 00 61 73 6d, found 3c 21 64 6f @+0
+[   81286ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:4189/.vite/deps/react-dom_client.js?v=da86bc03:20356
+[   81297ms] [WARNING] `WebAssembly.instantiateStreaming` failed because your server does not serve Wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:
+ TypeError: Failed to execute 'compile' on 'WebAssembly': Incorrect response MIME type. Expected 'application/wasm'. @ http://127.0.0.1:4189/.vite/deps/@dukelib_sheets-wasm.js?v=5fa13c1c:2301
+[   81304ms] WebAssembly.instantiate(): expected magic word 00 61 73 6d, found 3c 21 64 6f @+0
+[  102317ms] [INFO] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold @ http://127.0.0.1:4189/.vite/deps/react-dom_client.js?v=da86bc03:20356
+[  102340ms] [WARNING] `WebAssembly.instantiateStreaming` failed because your server does not serve Wasm with `application/wasm` MIME type. Falling back to `WebAssembly.instantiate` which is slower. Original error:
+ TypeError: Failed to execute 'compile' on 'WebAssembly': Incorrect response MIME type. Expected 'application/wasm'. @ http://127.0.0.1:4189/.vite/deps/@dukelib_sheets-wasm.js?v=5fa13c1c:2301
+[  102370ms] WebAssembly.instantiate(): expected magic word 00 61 73 6d, found 3c 21 64 6f @+0

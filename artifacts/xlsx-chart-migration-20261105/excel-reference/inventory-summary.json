@@ -1,0 +1,33 @@
+{
+  "chartWorkbooks": 42,
+  "chartParts": 376,
+  "uniqueChartXml": 368,
+  "legacyWorkbooks": 64,
+  "errors": 1,
+  "families": {
+    "pie3DChart": 5,
+    "pieChart": 5,
+    "barChart": 204,
+    "doughnutChart": 46,
+    "lineChart": 61,
+    "scatterChart": 52,
+    "areaChart": 5,
+    "radarChart": 9,
+    "waterfall": 3,
+    "funnel": 3,
+    "regionMap": 8,
+    "clusteredColumn": 4,
+    "paretoLine": 2,
+    "boxWhisker": 3,
+    "treemap": 3,
+    "sunburst": 3,
+    "area3DChart": 5,
+    "bubbleChart": 4,
+    "surfaceChart": 7,
+    "bar3DChart": 18,
+    "ofPieChart": 3,
+    "surface3DChart": 3,
+    "line3DChart": 1,
+    "stockChart": 5
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "hash": "5f97855d",
+  "configHash": "97042f6f",
+  "lockfileHash": "e3b0c442",
+  "browserHash": "6ba2f8a7",
+  "optimized": {
+    "@dukelib/sheets-wasm": {
+      "src": "../../../../../../react-xlsx/node_modules/.pnpm/@dukelib+sheets-wasm@0.1.23/node_modules/@dukelib/sheets-wasm/duke_sheets_wasm.js",
+      "file": "@dukelib_sheets-wasm.js",
+      "fileHash": "7421e44d",
+      "needsInterop": false
+    },
+    "fflate": {
+      "src": "../../../../../../react-xlsx/node_modules/.pnpm/fflate@0.8.3/node_modules/fflate/esm/browser.js",
+      "file": "fflate.js",
+      "fileHash": "b6017a55",
+      "needsInterop": false
+    },
+    "react": {
+      "src": "../../../../../../react-xlsx/node_modules/.pnpm/react@19.2.4/node_modules/react/index.js",
+      "file": "react.js",
+      "fileHash": "8117cb88",
+      "needsInterop": true
+    },
+    "react-dom/client": {
+      "src": "../../../../../../react-xlsx/node_modules/.pnpm/react-dom@19.2.4_react@19.2.4/node_modules/react-dom/client.js",
+      "file": "react-dom_client.js",
+      "fileHash": "2eb9ec46",
+      "needsInterop": true
+    }
+  },
+  "chunks": {
+    "chunk-QRA2VTCF": {
+      "file": "chunk-QRA2VTCF.js"
+    },
+    "chunk-BUSYA2B4": {
+      "file": "chunk-BUSYA2B4.js"
+    }
+  }
+}

@@ -38,10 +38,10 @@ pub struct ParseLimits {
 impl Default for ParseLimits {
     fn default() -> Self {
         Self {
-            max_input_bytes: 100 * 1024 * 1024,
+            max_input_bytes: usize::MAX,
             max_entries: 20_000,
-            max_entry_bytes: 64 * 1024 * 1024,
-            max_total_uncompressed_bytes: 512 * 1024 * 1024,
+            max_entry_bytes: usize::MAX,
+            max_total_uncompressed_bytes: usize::MAX,
             max_xml_depth: 256,
             max_xml_nodes: 250_000,
             max_xml_attributes: 1_000_000,

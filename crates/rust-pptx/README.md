@@ -2,7 +2,7 @@
 
 by Extend
 
-Parse PowerPoint presentations from bytes. The parser detects OOXML presentations and legacy PowerPoint binary presentations and returns a structured model of slides, shapes, text, charts, and embedded assets. Parsing limits bound input size, archive expansion, and XML complexity.
+Parse PowerPoint presentations from bytes. The parser detects OOXML presentations and legacy PowerPoint binary presentations and returns a structured model of slides, shapes, text, charts, and embedded assets. Input size, entry size, and total expanded size are unlimited by default, subject to available memory. Entry-count and XML-complexity limits remain enabled; callers can configure size limits through `ParseLimits`.
 
 Install with `cargo add rust-pptx`. The Rust library target is named `rust_pptx`.
 
