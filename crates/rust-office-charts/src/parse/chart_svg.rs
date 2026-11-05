@@ -209,7 +209,7 @@ pub(super) fn marker(
     let neg = -r;
     let shape = match symbol {
         "circle" | "dot" => format!(r#"<circle r="{r:.2}"/>"#),
-        "square" => format!(
+        "square" | "picture" => format!(
             r#"<rect x="{neg:.2}" y="{neg:.2}" width="{w:.2}" height="{w:.2}"/>"#,
             w = 2. * r
         ),

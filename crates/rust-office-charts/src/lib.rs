@@ -8,6 +8,14 @@ use std::collections::HashMap;
 pub use chart::{parse_chart_xml, ChartCategory, ChartData, ChartPoint, ChartSeries};
 pub use parse::render_chart;
 
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ChartDrawing {
+    pub xml: String,
+    #[serde(default)]
+    pub images: HashMap<String, String>,
+}
+
 /// Inputs resolved by the host. Missing dimensions default to 640 by 360 CSS pixels.
 #[derive(Clone, Debug, Default)]
 pub struct RenderOptions<'a> {
@@ -22,6 +30,8 @@ pub struct RenderOptions<'a> {
     pub color_style_xml: Option<&'a str>,
     /// Embedded raster data URLs keyed by relationship ID within the chart part.
     pub images: Option<&'a HashMap<String, String>>,
+    /// Saved drawing parts keyed by relationship ID within the chart part.
+    pub drawings: Option<&'a HashMap<String, ChartDrawing>>,
     pub legacy_defaults: bool,
     /// Apply spreadsheet host defaults for omitted chart properties.
     pub spreadsheet_defaults: bool,

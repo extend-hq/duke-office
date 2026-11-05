@@ -14,10 +14,10 @@ use zip::ZipArchive;
 
 use crate::{
     ChartSeries, ColorValue, FillStyle, GradientStop, LineStyle, ParseError, ParseLimits,
-    PresentationAsset, PresentationDocument, PresentationEmbeddedFont, PresentationFormat,
-    PresentationMetadata, PresentationSize, PresentationSlide, PresentationWarning, ShapeGeometry,
-    SlideComment, SlideNode, SlideNote, TableCell, TextParagraph, TextRun, Transform,
-    VerticalAlignment,
+    ParseOptions, PresentationAsset, PresentationDocument, PresentationEmbeddedFont,
+    PresentationFormat, PresentationMetadata, PresentationSize, PresentationSlide,
+    PresentationWarning, ShapeGeometry, SlideComment, SlideNode, SlideNote, TableCell,
+    TextParagraph, TextRun, Transform, VerticalAlignment,
 };
 
 const DEFAULT_WIDTH: u64 = 9_144_000;
@@ -550,7 +550,7 @@ fn parse_xml_tree(xml: &[u8], limits: &ParseLimits, context: &str) -> Result<Xml
                 source_starts.push(
                     matches!(
                         local_name(start.name().as_ref()),
-                        b"pic" | b"sp" | b"cxnSp" | b"fmtScheme"
+                        b"pic" | b"sp" | b"cxnSp" | b"fmtScheme" | b"model3d"
                     )
                     .then_some(source_start),
                 );
@@ -563,7 +563,10 @@ fn parse_xml_tree(xml: &[u8], limits: &ParseLimits, context: &str) -> Result<Xml
                 budget.consume_node(&start, limits)?;
                 let mut node = XmlNode::from_start(&start, reader.decoder())
                     .map_err(|error| ParseError::Corrupt(format!("{context}: {error}")))?;
-                if matches!(node.name.as_str(), "pic" | "sp" | "cxnSp" | "fmtScheme") {
+                if matches!(
+                    node.name.as_str(),
+                    "pic" | "sp" | "cxnSp" | "fmtScheme" | "model3d"
+                ) {
                     node.source_xml = Some(budget.retain_source_xml(
                         &xml[source_start..reader.buffer_position() as usize],
                         limits,
@@ -2381,6 +2384,7 @@ fn shape_line(node: &XmlNode, colors: Option<&ColorContext<'_>>) -> Option<Optio
 
 #[derive(Clone, Copy)]
 struct NodeParseContext<'a, 'color> {
+    options: &'a ParseOptions,
     slide_index: usize,
     paint_scale: (f64, f64),
     rels: &'a HashMap<String, String>,
@@ -2500,6 +2504,7 @@ fn parse_shape_node(
         text_insets: inherited_text_insets(&text_bodies),
         autofit: inherited_autofit(&text_bodies),
         text_rotation: inherited_body_attribute(&text_bodies, "rot").and_then(angle_degrees),
+        text_transform: None,
         vertical_text: inherited_body_attribute(&text_bodies, "vert").map(str::to_owned),
         horizontal_overflow: inherited_body_attribute(&text_bodies, "horzOverflow")
             .map(str::to_owned),
@@ -2530,11 +2535,49 @@ fn parse_shape_node(
     }
 }
 
+fn collect_model_assets(
+    node: &XmlNode,
+    rels: &HashMap<String, String>,
+    paths: &mut BTreeMap<String, String>,
+) {
+    if node.name == "model3d" {
+        if let Some(path) = node.attr("embed").and_then(|id| rels.get(id)) {
+            paths.insert(path.clone(), "model3d".into());
+        }
+    }
+    for child in &node.children {
+        collect_model_assets(child, rels, paths);
+    }
+}
+
+fn asset_content_type(path: &str, types: &XmlNode) -> String {
+    types
+        .children_named("Override")
+        .find(|node| {
+            node.attr("PartName")
+                .is_some_and(|name| name.trim_start_matches('/') == path)
+        })
+        .or_else(|| {
+            types.children_named("Default").find(|node| {
+                node.attr("Extension").is_some_and(|extension| {
+                    path.rsplit('.')
+                        .next()
+                        .is_some_and(|value| value.eq_ignore_ascii_case(extension))
+                })
+            })
+        })
+        .and_then(|node| node.attr("ContentType"))
+        .map(str::to_owned)
+        .unwrap_or_else(|| content_type(path))
+}
+
 fn load_picture_assets(
     archive: &mut ZipArchive<Cursor<&[u8]>>,
     paths: &BTreeMap<String, String>,
     assets: &mut BTreeMap<String, PresentationAsset>,
     limits: &ParseLimits,
+    options: &ParseOptions,
+    content_types: &XmlNode,
 ) -> Result<(), ParseError> {
     for path in paths
         .keys()
@@ -2542,12 +2585,18 @@ fn load_picture_assets(
         .cloned()
         .collect::<Vec<_>>()
     {
+        let content_type = asset_content_type(&path, content_types);
+        if !options.include_3d_models
+            && (paths[&path] == "model3d" || content_type.starts_with("model/"))
+        {
+            continue;
+        }
         if let Some(data) = read_entry(archive, &path, limits)? {
             assets.insert(
                 path.clone(),
                 PresentationAsset {
                     id: path.clone(),
-                    content_type: content_type(&path),
+                    content_type,
                     byte_length: data.len(),
                     file_name: path.rsplit('/').next().map(str::to_owned),
                     data: Some(data.into()),
@@ -2808,6 +2857,69 @@ fn picture_needs_rendering(
             })
 }
 
+fn parse_model3d_node(
+    frame: &XmlNode,
+    model: &XmlNode,
+    node_index: usize,
+    context: &NodeParseContext<'_, '_>,
+) -> SlideNode {
+    let (id, name) = node_identity(frame, context.slide_index, node_index);
+    let transform = parse_transform(frame.child("xfrm").or_else(|| {
+        model
+            .child("spPr")
+            .and_then(|properties| properties.child("xfrm"))
+    }));
+    let asset_id = model
+        .child("raster")
+        .and_then(|raster| raster.child("blip"))
+        .and_then(|blip| blip.attr("embed"))
+        .and_then(|id| context.rels.get(id))
+        .filter(|path| context.assets.contains_key(*path))
+        .cloned();
+    let source = model.source_xml.as_deref().unwrap_or_default();
+    let model_3d = rust_office_art::model3d::parse_model3d(source, context.options, |id| {
+        let path = context.rels.get(id)?;
+        let asset = context.assets.get(path)?;
+        Some(rust_office_art::model3d::Model3DAsset {
+            part_name: path.clone(),
+            content_type: asset.content_type.clone(),
+            data: asset.data.clone(),
+        })
+    })
+    .map(Box::new);
+    if model_3d
+        .as_ref()
+        .is_some_and(|model| model.model_relationship_id.is_some() && model.asset.is_none())
+    {
+        context.diagnostics.warn(
+            "missing-model3d-asset",
+            "The embedded 3D model asset could not be resolved.",
+            Some("model3d"),
+        );
+    }
+    if asset_id.is_none() {
+        context.diagnostics.warn(
+            "missing-model3d-preview",
+            "The 3D model has no available saved preview.",
+            Some("model3d"),
+        );
+    }
+    SlideNode::Image {
+        model_3d,
+        id,
+        name,
+        transform,
+        asset_id: asset_id.unwrap_or_else(|| "missing-asset".into()),
+        crop: None,
+        opacity: None,
+        preserve_aspect_ratio: false,
+        effects: None,
+        picture_svg: None,
+        paint_bounds: None,
+        source_xml: model.source_xml.clone(),
+    }
+}
+
 fn parse_image_node(
     node: &XmlNode,
     node_index: usize,
@@ -2906,6 +3018,7 @@ fn parse_image_node(
         );
     }
     SlideNode::Image {
+        model_3d: None,
         id,
         name,
         transform,
@@ -3591,9 +3704,7 @@ fn parse_chart_part(
 
 #[derive(Default)]
 struct ParsedSmartArtData {
-    semantic_text: HashMap<String, Vec<TextParagraph>>,
     semantic_labels: Vec<(String, Vec<TextParagraph>)>,
-    presentation_to_semantic: HashMap<String, String>,
     drawing_relationship_id: Option<String>,
     background: Option<FillStyle>,
 }
@@ -3628,11 +3739,6 @@ fn parse_smartart_data(xml: &[u8], context: &NodeParseContext<'_, '_>) -> Parsed
         ..Default::default()
     };
     for point in &data.points {
-        if let Some(association) = point.presentation_association.as_ref() {
-            parsed
-                .presentation_to_semantic
-                .insert(point.model_id.clone(), association.clone());
-        }
         if matches!(
             point.kind.as_str(),
             "pres" | "doc" | "parTrans" | "sibTrans"
@@ -3652,9 +3758,6 @@ fn parse_smartart_data(xml: &[u8], context: &NodeParseContext<'_, '_>) -> Parsed
         let paragraphs = parse_text_paragraphs(text_body.as_ref(), None, None, None, &text_context);
         if paragraphs_have_text(&paragraphs) {
             parsed
-                .semantic_text
-                .insert(point.model_id.clone(), paragraphs.clone());
-            parsed
                 .semantic_labels
                 .push((point.model_id.clone(), paragraphs));
         }
@@ -3672,28 +3775,16 @@ fn smartart_child_transform(frame: &Transform) -> Transform {
     }
 }
 
-fn mapped_smartart_text<'a>(
-    model_id: &str,
-    data: &'a ParsedSmartArtData,
-) -> Option<&'a Vec<TextParagraph>> {
-    data.presentation_to_semantic
-        .get(model_id)
-        .and_then(|semantic_id| data.semantic_text.get(semantic_id))
-        .or_else(|| data.semantic_text.get(model_id))
-}
-
 fn parse_materialized_smartart(
     frame_node: &XmlNode,
     node_index: usize,
     drawing: &rust_office_art::smartart::SmartArtDrawing,
-    data: &ParsedSmartArtData,
     context: &NodeParseContext<'_, '_>,
 ) -> Option<SlideNode> {
     fn parse_cached_node(
         entry: &rust_office_art::smartart::SmartArtDrawingNode,
         index: usize,
         frame_id: &str,
-        data: &ParsedSmartArtData,
         context: &NodeParseContext<'_, '_>,
     ) -> Option<SlideNode> {
         let shape = parse_xml_tree(
@@ -3702,10 +3793,10 @@ fn parse_materialized_smartart(
             "SmartArt drawing",
         )
         .ok()?;
-        if shape.child("txXfrm").is_some() {
+        if shape.child("txXfrm").is_some() && entry.text_transform.is_none() {
             context.diagnostics.warn(
                 "unsupported-smartart-text-transform",
-                "An independent SmartArt text transform is preserved in source XML; text uses the shape frame as a rendering fallback.",
+                "The SmartArt text transform has incomplete or unsupported dimensions; text uses the shape frame as a rendering fallback.",
                 Some("smartart"),
             );
         }
@@ -3726,12 +3817,16 @@ fn parse_materialized_smartart(
         if name.is_empty() {
             *name = format!("SmartArt shape {}", index + 1);
         }
-        if let SlideNode::Shape { paragraphs, .. } = &mut parsed {
-            if !paragraphs_have_text(paragraphs) {
-                if let Some(mapped) = mapped_smartart_text(&model_id, data) {
-                    *paragraphs = mapped.clone();
-                }
-            }
+        if let SlideNode::Shape { text_transform, .. } = &mut parsed {
+            *text_transform = entry.text_transform.as_ref().map(|frame| Transform {
+                x: frame.x,
+                y: frame.y,
+                width: frame.width,
+                height: frame.height,
+                rotation: Some(frame.rotation),
+                flip_horizontal: Some(frame.flip_horizontal),
+                flip_vertical: Some(frame.flip_vertical),
+            });
         }
         if let SlideNode::Group {
             id,
@@ -3746,9 +3841,7 @@ fn parse_materialized_smartart(
                 .children
                 .iter()
                 .enumerate()
-                .filter_map(|(index, entry)| {
-                    parse_cached_node(entry, index, id, data, &child_context)
-                })
+                .filter_map(|(index, entry)| parse_cached_node(entry, index, id, &child_context))
                 .collect();
         }
         Some(parsed)
@@ -3769,9 +3862,7 @@ fn parse_materialized_smartart(
         .nodes
         .iter()
         .enumerate()
-        .filter_map(|(index, entry)| {
-            parse_cached_node(entry, index, &frame_id, data, &child_context)
-        })
+        .filter_map(|(index, entry)| parse_cached_node(entry, index, &frame_id, &child_context))
         .collect::<Vec<_>>();
     if children.is_empty() {
         return None;
@@ -3860,6 +3951,7 @@ fn smartart_fallback_group(
             text_insets: None,
             autofit: None,
             text_rotation: None,
+            text_transform: None,
             vertical_text: None,
             horizontal_overflow: None,
             vertical_overflow: None,
@@ -3922,6 +4014,7 @@ fn smartart_fallback_group(
                 line_spacing_reduction: Some(0.1),
             }),
             text_rotation: None,
+            text_transform: None,
             vertical_text: None,
             horizontal_overflow: Some("clip".into()),
             vertical_overflow: Some("clip".into()),
@@ -3987,50 +4080,62 @@ fn parse_smartart_frame(
     };
     let data = parse_smartart_data(data_xml, &data_context);
     if let Some(drawing_relationship_id) = data.drawing_relationship_id.as_deref() {
-        if let Some(drawing_path) = data_rels
-            .get(drawing_relationship_id)
-            .or_else(|| context.rels.get(drawing_relationship_id))
+        let mut drawing_paths = Vec::with_capacity(2);
+        for path in [
+            data_rels.get(drawing_relationship_id),
+            context.rels.get(drawing_relationship_id),
+        ]
+        .into_iter()
+        .flatten()
         {
-            if let Some(drawing_xml) = context.related_parts.get(drawing_path) {
-                parse_xml_tree(drawing_xml, context.limits, drawing_path)?;
-                let drawing_context = NodeParseContext {
-                    rels: context
-                        .related_relationships
-                        .get(drawing_path)
-                        .unwrap_or(context.rels),
-                    layout_root: None,
-                    master_root: None,
-                    layout_rels: None,
-                    master_rels: None,
-                    ..*context
-                };
-                if let Some(drawing) = std::str::from_utf8(drawing_xml)
-                    .ok()
-                    .and_then(rust_office_art::smartart::parse_smartart_drawing)
-                {
-                    if let Some(group) = parse_materialized_smartart(
-                        frame_node,
-                        node_index,
-                        &drawing,
-                        &data,
-                        &drawing_context,
-                    ) {
-                        return Ok(Some(group));
-                    }
-                }
-            } else {
-                context.diagnostics.warn(
-                    "missing-part",
-                    format!("SmartArt drawing part {drawing_path} is missing."),
-                    Some("smartart"),
-                );
+            if !drawing_paths.contains(&path) {
+                drawing_paths.push(path);
             }
-        } else {
+        }
+        for drawing_path in &drawing_paths {
+            let Some(drawing_xml) = context.related_parts.get(*drawing_path) else {
+                continue;
+            };
+            let Some(drawing) = std::str::from_utf8(drawing_xml)
+                .ok()
+                .and_then(rust_office_art::smartart::parse_smartart_drawing)
+            else {
+                continue;
+            };
+            parse_xml_tree(drawing_xml, context.limits, drawing_path)?;
+            let drawing_context = NodeParseContext {
+                rels: context
+                    .related_relationships
+                    .get(*drawing_path)
+                    .unwrap_or(context.rels),
+                layout_root: None,
+                master_root: None,
+                layout_rels: None,
+                master_rels: None,
+                ..*context
+            };
+            if let Some(group) =
+                parse_materialized_smartart(frame_node, node_index, &drawing, &drawing_context)
+            {
+                return Ok(Some(group));
+            }
+        }
+        if drawing_paths.is_empty() {
             context.diagnostics.warn(
                 "missing-part",
                 "SmartArt drawing relationship could not be resolved.",
                 Some("smartart"),
             );
+        } else {
+            for drawing_path in drawing_paths {
+                if !context.related_parts.contains_key(drawing_path) {
+                    context.diagnostics.warn(
+                        "missing-part",
+                        format!("SmartArt drawing part {drawing_path} is missing."),
+                        Some("smartart"),
+                    );
+                }
+            }
         }
     }
     Ok(smartart_fallback_group(
@@ -4044,6 +4149,9 @@ fn parse_graphic_frame(
     context: &NodeParseContext<'_, '_>,
 ) -> Result<SlideNode, ParseError> {
     let graphic_data = node.descendant("graphicData");
+    if let Some(model) = graphic_data.and_then(|value| value.child("model3d")) {
+        return Ok(parse_model3d_node(node, model, node_index, context));
+    }
     if let Some(table) = graphic_data.and_then(|value| value.child("tbl")) {
         return Ok(parse_table_node(node, table, node_index, context));
     }
@@ -4181,6 +4289,7 @@ fn parse_slide_node(
     match node.name.as_str() {
         "sp" | "cxnSp" => Ok(Some(parse_shape_node(node, node_index, context))),
         "pic" => Ok(Some(parse_image_node(node, node_index, context))),
+        "model3d" => Ok(Some(parse_model3d_node(node, node, node_index, context))),
         "grpSp" => Ok(Some(parse_group_node(node, node_index, context)?)),
         "graphicFrame" => Ok(Some(parse_graphic_frame(node, node_index, context)?)),
         // Markup-compatibility wrapper used by PowerPoint for modern content
@@ -4189,12 +4298,37 @@ fn parse_slide_node(
         // fallback rendering.
         "AlternateContent" => {
             let mut fallback: Option<SlideNode> = None;
+            let mut model_without_preview = None;
             for branch_name in ["Choice", "Fallback"] {
                 for branch in node.children_named(branch_name) {
                     for child in &branch.children {
-                        let Some(parsed) = parse_slide_node(child, node_index, context)? else {
+                        let Some(mut parsed) = parse_slide_node(child, node_index, context)? else {
                             continue;
                         };
+                        if matches!(&parsed, SlideNode::Image { asset_id, source_xml: Some(xml), .. }
+                            if asset_id == "missing-asset" && rust_office_art::model3d::model3d_xml(xml).is_some())
+                        {
+                            if model_without_preview.is_none() {
+                                model_without_preview = Some(parsed);
+                            }
+                            continue;
+                        }
+                        if let SlideNode::Image {
+                            model_3d,
+                            source_xml,
+                            ..
+                        } = &mut parsed
+                        {
+                            if let Some(SlideNode::Image {
+                                model_3d: original,
+                                source_xml: original_xml,
+                                ..
+                            }) = model_without_preview.take()
+                            {
+                                *model_3d = original;
+                                *source_xml = original_xml;
+                            }
+                        }
                         if !matches!(parsed, SlideNode::Unknown { .. }) {
                             return Ok(Some(parsed));
                         }
@@ -4204,7 +4338,7 @@ fn parse_slide_node(
                     }
                 }
             }
-            Ok(fallback)
+            Ok(model_without_preview.or(fallback))
         }
         "nvGrpSpPr" | "grpSpPr" | "extLst" => Ok(None),
         feature => {
@@ -4326,6 +4460,7 @@ fn parse_slide(
                 assets: context.assets,
                 chart_companions: context.chart_companions,
                 legacy_chart_defaults: context.legacy_chart_defaults,
+                options: context.options,
                 limits: context.limits,
                 colors: context.colors,
                 diagnostics: context.diagnostics,
@@ -4353,6 +4488,7 @@ fn parse_slide(
             assets: context.assets,
             chart_companions: context.chart_companions,
             legacy_chart_defaults: context.legacy_chart_defaults,
+            options: context.options,
             limits: context.limits,
             colors: context.colors,
             diagnostics: context.diagnostics,
@@ -4480,6 +4616,8 @@ fn content_type(path: &str) -> String {
         "wdp" => "image/vnd.ms-photo",
         "emf" => "image/x-emf",
         "wmf" => "image/x-wmf",
+        "glb" => "model/gltf-binary",
+        "gltf" => "model/gltf+json",
         "mp4" => "video/mp4",
         "mp3" => "audio/mpeg",
         "wav" => "audio/wav",
@@ -4553,7 +4691,11 @@ fn missing_part_warning(path: &str, slide_index: Option<usize>) -> PresentationW
     warning
 }
 
-pub fn parse(bytes: &[u8], limits: &ParseLimits) -> Result<PresentationDocument, ParseError> {
+pub fn parse(
+    bytes: &[u8],
+    limits: &ParseLimits,
+    options: &ParseOptions,
+) -> Result<PresentationDocument, ParseError> {
     let cursor = Cursor::new(bytes);
     let mut archive =
         ZipArchive::new(cursor).map_err(|error| ParseError::Corrupt(format!("ZIP: {error}")))?;
@@ -4570,6 +4712,16 @@ pub fn parse(bytes: &[u8], limits: &ParseLimits) -> Result<PresentationDocument,
         return Err(ParseError::Encrypted);
     }
 
+    let content_types = read_entry(&mut archive, "[Content_Types].xml", limits)?
+        .map(|xml| parse_xml_tree(&xml, limits, "[Content_Types].xml"))
+        .transpose()?
+        .unwrap_or(XmlNode {
+            source_xml: None,
+            name: "Types".into(),
+            attributes: Vec::new(),
+            text: String::new(),
+            children: Vec::new(),
+        });
     let legacy_chart_defaults = read_entry(&mut archive, "docProps/app.xml", limits)?
         .and_then(|xml| parse_xml_tree(&xml, limits, "docProps/app.xml").ok())
         .and_then(|root| {
@@ -4694,21 +4846,42 @@ pub fn parse(bytes: &[u8], limits: &ParseLimits) -> Result<PresentationDocument,
         let mut related_relationships = HashMap::new();
         let mut chart_companions: HashMap<String, ChartCompanionParts> = HashMap::new();
         while let Some((target, is_chart_part)) = related_paths.pop_first() {
-            if related_parts.contains_key(&target) { continue; }
-            if related_parts.len() >= limits.max_entries { return Err(ParseError::ResourceLimit("related presentation parts".into())); }
+            if related_parts.contains_key(&target) {
+                continue;
+            }
+            if related_parts.len() >= limits.max_entries {
+                return Err(ParseError::ResourceLimit(
+                    "related presentation parts".into(),
+                ));
+            }
             if let Some(bytes) = read_entry(&mut archive, &target, limits)? {
                 related_parts.insert(target.clone(), bytes);
-                let Some(rels_xml) = read_entry(&mut archive, &relationship_part_path(&target), limits)? else { continue; };
+                let Some(rels_xml) =
+                    read_entry(&mut archive, &relationship_part_path(&target), limits)?
+                else {
+                    continue;
+                };
                 let part_rels = relationships(&rels_xml, &target, limits.max_xml_depth)?;
-                for path in part_rels.values().filter(|path| path.starts_with("ppt/media/")) {
+                for path in part_rels
+                    .values()
+                    .filter(|path| path.starts_with("ppt/media/"))
+                {
                     asset_paths.insert(path.clone(), path.clone());
                 }
                 if !is_chart_part {
-                    for path in part_rels.values().filter(|path| path.starts_with("ppt/diagrams/")) {
-                        if !related_parts.contains_key(path) { related_paths.entry(path.clone()).or_insert(false); }
+                    for path in part_rels
+                        .values()
+                        .filter(|path| path.starts_with("ppt/diagrams/"))
+                    {
+                        if !related_parts.contains_key(path) {
+                            related_paths.entry(path.clone()).or_insert(false);
+                        }
                     }
-                    for (kind, path) in relationship_targets_by_type(&rels_xml, &target, limits.max_xml_depth)? {
-                        if is_diagram_relationship_type(&kind) && !related_parts.contains_key(&path) {
+                    for (kind, path) in
+                        relationship_targets_by_type(&rels_xml, &target, limits.max_xml_depth)?
+                    {
+                        if is_diagram_relationship_type(&kind) && !related_parts.contains_key(&path)
+                        {
                             related_paths.entry(path).or_insert(false);
                         }
                     }
@@ -4755,10 +4928,23 @@ pub fn parse(bytes: &[u8], limits: &ParseLimits) -> Result<PresentationDocument,
                 .values()
                 .filter(|target| target.starts_with("ppt/media/"))
             {
-                asset_paths.insert(target.clone(), target.clone());
+                asset_paths
+                    .entry(target.clone())
+                    .or_insert_with(|| target.clone());
             }
         }
-        load_picture_assets(&mut archive, &asset_paths, &mut assets, limits)?;
+        collect_model_assets(&slide_root, &slide_rels, &mut asset_paths);
+        for part in [layout.as_ref(), master.as_ref()].into_iter().flatten() {
+            collect_model_assets(&part.root, &part.rels, &mut asset_paths);
+        }
+        load_picture_assets(
+            &mut archive,
+            &asset_paths,
+            &mut assets,
+            limits,
+            options,
+            &content_types,
+        )?;
         let notes = if let Some(target) = slide_rels
             .values()
             .find(|target| target.starts_with("ppt/notesSlides/"))
@@ -4811,6 +4997,7 @@ pub fn parse(bytes: &[u8], limits: &ParseLimits) -> Result<PresentationDocument,
                 assets: &assets,
                 chart_companions: &chart_companions,
                 legacy_chart_defaults,
+                options,
                 limits,
                 colors: Some(&colors),
                 diagnostics: &diagnostics,
@@ -4897,10 +5084,22 @@ pub fn parse(bytes: &[u8], limits: &ParseLimits) -> Result<PresentationDocument,
         .chain(theme_parts.values().flat_map(|theme| theme.rels.values()))
         .filter(|target| target.starts_with("ppt/media/"))
     {
-        asset_paths.insert(target.clone(), target.clone());
+        asset_paths
+            .entry(target.clone())
+            .or_insert_with(|| target.clone());
     }
 
-    load_picture_assets(&mut archive, &asset_paths, &mut assets, limits)?;
+    for part in master_parts.values().chain(layout_parts.values()) {
+        collect_model_assets(&part.root, &part.rels, &mut asset_paths);
+    }
+    load_picture_assets(
+        &mut archive,
+        &asset_paths,
+        &mut assets,
+        limits,
+        options,
+        &content_types,
+    )?;
     let empty_related_parts = HashMap::new();
     let empty_related_relationships = HashMap::new();
     let empty_chart_companions = HashMap::new();
@@ -4925,6 +5124,7 @@ pub fn parse(bytes: &[u8], limits: &ParseLimits) -> Result<PresentationDocument,
                 assets: &assets,
                 chart_companions: &empty_chart_companions,
                 legacy_chart_defaults,
+                options,
                 limits,
                 colors: Some(&colors),
                 diagnostics: &diagnostics,
@@ -4975,6 +5175,7 @@ pub fn parse(bytes: &[u8], limits: &ParseLimits) -> Result<PresentationDocument,
                 assets: &assets,
                 chart_companions: &empty_chart_companions,
                 legacy_chart_defaults,
+                options,
                 limits,
                 colors: Some(&colors),
                 diagnostics: &diagnostics,

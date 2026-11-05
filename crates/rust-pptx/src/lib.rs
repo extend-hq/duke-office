@@ -3,6 +3,7 @@ mod model;
 mod pptx;
 
 pub use model::*;
+pub use rust_office_art::ParseOptions;
 
 use thiserror::Error;
 
@@ -72,11 +73,19 @@ pub fn parse_presentation(
     bytes: &[u8],
     limits: &ParseLimits,
 ) -> Result<PresentationDocument, ParseError> {
+    parse_presentation_with_options(bytes, limits, &ParseOptions::default())
+}
+
+pub fn parse_presentation_with_options(
+    bytes: &[u8],
+    limits: &ParseLimits,
+    options: &ParseOptions,
+) -> Result<PresentationDocument, ParseError> {
     if bytes.len() > limits.max_input_bytes {
         return Err(ParseError::InputLimit(limits.max_input_bytes));
     }
     match detect_format(bytes)? {
-        PresentationFormat::Pptx => pptx::parse(bytes, limits),
+        PresentationFormat::Pptx => pptx::parse(bytes, limits, options),
         PresentationFormat::Ppt => legacy::parse(bytes, limits),
     }
 }

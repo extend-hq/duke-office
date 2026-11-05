@@ -89,7 +89,7 @@ fn transformed(color: &str, transforms: &[Transform]) -> Option<String> {
     Some(rgb)
 }
 
-fn color(node: Node, theme: &ThemeColorMap) -> Option<String> {
+pub(super) fn color(node: Node, theme: &ThemeColorMap) -> Option<String> {
     if !drawing(node) {
         return None;
     }
@@ -113,6 +113,12 @@ struct Properties {
     outline_width: Option<f64>,
     marker: Option<String>,
     marker_outline: Option<String>,
+    #[cfg(feature = "extended-charts")]
+    marker_effects: Option<String>,
+    #[cfg(feature = "extended-charts")]
+    marker_symbol: Option<String>,
+    #[cfg(feature = "extended-charts")]
+    marker_size: Option<f64>,
 }
 
 impl Properties {
@@ -134,6 +140,21 @@ impl Properties {
             marker_outline: marker
                 .and_then(|m| drawing_child(m, "ln"))
                 .and_then(|p| servers.fill(p, theme)),
+            #[cfg(feature = "extended-charts")]
+            marker_effects: child(node, "marker")
+                .and_then(effects::properties)
+                .map(effects::fragment),
+            #[cfg(feature = "extended-charts")]
+            marker_symbol: child(node, "marker")
+                .and_then(|n| child(n, "symbol"))
+                .and_then(|n| n.attribute("val"))
+                .map(str::to_owned),
+            #[cfg(feature = "extended-charts")]
+            marker_size: child(node, "marker")
+                .and_then(|n| child(n, "size"))
+                .and_then(|n| n.attribute("val"))
+                .and_then(|s| s.parse::<f64>().ok())
+                .filter(|v| v.is_finite()),
         }
     }
 }
@@ -251,7 +272,7 @@ pub(super) struct ChartColors {
     style_palette: Option<style_palette::StylePalette>,
     #[cfg(feature = "extended-charts")]
     style: Option<style_palette::StylePaint>,
-    theme: ThemeColorMap,
+    pub(super) theme: ThemeColorMap,
     series: Vec<Series>,
     highest_series: usize,
     highest_point: usize,
@@ -560,7 +581,7 @@ impl ChartColors {
                 svg.insert_str(pos + 1, &defs);
             }
         }
-        svg
+        self.servers.apply_images(svg, &self.theme)
     }
 
     pub fn shape_fill(&self, properties: Node) -> Option<String> {
@@ -642,6 +663,47 @@ impl ChartColors {
 
     pub fn line_dash(&self, line: Option<Node>, width: f64) -> String {
         effects::line_dash(line, width)
+    }
+
+    #[cfg(feature = "extended-charts")]
+    pub fn point_marker_options(&self, series: usize, point: u32) -> (Option<&str>, Option<f64>) {
+        (
+            self.explicit(series, Some(point), |p| p.marker_symbol.as_deref()),
+            self.series.get(series).and_then(|s| {
+                s.points
+                    .get(&point)
+                    .and_then(|p| p.marker_size)
+                    .or(s.paint.marker_size)
+            }),
+        )
+    }
+
+    #[cfg(feature = "extended-charts")]
+    pub fn paint_marker(
+        &self,
+        svg: &mut String,
+        series: usize,
+        point: u32,
+        bounds: [f64; 4],
+        body: &str,
+    ) {
+        if body.is_empty() {
+            return;
+        }
+        let document = self
+            .explicit(series, Some(point), |p| p.marker_effects.as_deref())
+            .and_then(|xml| roxmltree::Document::parse(xml).ok());
+        let properties = document
+            .as_ref()
+            .and_then(|d| d.root_element().first_element_child());
+        self.paint_styled_shape(
+            svg,
+            properties,
+            "dataPointMarker",
+            &self.marker(series, Some(point)),
+            bounds,
+            body,
+        );
     }
 
     #[cfg(feature = "extended-charts")]

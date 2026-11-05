@@ -61,12 +61,50 @@ pub enum SmartArtDrawingKind {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct SmartArtTextTransform {
+    pub x: i64,
+    pub y: i64,
+    pub width: i64,
+    pub height: i64,
+    pub rotation: f64,
+    pub flip_horizontal: bool,
+    pub flip_vertical: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SmartArtDrawingNode {
     pub kind: SmartArtDrawingKind,
     pub model_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_transform: Option<SmartArtTextTransform>,
     /// Canonical standalone XML. Group children are represented separately.
     pub source_xml: String,
     pub children: Vec<SmartArtDrawingNode>,
+}
+
+fn text_transform(node: Node<'_, '_>) -> Option<SmartArtTextTransform> {
+    let offset = child(node, "off")?;
+    let extent = child(node, "ext")?;
+    let number = |node, name| attribute(node, name)?.parse::<i64>().ok();
+    let rotation = attribute(node, "rot")
+        .map(|value| value.parse::<i64>().ok())
+        .unwrap_or(Some(0))? as f64 / 60_000.0;
+    let flip = |name| match attribute(node, name) {
+        None | Some("0" | "false") => Some(false),
+        Some("1" | "true") => Some(true),
+        _ => None,
+    };
+    let frame = SmartArtTextTransform {
+        x: number(offset, "x")?,
+        y: number(offset, "y")?,
+        width: number(extent, "cx")?,
+        height: number(extent, "cy")?,
+        rotation,
+        flip_horizontal: flip("flipH")?,
+        flip_vertical: flip("flipV")?,
+    };
+    (frame.width > 0 && frame.height > 0).then_some(frame)
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -341,6 +379,7 @@ pub fn parse_smartart_drawing(xml: &str) -> Option<SmartArtDrawing> {
             output.push(SmartArtDrawingNode {
                 kind,
                 model_id: attribute(node, "modelId").map(str::to_owned),
+                text_transform: child(node, "txXfrm").and_then(text_transform),
                 source_xml: canonical_xml(node, grouped),
                 children: if grouped {
                     nodes(node, unsupported)

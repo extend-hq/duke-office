@@ -157,6 +157,9 @@ fn point_marker(
     size: f64,
 ) {
     let (x, y) = position;
+    let (override_symbol, override_size) = colors.point_marker_options(series, index);
+    let symbol = override_symbol.filter(|s| *s != "auto").unwrap_or(symbol);
+    let size = override_size.map_or(size, |v| (v * 4.0 / 3.0).clamp(1.0, 96.0));
     if colors.interactive {
         svg.push_str("<g");
         let kind = if symbol == "none" { "point" } else { "marker" };
@@ -168,14 +171,22 @@ fn point_marker(
         )
         .unwrap();
     }
+    let mut body = String::new();
     marker(
-        svg,
+        &mut body,
         symbol,
         x,
         y,
         size,
         &colors.marker(series, Some(index)),
         &colors.marker_outline(series, Some(index)),
+    );
+    colors.paint_marker(
+        svg,
+        series,
+        index,
+        [x - size / 2.0, y - size / 2.0, size, size],
+        &body,
     );
     colors.end_hit(svg);
 }

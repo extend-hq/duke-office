@@ -147,8 +147,9 @@ pub(super) fn render_picture(
     height: f64,
     context: &ParseContext<'_, impl Borrow<ParsedStyleSheet>>,
 ) -> Option<PicturePaint> {
-    let rendered =
-        rust_office_art::render_picture(xml, source, width, height, &drawing_context(context))?;
+    let context = drawing_context(context);
+    let rendered = rust_office_art::model3d::render_model3d_preview(xml, source, width, height, &context)
+        .or_else(|| rust_office_art::render_picture(xml, source, width, height, &context))?;
     Some(PicturePaint {
         src: super::util::svg_data_uri(&rendered.svg),
         paint_bounds: rendered.paint_bounds.map(|bounds| {

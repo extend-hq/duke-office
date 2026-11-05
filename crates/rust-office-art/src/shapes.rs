@@ -1,6 +1,10 @@
 use std::fmt::Write;
 
 use base64::Engine;
+use image::ImageEncoder;
+
+#[path = "pattern_data.rs"]
+mod pattern_data;
 
 use crate::geometry::{geometry_paths, PathFill};
 use crate::xml::{escape_xml_text, extract_direct_child_tag_ranges, get_attribute_ref};
@@ -21,6 +25,20 @@ fn child<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
         .into_iter()
         .find(|tag| tag.tag_name.rsplit(':').next() == Some(name))
         .map(|tag| &xml[tag.start..tag.end])
+}
+
+fn is_empty_element(xml: &str) -> bool {
+    use quick_xml::events::Event;
+    let mut reader = quick_xml::Reader::from_str(xml);
+    reader.config_mut().trim_text(true);
+    let empty = match reader.read_event() {
+        Ok(Event::Empty(tag)) => tag.attributes().next().is_none(),
+        Ok(Event::Start(tag)) if tag.attributes().next().is_none() => {
+            matches!(reader.read_event(), Ok(Event::End(end)) if end.name() == tag.name())
+        }
+        _ => false,
+    };
+    empty && matches!(reader.read_event(), Ok(Event::Eof))
 }
 
 fn local_name(xml: &str) -> Option<&str> {
@@ -156,6 +174,7 @@ fn bitmap_fill(
     Some(())
 }
 
+#[derive(Clone)]
 struct Paint {
     value: String,
     opacity: f64,
@@ -175,6 +194,7 @@ fn resolved_paint(xml: &str, mode: PathFill, context: &impl PictureContext) -> O
 
 fn gradient(
     xml: &str,
+    rectangular: bool,
     id: &str,
     width: f64,
     height: f64,
@@ -214,7 +234,11 @@ fn gradient(
         );
     }
     if let Some(path) = child(xml, "path") {
-        if get_attribute_ref(path, "path").unwrap_or("shape") != "circle" {
+        let kind = get_attribute_ref(path, "path").unwrap_or("shape");
+        if kind == "rect" || (kind == "shape" && rectangular) {
+            return rectangular_gradient(path, id, width, height, &colors, defs);
+        }
+        if kind != "circle" {
             return None;
         }
         let destination = child(path, "fillToRect").unwrap_or("");
@@ -222,17 +246,21 @@ fn gradient(
         let top = percentage(destination, "t", 0.0)?;
         let right = 1.0 - percentage(destination, "r", 0.0)?;
         let bottom = 1.0 - percentage(destination, "b", 0.0)?;
-        let cx = (left + right) / 2.0;
-        let cy = (top + bottom) / 2.0;
+        let cx = (left + right) * width / 2.0;
+        let cy = (top + bottom) * height / 2.0;
         if ![cx, cy]
             .into_iter()
-            .all(|value| value.is_finite() && value.abs() <= 100.0)
+            .all(|value| value.is_finite() && value.abs() <= 100_000_000.0)
         {
             return None;
         }
+        let radius = cx
+            .abs()
+            .max((width - cx).abs())
+            .hypot(cy.abs().max((height - cy).abs()));
         let _ = write!(
             defs,
-            r##"<radialGradient id="{id}" cx="{cx}" cy="{cy}" r="0.5" fx="{cx}" fy="{cy}" color-interpolation="sRGB">{stop_markup}</radialGradient>"##
+            r##"<radialGradient id="{id}" gradientUnits="userSpaceOnUse" cx="{cx}" cy="{cy}" r="{radius}" fx="{cx}" fy="{cy}" color-interpolation="sRGB">{stop_markup}</radialGradient>"##
         );
     } else {
         let linear = child(xml, "lin").unwrap_or("");
@@ -240,8 +268,8 @@ fn gradient(
         let mut dx = radians.cos();
         let mut dy = radians.sin();
         if !get_attribute_ref(linear, "scaled").is_some_and(|v| matches!(v, "0" | "false")) {
-            dx *= width;
-            dy *= height;
+            dx /= width.max(f64::EPSILON);
+            dy /= height.max(f64::EPSILON);
             let length = dx.hypot(dy);
             if length > 0.0 {
                 dx /= length;
@@ -264,6 +292,124 @@ fn gradient(
     })
 }
 
+fn rectangular_gradient(
+    path: &str,
+    id: &str,
+    width: f64,
+    height: f64,
+    stops: &[(f64, Paint)],
+    defs: &mut String,
+) -> Option<Paint> {
+    if width <= 0.0 || height <= 0.0 {
+        return None;
+    }
+    let target = child(path, "fillToRect").unwrap_or("");
+    let left = percentage(target, "l", 0.5)? * width;
+    let top = percentage(target, "t", 0.5)? * height;
+    let right = (1.0 - percentage(target, "r", 0.5)?) * width;
+    let bottom = (1.0 - percentage(target, "b", 0.5)?) * height;
+    if left < 0.0 || top < 0.0 || right > width || bottom > height || left > right || top > bottom {
+        return None;
+    }
+    let colors: Vec<_> = stops
+        .iter()
+        .map(|(position, paint)| Some((*position, rgba(paint)?)))
+        .collect::<Option<_>>()?;
+    let scale = (300.0_f64 / 96.0)
+        .min((4_194_304.0 / (width * height)).sqrt())
+        .min(8192.0 / width.max(height));
+    let pixel_width = (width * scale).ceil() as u32;
+    let pixel_height = (height * scale).ceil() as u32;
+    let count = pixel_width.checked_mul(pixel_height)?.checked_mul(4)? as usize;
+    if count > 17_000_000 || pixel_width == 0 || pixel_height == 0 {
+        return None;
+    }
+    let distance = |point: f64, first: f64, last: f64, extent: f64| {
+        if point < first && first > 0.0 {
+            (first - point) / first
+        } else if point > last && last < extent {
+            (point - last) / (extent - last)
+        } else {
+            0.0
+        }
+    };
+    let mut pixels = Vec::with_capacity(count);
+    for y in 0..pixel_height {
+        for x in 0..pixel_width {
+            let x = (f64::from(x) + 0.5) / scale;
+            let y = (f64::from(y) + 0.5) / scale;
+            let position = distance(x, left, right, width)
+                .max(distance(y, top, bottom, height))
+                .clamp(0.0, 1.0);
+            let end = colors.partition_point(|(offset, _)| *offset <= position);
+            let (start, end) = if end == 0 {
+                (colors[0], colors[0])
+            } else if end == colors.len() {
+                (colors[end - 1], colors[end - 1])
+            } else {
+                (colors[end - 1], colors[end])
+            };
+            let ratio = if end.0 > start.0 {
+                (position - start.0) / (end.0 - start.0)
+            } else {
+                0.0
+            };
+            pixels.extend(mix_color(start.1, end.1, ratio));
+        }
+    }
+    let source = png_source(&pixels, pixel_width, pixel_height)?;
+    let image_width = f64::from(pixel_width) / scale;
+    let image_height = f64::from(pixel_height) / scale;
+    let _ = write!(
+        defs,
+        r##"<pattern id="{id}" width="{width}" height="{height}" patternUnits="userSpaceOnUse"><image width="{image_width}" height="{image_height}" xlink:href="{source}" preserveAspectRatio="none"/></pattern>"##
+    );
+    Some(Paint {
+        value: format!("url(#{id})"),
+        opacity: 1.0,
+    })
+}
+
+fn rgba(paint: &Paint) -> Option<[f64; 4]> {
+    let value = paint.value.strip_prefix('#')?;
+    if value.len() != 6 {
+        return None;
+    }
+    Some([
+        f64::from(u8::from_str_radix(&value[0..2], 16).ok()?),
+        f64::from(u8::from_str_radix(&value[2..4], 16).ok()?),
+        f64::from(u8::from_str_radix(&value[4..6], 16).ok()?),
+        paint.opacity,
+    ])
+}
+
+fn png_source(pixels: &[u8], width: u32, height: u32) -> Option<String> {
+    let mut png = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut png)
+        .write_image(pixels, width, height, image::ExtendedColorType::Rgba8)
+        .ok()?;
+    Some(format!(
+        "data:image/png;base64,{}",
+        base64::engine::general_purpose::STANDARD.encode(png)
+    ))
+}
+
+fn mix_color(start: [f64; 4], end: [f64; 4], ratio: f64) -> [u8; 4] {
+    let alpha = start[3] * (1.0 - ratio) + end[3] * ratio;
+    let mut result = [0u8; 4];
+    if alpha > 0.0 {
+        for channel in 0..3 {
+            result[channel] = ((start[channel] * start[3] * (1.0 - ratio)
+                + end[channel] * end[3] * ratio)
+                / alpha)
+                .round()
+                .clamp(0.0, 255.0) as u8;
+        }
+    }
+    result[3] = (alpha * 255.0).round().clamp(0.0, 255.0) as u8;
+    result
+}
+
 fn pattern(
     xml: &str,
     id: &str,
@@ -271,123 +417,21 @@ fn pattern(
     context: &impl PictureContext,
     defs: &mut String,
 ) -> Option<Paint> {
-    let foreground = resolved_paint(child(xml, "fgClr")?, mode, context)?;
-    let background = resolved_paint(child(xml, "bgClr")?, mode, context)?;
-    let preset = get_attribute_ref(xml, "prst")?;
-    let mut ink = String::new();
-    let mut size = 8.0;
-    if let Some(percent) = preset
-        .strip_prefix("pct")
-        .and_then(|value| value.parse::<u32>().ok())
-    {
-        if ![5, 10, 20, 25, 30, 40, 50, 60, 70, 75, 80, 90].contains(&percent) {
-            return None;
-        }
-        let bayer = [
-            [0, 32, 8, 40, 2, 34, 10, 42],
-            [48, 16, 56, 24, 50, 18, 58, 26],
-            [12, 44, 4, 36, 14, 46, 6, 38],
-            [60, 28, 52, 20, 62, 30, 54, 22],
-            [3, 35, 11, 43, 1, 33, 9, 41],
-            [51, 19, 59, 27, 49, 17, 57, 25],
-            [15, 47, 7, 39, 13, 45, 5, 37],
-            [63, 31, 55, 23, 61, 29, 53, 21],
-        ];
-        for (y, row) in bayer.iter().enumerate() {
-            for (x, value) in row.iter().enumerate() {
-                if value * 100 < percent * 64 {
-                    let _ = write!(ink, r##"<rect x="{x}" y="{y}" width="1" height="1"/>"##);
-                }
-            }
-        }
-    } else {
-        let (path, weight) = match preset {
-            "horz" => ("M0 0H8", 1.0),
-            "vert" => ("M0 0V8", 1.0),
-            "ltHorz" => {
-                size = 4.0;
-                ("M0 0H8", 1.0)
-            }
-            "ltVert" => {
-                size = 4.0;
-                ("M0 0V8", 1.0)
-            }
-            "dkHorz" => {
-                size = 4.0;
-                ("M0 0H8", 2.0)
-            }
-            "dkVert" => {
-                size = 4.0;
-                ("M0 0V8", 2.0)
-            }
-            "narHorz" => {
-                size = 2.0;
-                ("M0 0H8", 1.0)
-            }
-            "narVert" => {
-                size = 2.0;
-                ("M0 0V8", 1.0)
-            }
-            "cross" => ("M0 0H8 M0 0V8", 1.0),
-            "dnDiag" => ("M-1 -1L9 9 M-1 7L1 9 M7 -1L9 1", 1.0),
-            "upDiag" => ("M-1 9L9 -1 M-1 1L1 -1 M7 9L9 7", 1.0),
-            "ltDnDiag" => {
-                size = 4.0;
-                ("M-1 -1L9 9 M-1 3L5 9 M3 -1L9 5", 1.0)
-            }
-            "ltUpDiag" => {
-                size = 4.0;
-                ("M-1 5L5 -1 M-1 1L1 -1 M3 5L5 3", 1.0)
-            }
-            "dkDnDiag" | "wdDnDiag" => ("M-2 -2L10 10 M-2 6L2 10 M6 -2L10 2", 3.0),
-            "dkUpDiag" | "wdUpDiag" => ("M-2 10L10 -2 M-2 2L2 -2 M6 10L10 6", 3.0),
-            "diagCross" => ("M-1 -1L9 9 M-1 9L9 -1", 1.0),
-            "dashHorz" => ("M0 0H4 M4 4H8", 1.0),
-            "dashVert" => ("M0 0V4 M4 4V8", 1.0),
-            "dashDnDiag" => ("M0 0L3 3 M4 4L7 7", 1.0),
-            "dashUpDiag" => ("M0 7L3 4 M4 3L7 0", 1.0),
-            "smGrid" => {
-                size = 4.0;
-                ("M0 0H8 M0 0V8", 1.0)
-            }
-            "lgGrid" => ("M0 0H8 M0 0V8", 1.0),
-            "dotGrid" => {
-                ink.push_str("<rect width=\"1\" height=\"1\"/>");
-                ("", 0.0)
-            }
-            "smCheck" => {
-                size = 4.0;
-                ink.push_str("<path d=\"M0 0H2V2H0Z M2 2H4V4H2Z\"/>");
-                ("", 0.0)
-            }
-            "lgCheck" => {
-                ink.push_str("<path d=\"M0 0H4V4H0Z M4 4H8V8H4Z\"/>");
-                ("", 0.0)
-            }
-            "horzBrick" => ("M0 0H8 M0 4H8 M0 0V4 M4 4V8", 1.0),
-            "diagBrick" => ("M-1 9L9 -1 M-1 1L7 9 M3 -1L5 1", 1.0),
-            "openDmnd" | "solidDmnd" => ("M4 0L8 4L4 8L0 4Z", 1.0),
-            "zigZag" => ("M0 2L2 0L6 4L8 2 M0 6L2 4L6 8L8 6", 1.0),
-            "wave" => ("M0 2Q2 -1 4 2T8 2 M0 6Q2 3 4 6T8 6", 1.0),
-            _ => return None,
-        };
-        if !path.is_empty() {
-            let _ = write!(
-                ink,
-                r##"<path d="{path}" fill="{}" stroke="{}" stroke-width="{weight}"/>"##,
-                if preset == "solidDmnd" {
-                    foreground.value.as_str()
-                } else {
-                    "none"
-                },
-                foreground.value
-            );
+    let foreground = rgba(&resolved_paint(child(xml, "fgClr")?, mode, context)?)?;
+    let background = rgba(&resolved_paint(child(xml, "bgClr")?, mode, context)?)?;
+    let coverage = pattern_data::coverage(get_attribute_ref(xml, "prst")?)?;
+    let mut pixels = Vec::with_capacity(64 * 64 * 4);
+    for y in 0..64 {
+        for x in 0..64 {
+            let amount = f64::from(coverage[(y / 8) * 8 + x / 8]) / 2.0;
+            pixels.extend(mix_color(background, foreground, amount));
         }
     }
+    let source = png_source(&pixels, 64, 64)?;
+    let period = 32.0 / 3.0;
     let _ = write!(
         defs,
-        r##"<pattern id="{id}" width="{size}" height="{size}" patternUnits="userSpaceOnUse"><rect width="{size}" height="{size}" fill="{}" fill-opacity="{}"/><g fill="{}" opacity="{}">{ink}</g></pattern>"##,
-        background.value, background.opacity, foreground.value, foreground.opacity
+        r##"<pattern id="{id}" x="0" y="0" width="{period}" height="{period}" patternUnits="userSpaceOnUse" data-office-art-pattern-origin="page" data-office-art-pattern-period="{period}"><image width="{period}" height="{period}" preserveAspectRatio="none" xlink:href="{source}"/></pattern>"##
     );
     Some(Paint {
         value: format!("url(#{id})"),
@@ -397,6 +441,7 @@ fn pattern(
 
 fn paint(
     xml: Option<&str>,
+    rectangular: bool,
     id: &str,
     width: f64,
     height: f64,
@@ -417,7 +462,7 @@ fn paint(
             opacity: 1.0,
         }),
         "solidFill" => resolved_paint(xml, mode, context),
-        "gradFill" => gradient(xml, id, width, height, mode, context, defs),
+        "gradFill" => gradient(xml, rectangular, id, width, height, mode, context, defs),
         "pattFill" => pattern(xml, id, mode, context, defs),
         _ => None,
     }
@@ -428,6 +473,8 @@ struct Stroke {
     width: f64,
     margin: f64,
     inset: bool,
+    compound: &'static [f64],
+    mask_attributes: String,
 }
 
 fn marker(xml: &str, id: &str, paint: &Paint, defs: &mut String) -> Option<f64> {
@@ -484,6 +531,7 @@ fn marker(xml: &str, id: &str, paint: &Paint, defs: &mut String) -> Option<f64> 
 
 fn stroke(
     xml: Option<&str>,
+    rectangular: bool,
     width: f64,
     height: f64,
     context: &impl PictureContext,
@@ -495,12 +543,22 @@ fn stroke(
             width: 0.0,
             margin: 0.0,
             inset: false,
+            compound: &[],
+            mask_attributes: String::new(),
         });
     };
     let line_width = number(xml, "w", 12700.0)?.max(0.0) / 9525.0;
-    if line_width > 100_000.0 || get_attribute_ref(xml, "cmpd").is_some_and(|v| v != "sng") {
+    if line_width > 100_000.0 {
         return None;
     }
+    let compound: &'static [f64] = match get_attribute_ref(xml, "cmpd").unwrap_or("sng") {
+        "sng" => &[],
+        "dbl" => &[1.0, 1.0, 1.0],
+        "thickThin" => &[3.0, 1.0, 1.0],
+        "thinThick" => &[1.0, 1.0, 3.0],
+        "tri" => &[1.0, 1.0, 2.0, 1.0, 1.0],
+        _ => return None,
+    };
     let inset = match get_attribute_ref(xml, "algn").unwrap_or("ctr") {
         "ctr" => false,
         "in" => true,
@@ -509,6 +567,7 @@ fn stroke(
     let default_fill = "<a:solidFill><a:srgbClr val=\"000000\"/></a:solidFill>";
     let color = paint(
         Some(fill_node(xml).unwrap_or(default_fill)),
+        rectangular,
         "shape-stroke",
         width,
         height,
@@ -572,6 +631,11 @@ fn stroke(
     };
     for (name, position) in [("headEnd", "start"), ("tailEnd", "end")] {
         if let Some(endpoint) = child(xml, name) {
+            if !compound.is_empty()
+                && get_attribute_ref(endpoint, "type").is_some_and(|value| value != "none")
+            {
+                return None;
+            }
             let id = format!("shape-marker-{position}");
             let extent = marker(endpoint, &id, &color, defs)?;
             if extent > 0.0 {
@@ -588,7 +652,75 @@ fn stroke(
         width: line_width,
         margin,
         inset,
+        compound,
+        mask_attributes: format!(
+            r##"stroke-linecap="{cap}" stroke-linejoin="{join}" stroke-miterlimit="{limit}""##
+        ),
     })
+}
+
+fn compound_outline(
+    path: &str,
+    stroke: &Stroke,
+    index: usize,
+    bounds: [f64; 4],
+    defs: &mut String,
+    body: &mut String,
+) {
+    let padding = stroke.margin.max(stroke.width * 2.0) + 1.0;
+    let left = bounds[0] - padding;
+    let top = bounds[1] - padding;
+    let right = bounds[2] + padding;
+    let bottom = bounds[3] + padding;
+    let mask_width = right - left;
+    let mask_height = bottom - top;
+    let inside = format!("shape-compound-inside-{index}");
+    let outside = format!("shape-compound-outside-{index}");
+    let _ = write!(
+        defs,
+        r##"<clipPath id="{inside}"><path d="{path}"/></clipPath><clipPath id="{outside}"><path clip-rule="evenodd" d="M{left} {top}H{right}V{bottom}H{left}Z {path}"/></clipPath>"##
+    );
+    let total: f64 = stroke.compound.iter().sum();
+    let mut position = if stroke.inset {
+        0.0
+    } else {
+        -stroke.width / 2.0
+    };
+    for (band, weight) in stroke.compound.iter().enumerate() {
+        let end = position + weight / total * stroke.width;
+        if band % 2 == 0 {
+            for (side, inner, outer, clip) in [
+                ("outer", (-end).max(0.0), (-position).max(0.0), &outside),
+                ("inner", position.max(0.0), end.max(0.0), &inside),
+            ] {
+                if outer <= inner {
+                    continue;
+                }
+                let id = format!("shape-compound-{index}-{band}-{side}");
+                let _ = write!(
+                    defs,
+                    r##"<mask id="{id}" maskUnits="userSpaceOnUse" x="{left}" y="{top}" width="{mask_width}" height="{mask_height}" style="mask-type:luminance"><g clip-path="url(#{clip})"><path d="{path}" fill="none" stroke="white" stroke-width="{}" {}/>"##,
+                    outer * 2.0,
+                    stroke.mask_attributes
+                );
+                if inner > 0.0 {
+                    let _ = write!(
+                        defs,
+                        r##"<path d="{path}" fill="none" stroke="black" stroke-width="{}" {}/>"##,
+                        inner * 2.0,
+                        stroke.mask_attributes
+                    );
+                }
+                defs.push_str("</g></mask>");
+                let _ = write!(
+                    body,
+                    r##"<path d="{path}" fill="none" {} mask="url(#{id})"/>"##,
+                    stroke.attributes
+                );
+            }
+        }
+        position = end;
+    }
 }
 
 pub fn render_shape(
@@ -609,9 +741,8 @@ pub fn render_shape(
     {
         return None;
     }
-    if ["scene3d", "sp3d", "effectDag"]
-        .into_iter()
-        .any(|name| child(properties_xml, name).is_some())
+    if child(properties_xml, "scene3d").is_some()
+        || child(properties_xml, "sp3d").is_some_and(|xml| !is_empty_element(xml))
     {
         return None;
     }
@@ -633,24 +764,29 @@ pub fn render_shape(
     let merged_line = child(properties_xml, "ln")
         .map(|line| merge_line(line, inherited_line.as_deref().unwrap_or("")));
     let line = merged_line.as_deref().or(inherited_line.as_deref());
-    let effect_reference = if child(properties_xml, "effectLst").is_none() {
+    let explicit_effects =
+        child(properties_xml, "effectLst").or_else(|| child(properties_xml, "effectDag"));
+    let effect_reference = if explicit_effects.is_none() {
         referenced_style(style_xml, StyleReferenceKind::Effect, context)?
     } else {
         None
     };
-    let effects = child(properties_xml, "effectLst")
+    let effects = explicit_effects
         .or(effect_reference.as_deref())
         .unwrap_or("");
-    if local_name(effects) == Some("effectDag") {
-        return None;
-    }
     let effective_properties = format!("<a:spPr>{effects}</a:spPr>");
     let mut defs = String::new();
-    let stroke = stroke(line, width, height, context, &mut defs)?;
+    let rectangular = child(properties_xml, "prstGeom")
+        .is_some_and(|xml| get_attribute_ref(xml, "prst") == Some("rect"));
+    let stroke = stroke(line, rectangular, width, height, context, &mut defs)?;
+    if !stroke.compound.is_empty() && paths.iter().any(|path| path.stroke && !path.closed) {
+        return None;
+    }
     let mut body = String::new();
     let mut silhouette = String::new();
     let mut outside = 0.0f64;
     let mut bitmap_ready = false;
+    let mut fill_cache: Vec<(PathFill, Paint)> = Vec::new();
     for (index, path) in paths.iter().enumerate() {
         if !path
             .bounds
@@ -692,15 +828,23 @@ pub fn render_shape(
                 r##"<g clip-path="url(#{clip})"{filter}><use xlink:href="#shape-bitmap"/></g>"##
             );
         } else {
-            let fill = paint(
-                fill,
-                &format!("shape-fill-{index}"),
-                width,
-                height,
-                path.fill,
-                context,
-                &mut defs,
-            )?;
+            let fill =
+                if let Some((_, cached)) = fill_cache.iter().find(|(mode, _)| *mode == path.fill) {
+                    cached.clone()
+                } else {
+                    let rendered = paint(
+                        fill,
+                        rectangular,
+                        &format!("shape-fill-{index}"),
+                        width,
+                        height,
+                        path.fill,
+                        context,
+                        &mut defs,
+                    )?;
+                    fill_cache.push((path.fill, rendered.clone()));
+                    rendered
+                };
             if fill.value != "none" {
                 let _ = write!(
                     body,
@@ -710,6 +854,12 @@ pub fn render_shape(
             }
         }
         if path.stroke && stroke.width > 0.0 {
+            if !stroke.compound.is_empty() {
+                compound_outline(&path.d, &stroke, index, path.bounds, &mut defs, &mut body);
+                silhouette.push_str(&path.d);
+                silhouette.push(' ');
+                continue;
+            }
             let clip = if stroke.inset && path.closed {
                 let id = format!("shape-outline-{index}");
                 let _ = write!(
@@ -782,6 +932,10 @@ pub fn render_shape(
     if !bounds.valid() {
         return None;
     }
+    bounds.left = bounds.left.floor();
+    bounds.top = bounds.top.floor();
+    bounds.right = bounds.right.ceil();
+    bounds.bottom = bounds.bottom.ceil();
     let paint_width = bounds.right - bounds.left;
     let paint_height = bounds.bottom - bounds.top;
     let expanded = (bounds.left.abs()

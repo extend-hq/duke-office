@@ -32,10 +32,21 @@ let json = serde_json::to_string(&blocks)?;
 
 `parse_document_blocks(&bytes)` combines these steps. `cargo run --example parse_blocks -- input.docx` writes the block JSON to standard output.
 
+Embedded 3D model output is opt-in:
+
+```rust
+let model = rust_docx::build_doc_model_with_options(
+    &package,
+    &rust_docx::ParseOptions { include_3d_models: true },
+);
+```
+
+Image nodes then include `model3d` with the original model bytes in `asset.data`, its part name and content type, preview relationship metadata, and source XML preserving camera, transform and lighting settings. Existing image fields continue to hold the saved 2D preview. The option defaults to `false`; `build_doc_model` omits `model3d`. Original package assets remain preserved independently for export. No mesh decoding or interactive 3D rendering is performed. For structured output, pass `ExtractDocumentBlocksOptions { include_3d_models: true, ..Default::default() }` to `parse_document_blocks_with_options`; figure blocks then expose `details.model3d`. Extracting from an existing model requires both importing the model with the flag enabled and enabling it in extraction options.
+
 Word spans are optional:
 
 ```rust
-let options = rust_docx::ExtractDocumentBlocksOptions { include_words: true };
+let options = rust_docx::ExtractDocumentBlocksOptions { include_words: true, ..Default::default() };
 let blocks = rust_docx::parse_document_blocks_with_options(&bytes, options)?;
 ```
 

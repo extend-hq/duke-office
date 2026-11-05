@@ -127,6 +127,8 @@ pub enum SlideNode {
         autofit: Option<TextAutofit>,
         #[serde(skip_serializing_if = "Option::is_none")]
         text_rotation: Option<f64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text_transform: Option<Transform>,
         #[serde(skip_serializing_if = "Option::is_none")]
         vertical_text: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -145,6 +147,8 @@ pub enum SlideNode {
         space_first_last_paragraph: Option<bool>,
     },
     Image {
+        #[serde(default, rename = "model3d", skip_serializing_if = "Option::is_none")]
+        model_3d: Option<Box<rust_office_art::model3d::Model3D>>,
         id: String,
         name: String,
         transform: Transform,

@@ -8,11 +8,13 @@ mod context;
 mod document;
 mod images;
 mod image_properties;
+mod ink;
 mod picture;
 mod vml_picture;
 pub(crate) use images::vml_pixels;
 mod math;
 mod metadata;
+mod model3d;
 mod namespaces;
 mod numbering;
 mod paragraph;
@@ -26,11 +28,12 @@ mod style;
 mod styles;
 mod symbols;
 mod table;
+pub(crate) mod text_effects;
 mod util;
 pub(crate) use util::{append_base64, escape_xml_text, svg_data_uri};
 
 pub use body::extract_body_xml;
-pub use build::build_doc_model;
+pub use build::{build_doc_model, build_doc_model_with_options};
 pub use colors::{
     default_drawing_scheme_colors, normalize_hex_color, resolve_drawing_color_from_xml,
     ResolvedDrawingColor,

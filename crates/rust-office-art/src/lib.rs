@@ -9,13 +9,22 @@ use crate::xml::{
 
 use crate::xml::escape_xml_text;
 
+mod effects;
 mod geometry;
+pub mod model3d;
 mod raster;
 mod shapes;
 pub mod smartart;
 mod xml;
 
 pub use shapes::{render_shape, StyleReferenceKind};
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ParseOptions {
+    #[serde(rename = "include3dModels")]
+    pub include_3d_models: bool,
+}
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -60,6 +69,58 @@ pub trait PictureContext {
 
 pub fn normalize_raster(source: &str) -> Option<String> {
     raster::normalize(source)
+}
+
+/// Apply DrawingML effects to trusted, generated SVG in a local coordinate frame.
+/// The caller owns SVG validation, resource resolution and unique identifier scoping.
+pub fn render_effects(
+    properties_xml: &str,
+    svg_body: &str,
+    width: f64,
+    height: f64,
+    context: &impl PictureContext,
+) -> Option<RenderedPicture> {
+    if !width.is_finite()
+        || !height.is_finite()
+        || width <= 0.0
+        || height <= 0.0
+        || width > 1_000_000.0
+        || height > 1_000_000.0
+        || properties_xml.len() > 4 * 1024 * 1024
+        || svg_body.len() > 32 * 1024 * 1024
+    {
+        return None;
+    }
+    let mut defs = String::new();
+    let (body, bounds) = apply_shape_effects(
+        properties_xml,
+        svg_body,
+        "",
+        width,
+        height,
+        0.0,
+        Matrix([1.0, 0.0, 0.0, 1.0, 0.0, 0.0]),
+        context,
+        &mut defs,
+        true,
+    )?;
+    let paint_width = bounds.right - bounds.left;
+    let paint_height = bounds.bottom - bounds.top;
+    let svg = format!(
+        r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{paint_width}" height="{paint_height}" viewBox="{} {} {paint_width} {paint_height}"><defs>{defs}</defs>{body}</svg>"##,
+        bounds.left, bounds.top,
+    );
+    Some(RenderedPicture {
+        svg,
+        paint_bounds: Some(PaintBounds {
+            x_px: bounds.left,
+            y_px: bounds.top,
+            width_px: paint_width,
+            height_px: paint_height,
+            layout_width_px: width,
+            layout_height_px: height,
+        }),
+    })
 }
 
 fn resolve_drawing_color_from_xml(
@@ -687,6 +748,15 @@ fn apply_shape_effects(
     let local = Bounds::rect(width, height).expanded(margin);
     let mut source_bounds = local;
     let mut source = body.to_string();
+    if let Some(graph) = direct_child_tag(properties, "a:effectDag") {
+        let filter = effects::render(graph, colors)?;
+        let _ = write!(
+            defs,
+            r##"<filter id="picture-effect-tree" filterUnits="userSpaceOnUse" {} color-interpolation-filters="sRGB">{filter}</filter>"##,
+            source_bounds.attributes()
+        );
+        source = format!(r##"<g filter="url(#picture-effect-tree)">{source}</g>"##);
+    }
     let list = direct_child_tag(properties, "a:effectLst").unwrap_or("");
     let children = extract_direct_child_tag_ranges(list);
     for effect in &children {
@@ -799,7 +869,7 @@ fn apply_shape_effects(
                     );
                     let _ = write!(
                         underlay,
-                        r##"<g mask="url(#{id}-mask)" filter="url(#{id})"><use xlink:href="#picture-body" transform="{}"/></g>"##,
+                        r##"<g data-office-art-overflow="true" mask="url(#{id}-mask)" filter="url(#{id})"><use xlink:href="#picture-body" transform="{}"/></g>"##,
                         transformed.markup()
                     );
                 }
@@ -833,7 +903,7 @@ fn apply_shape_effects(
     }
     Some((
         format!(
-            r##"{underlay}<use xlink:href="#picture-body" transform="{}"/>{overlay}"##,
+            r##"<g data-office-art-effect="true" pointer-events="none">{underlay}</g><g transform="{}">{source}</g><g data-office-art-effect="true" pointer-events="none">{overlay}</g>"##,
             matrix.markup()
         ),
         bounds,
@@ -1035,8 +1105,7 @@ pub fn render_picture(
         .next()?;
     let properties = direct_child_tag(picture, "pic:spPr").unwrap_or("");
     let fill = direct_child_tag(picture, "pic:blipFill")?;
-    if direct_child_tag(properties, "a:effectDag").is_some()
-        || direct_child_tag(properties, "a:scene3d").is_some()
+    if direct_child_tag(properties, "a:scene3d").is_some()
         || direct_child_tag(properties, "a:sp3d").is_some()
     {
         return None;
@@ -1084,6 +1153,7 @@ pub fn render_picture(
         && destination == [0.0; 4]
         && raster_source.is_none()
         && direct_child_tag(fill, "a:tile").is_none()
+        && direct_child_tag(properties, "a:effectDag").is_none()
         && direct_child_tag(properties, "a:effectLst")
             .is_none_or(|effects| extract_direct_child_tag_ranges(effects).is_empty())
     {

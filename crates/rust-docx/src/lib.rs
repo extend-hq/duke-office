@@ -21,7 +21,8 @@ pub use chart::{extract_chart_data, ChartCategory, ChartData, ChartPoint, ChartS
 pub use doc::{is_doc_format, parse_doc};
 pub use model::*;
 pub use package::*;
-pub use parse::build_doc_model;
+pub use parse::{build_doc_model, build_doc_model_with_options};
+pub use rust_office_art::ParseOptions;
 pub use review::{extract_document_review, DocumentReview, DocumentComment, CommentTarget};
 pub use revisions::{
     DocumentRevision, ReviewedDocument, RevisionKind, RevisionProperties, RevisionScope,
@@ -45,7 +46,12 @@ pub fn parse_document_blocks_with_options(
 ) -> Result<StructuredDocument, String> {
     let package = parse_document_bytes(bytes)?;
     Ok(extract_document_blocks_with_options(
-        &build_doc_model(&package),
+        &build_doc_model_with_options(
+            &package,
+            &ParseOptions {
+                include_3d_models: options.include_3d_models,
+            },
+        ),
         options,
     ))
 }
@@ -57,7 +63,12 @@ pub fn parse_document_blocks_with_revisions(
 ) -> Result<ReviewedDocument, String> {
     let package = parse_document_bytes(bytes)?;
     Ok(extract_document_blocks_with_revisions(
-        &build_doc_model(&package),
+        &build_doc_model_with_options(
+            &package,
+            &ParseOptions {
+                include_3d_models: options.include_3d_models,
+            },
+        ),
         options,
     ))
 }

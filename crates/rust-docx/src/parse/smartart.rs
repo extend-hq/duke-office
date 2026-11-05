@@ -1,7 +1,7 @@
 use std::{borrow::Borrow, cell::RefCell};
 
 use roxmltree::Node;
-use rust_office_art::smartart::{SmartArtData, SmartArtDrawingKind, SmartArtDrawingNode};
+use rust_office_art::smartart::{SmartArtDrawingKind, SmartArtDrawingNode};
 
 use super::context::{ParseContext, ParsedStyleSheet};
 use super::util::escape_xml_text;
@@ -32,12 +32,21 @@ fn wrapped(name: &str, node: Node<'_, '_>, xml: &str) -> String {
 
 fn text_box(
     xml: &str,
+    style_xml: &str,
     context: &ParseContext<'_, impl Borrow<ParsedStyleSheet>>,
 ) -> Option<String> {
     let wrapped_xml = format!(
-        r#"<root xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:dsp="http://schemas.microsoft.com/office/drawing/2008/diagram">{xml}</root>"#
+        r#"<root xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:dsp="http://schemas.microsoft.com/office/drawing/2008/diagram" xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape">{style_xml}{xml}</root>"#
     );
     let document = roxmltree::Document::parse(&wrapped_xml).ok()?;
+    let font_reference = document
+        .descendants()
+        .find(|node| node.is_element() && node.tag_name().name() == "fontRef");
+    let reference_family = match font_reference.and_then(|node| node.attribute("idx")) {
+        Some("major") => context.styles().theme_fonts.major_latin.as_deref(),
+        Some("minor") => context.styles().theme_fonts.minor_latin.as_deref(),
+        _ => None,
+    };
     let mut output = String::new();
     if let Some(body) = document
         .descendants()
@@ -68,7 +77,7 @@ fn text_box(
                 "r" | "fld" => {
                     output.push_str("<w:r><w:rPr>");
                     let direct_style = child(run, "rPr");
-                    let style = direct_style.or(defaults);
+                    let style = direct_style.or(defaults).or(font_reference);
                     if let Some(style) = style {
                         let attribute_value = |name| {
                             direct_style
@@ -93,6 +102,7 @@ fn text_box(
                         if let Some(font) = child(style, "latin")
                             .or_else(|| defaults.and_then(|node| child(node, "latin")))
                             .and_then(|node| node.attribute("typeface"))
+                            .or(reference_family)
                         {
                             let family = match font {
                                 "+mj-lt" => context
@@ -121,6 +131,14 @@ fn text_box(
                         )
                         .or_else(|| {
                             defaults.and_then(|node| {
+                                super::colors::resolve_drawing_color_from_xml(
+                                    Some(&wrapped_xml[node.range()]),
+                                    &context.styles().theme_colors,
+                                )
+                            })
+                        })
+                        .or_else(|| {
+                            font_reference.and_then(|node| {
                                 super::colors::resolve_drawing_color_from_xml(
                                     Some(&wrapped_xml[node.range()]),
                                     &context.styles().theme_colors,
@@ -156,7 +174,6 @@ fn text_box(
 
 fn word_node(
     node: &SmartArtDrawingNode,
-    data: &SmartArtData,
     context: &ParseContext<'_, impl Borrow<ParsedStyleSheet>>,
     remaining: &mut usize,
     depth: usize,
@@ -176,7 +193,7 @@ fn word_node(
                 .unwrap_or_default();
             let mut output = format!("<wpg:grpSp>{properties}");
             for nested in &node.children {
-                output.push_str(&word_node(nested, data, context, remaining, depth + 1)?);
+                output.push_str(&word_node(nested, context, remaining, depth + 1)?);
             }
             output.push_str("</wpg:grpSp>");
             Some(output)
@@ -192,26 +209,33 @@ fn word_node(
             Some(output)
         }
         SmartArtDrawingKind::Shape | SmartArtDrawingKind::Connector => {
-            if child(root, "txXfrm").is_some() {
-                context.push_warning("SmartArt independent text-frame transforms are preserved but not applied to text layout");
-            }
+            let text_transform = if let Some(transform) = node.text_transform.as_ref() {
+                format!(
+                    r#"<wps:txXfrm rot="{}" flipH="{}" flipV="{}"><a:off x="{}" y="{}"/><a:ext cx="{}" cy="{}"/></wps:txXfrm>"#,
+                    transform.rotation * 60000.0,
+                    u8::from(transform.flip_horizontal),
+                    u8::from(transform.flip_vertical),
+                    transform.x,
+                    transform.y,
+                    transform.width,
+                    transform.height
+                )
+            } else {
+                if child(root, "txXfrm").is_some() {
+                    context.push_warning("SmartArt text transform has incomplete or unsupported dimensions; text uses the shape frame");
+                }
+                String::new()
+            };
             let properties = wrapped("wps:spPr", child(root, "spPr")?, xml);
             let style = child(root, "style")
                 .map(|node| wrapped("wps:style", node, xml))
                 .unwrap_or_default();
-            let semantic_text = node
-                .model_id
-                .as_deref()
-                .and_then(|id| data.semantic_point(id))
-                .and_then(|point| point.text_body_xml.as_deref());
-            let saved_text = child(root, "txBody").map(|_| xml.as_str());
-            let text = saved_text
-                .filter(|xml| xml.contains(":t>"))
-                .or(semantic_text)
-                .or(saved_text)
-                .and_then(|xml| text_box(xml, context))
+            let text = child(root, "txBody")
+                .and_then(|_| text_box(xml, &style, context))
                 .unwrap_or_default();
-            Some(format!("<wps:wsp>{properties}{style}{text}</wps:wsp>"))
+            Some(format!(
+                "<wps:wsp>{properties}{style}{text_transform}{text}</wps:wsp>"
+            ))
         }
     }
 }
@@ -230,19 +254,23 @@ pub(super) fn render_diagram(
     let data =
         rust_office_art::smartart::parse_smartart_data(&context.parts.get(data_part)?.content)?;
     let related = super::relationships::parse_relationships_from_parts(context.parts, data_part);
-    let drawing_part = data
-        .drawing_relationship_id
-        .as_deref()
-        .and_then(|id| related.get(id))
-        .cloned()
-        .or_else(|| {
-            crate::package::relationship_target_from_parts(
-                context.parts,
-                data_part,
-                "diagramDrawing",
-            )
-        });
-    if let Some(drawing_part) = drawing_part {
+    let drawing_id = data.drawing_relationship_id.as_deref();
+    let mut drawing_parts = Vec::new();
+    for candidate in [
+        drawing_id.and_then(|id| related.get(id)).cloned(),
+        drawing_id
+            .and_then(|id| context.relationships.get(id))
+            .cloned(),
+        crate::package::relationship_target_from_parts(context.parts, data_part, "diagramDrawing"),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if !drawing_parts.contains(&candidate) {
+            drawing_parts.push(candidate);
+        }
+    }
+    for drawing_part in drawing_parts {
         if let Some(drawing) = context
             .parts
             .get(&drawing_part)
@@ -259,18 +287,31 @@ pub(super) fn render_diagram(
                 style_sheet: context.styles(),
                 warnings: RefCell::new(Vec::new()),
             };
+            let (width_emu, height_emu) = crate::xml::extract_balanced_tag_slices(run, "wp:extent")
+                .into_iter()
+                .find_map(|extent| {
+                    let width = crate::xml::parse_integer_attribute(extent, "cx")?;
+                    let height = crate::xml::parse_integer_attribute(extent, "cy")?;
+                    (width > 0 && height > 0).then_some((width, height))
+                })
+                .unwrap_or_else(|| {
+                    (
+                        (width * 9525.0).round() as i64,
+                        (height * 9525.0).round() as i64,
+                    )
+                });
             let properties = drawing.group_properties_xml.as_deref().and_then(|xml| {
                 let document = roxmltree::Document::parse(xml).ok()?;
                 let transform = child(document.root_element(), "xfrm")?;
                 child(transform, "chOff")?;
                 child(transform, "chExt")?;
                 Some(wrapped("wpg:grpSpPr", document.root_element(), xml))
-            }).unwrap_or_else(|| format!(r#"<wpg:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{}" cy="{}"/><a:chOff x="0" y="0"/><a:chExt cx="{}" cy="{}"/></a:xfrm></wpg:grpSpPr>"#, width * 9525.0, height * 9525.0, width * 9525.0, height * 9525.0));
+            }).unwrap_or_else(|| format!(r#"<wpg:grpSpPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{}" cy="{}"/><a:chOff x="0" y="0"/><a:chExt cx="{}" cy="{}"/></a:xfrm></wpg:grpSpPr>"#, width_emu, height_emu, width_emu, height_emu));
             let mut remaining = 2048;
             let nodes = drawing
                 .nodes
                 .iter()
-                .map(|node| word_node(node, &data, &child_context, &mut remaining, 0))
+                .map(|node| word_node(node, &child_context, &mut remaining, 0))
                 .collect::<Option<Vec<_>>>();
             if let Some(nodes) = nodes {
                 let group = format!("<wpg:wgp>{properties}{}</wpg:wgp>", nodes.join(""));

@@ -26,6 +26,8 @@ pub struct ParsedTextBoxImage {
 
 #[derive(Clone, Debug)]
 pub struct ParsedTextBoxLayout {
+    pub auto_fit_no_wrap: bool,
+    pub wrap_text: bool,
     pub padding_left_px: Option<f64>,
     pub padding_top_px: Option<f64>,
     pub padding_right_px: Option<f64>,
@@ -53,9 +55,7 @@ pub fn parse_text_box_paragraphs(
     let mut resolved = Vec::new();
     let mut has_visible_text = false;
     for paragraph_xml in paragraphs {
-        let paragraph_text = super::paragraph::parse_run_text(&paragraph_xml)
-            .trim_end_matches('\n')
-            .to_string();
+        let paragraph_text = super::paragraph::parse_run_text(&paragraph_xml);
         let images = super::images::parse_run_images(&paragraph_xml, context)
             .into_iter()
             .filter_map(|image| {
@@ -98,12 +98,15 @@ pub fn parse_text_box_paragraphs(
                 .next()
                 .or_else(|| regex_tag(&paragraph_properties_xml, r"(?i)<w:rPr\b[^>]*/?>"))
                 .unwrap_or_default();
-        let style = super::util::merge_text_styles(&[
+        let mut style = super::util::merge_text_styles(&[
             context.styles().default_run_style.clone(),
             paragraph_style.and_then(|s| s.run_style.clone()),
             parse_text_style_from_xml(&paragraph_run_properties_xml, &context.styles().theme_fonts),
             parse_text_style_from_xml(&run_properties_xml, &context.styles().theme_fonts),
         ]);
+        if let Some(style) = &mut style {
+            super::text_effects::resolve(style, &context.styles().theme_colors);
+        }
         let align = super::style::parse_paragraph_align_from_xml(&paragraph_properties_xml)
             .or_else(|| paragraph_style.and_then(|s| s.align));
         resolved.push(ParsedTextBoxParagraph {
@@ -135,6 +138,9 @@ pub fn parse_text_box_layout(run_xml: &str) -> Option<ParsedTextBoxLayout> {
             _ => Some("top".to_string()),
         };
         return Some(ParsedTextBoxLayout {
+            auto_fit_no_wrap: get_attribute(&body_pr_xml, "wrap").as_deref() == Some("none")
+                && body_pr_xml.contains("<a:spAutoFit"),
+            wrap_text: matches!(get_attribute(&body_pr_xml, "wrap").as_deref(), None | Some("square")),
             padding_left_px: emu_to_pixels(get_attribute(&body_pr_xml, "lIns").as_deref()),
             padding_top_px: emu_to_pixels(get_attribute(&body_pr_xml, "tIns").as_deref()),
             padding_right_px: emu_to_pixels(get_attribute(&body_pr_xml, "rIns").as_deref()),
@@ -148,6 +154,8 @@ pub fn parse_text_box_layout(run_xml: &str) -> Option<ParsedTextBoxLayout> {
     let inset = get_attribute(&text_box_tag, "inset")?;
     let mut values = inset.split(',').map(str::trim);
     Some(ParsedTextBoxLayout {
+        auto_fit_no_wrap: false,
+        wrap_text: false,
         padding_left_px: super::images::css_length_to_pixels(values.next()),
         padding_top_px: super::images::css_length_to_pixels(values.next()),
         padding_right_px: super::images::css_length_to_pixels(values.next()),
@@ -174,6 +182,64 @@ pub(crate) fn render_bounded_text_box_svg(
     render_text_box_svg_impl(paragraphs, Some(width_px), Some(height_px), layout, true)
 }
 
+fn text_box_line_slices(text: &str, wrap_width: Option<f64>, font_size_px: f64) -> Vec<&str> {
+    let mut lines = Vec::new();
+    let break_space = |ch: char| ch.is_whitespace() && !matches!(ch, '\u{a0}' | '\u{202f}');
+    for explicit_line in text.split('\n') {
+        if lines.len() >= 4096 {
+            return vec![text];
+        }
+        let explicit_line = explicit_line.strip_suffix('\r').unwrap_or(explicit_line);
+        let Some(wrap_width) = wrap_width else {
+            lines.push(explicit_line);
+            continue;
+        };
+        let mut start = 0;
+        loop {
+            if lines.len() >= 4096 {
+                return vec![text];
+            }
+            let remaining = &explicit_line[start..];
+            let mut width = 0.0;
+            let mut last_break = None;
+            let mut split = None;
+            for (offset, ch) in remaining.char_indices() {
+                let mut encoded = [0; 4];
+                let advance = estimate_text_width_px(ch.encode_utf8(&mut encoded), font_size_px);
+                if offset > 0 && width + advance > wrap_width {
+                    split = Some(last_break.unwrap_or(offset));
+                    break;
+                }
+                width += advance;
+                if break_space(ch) {
+                    last_break = Some(offset + ch.len_utf8());
+                }
+            }
+            if let Some(end) = split {
+                lines.push(remaining[..end].trim_end_matches(break_space));
+                start += end;
+                while let Some(ch) = explicit_line[start..].chars().next().filter(|ch| break_space(*ch)) {
+                    start += ch.len_utf8();
+                }
+                if start >= explicit_line.len() {
+                    break;
+                }
+            } else {
+                lines.push(remaining);
+                break;
+            }
+        }
+    }
+    lines
+}
+
+struct TextBoxRenderLine<'a> {
+    text: &'a str,
+    style: &'a Option<crate::model::TextStyle>,
+    align: Option<ParagraphAlignment>,
+    images: &'a [ParsedTextBoxImage],
+}
+
 fn render_text_box_svg_impl(
     paragraphs: &[ParsedTextBoxParagraph],
     width_px: Option<f64>,
@@ -186,6 +252,32 @@ fn render_text_box_svg_impl(
         if bounded { 1 } else { 80 },
         2400,
     ) as f64;
+    let horizontal_inset = ((layout
+        .and_then(|l| l.padding_left_px)
+        .unwrap_or(safe_width * 0.03))
+    .round() as i64)
+        .max(if bounded { 0 } else { 8 }) as f64;
+    let right_inset = ((layout
+        .and_then(|l| l.padding_right_px)
+        .unwrap_or(horizontal_inset))
+    .round() as i64)
+        .max(if bounded { 0 } else { 8 }) as f64;
+    let wrap_text = bounded && layout.is_some_and(|layout| layout.wrap_text);
+    let available_text_width = (safe_width - horizontal_inset - right_inset).max(1.0);
+    let render_lines: Vec<TextBoxRenderLine<'_>> = paragraphs.iter().flat_map(|paragraph| {
+        let font_size_px = (paragraph.style.as_ref().and_then(|style| style.font_size_pt)
+            .unwrap_or(12.0) * 96.0 / 72.0).round().max(10.0);
+        let text_lines = if bounded && paragraph.images.is_empty() {
+            text_box_line_slices(&paragraph.text, wrap_text.then_some(available_text_width), font_size_px)
+        } else {
+            vec![paragraph.text.as_str()]
+        };
+        text_lines.into_iter().enumerate().map(move |(index, text)| TextBoxRenderLine {
+            text, style: &paragraph.style, align: paragraph.align,
+            images: if index == 0 { &paragraph.images } else { &[] },
+        })
+    }).collect();
+    let paragraphs = render_lines.as_slice();
     let line_heights: Vec<i64> = paragraphs
         .iter()
         .map(|paragraph| {
@@ -211,19 +303,9 @@ fn render_text_box_svg_impl(
         if bounded { 1 } else { 48 },
         2400,
     ) as f64;
-    let horizontal_inset = ((layout
-        .and_then(|l| l.padding_left_px)
-        .unwrap_or(safe_width * 0.03))
-    .round() as i64)
-        .max(if bounded { 0 } else { 8 }) as f64;
     let top_inset = ((layout
         .and_then(|l| l.padding_top_px)
         .unwrap_or(safe_height * 0.04))
-    .round() as i64)
-        .max(if bounded { 0 } else { 8 }) as f64;
-    let right_inset = ((layout
-        .and_then(|l| l.padding_right_px)
-        .unwrap_or(horizontal_inset))
     .round() as i64)
         .max(if bounded { 0 } else { 8 }) as f64;
     let bottom_inset = ((layout
@@ -231,7 +313,24 @@ fn render_text_box_svg_impl(
         .unwrap_or(top_inset))
     .round() as i64)
         .max(if bounded { 0 } else { 8 }) as f64;
-    let max_text_width = (safe_width - horizontal_inset * 2.0).max(20.0);
+    let auto_fit_no_wrap = layout.is_some_and(|layout| layout.auto_fit_no_wrap)
+        && paragraphs.iter().all(|paragraph| paragraph.images.is_empty());
+    let intrinsic_text_width = if auto_fit_no_wrap {
+        paragraphs.iter().map(|paragraph| {
+            let font_size_px = (paragraph.style.as_ref().and_then(|style| style.font_size_pt)
+                .unwrap_or(12.0) * 96.0 / 72.0).round().max(10.0);
+            estimate_text_width_px(&paragraph.text, font_size_px)
+        }).fold(0.0_f64, f64::max)
+    } else {
+        0.0
+    };
+    let max_text_width = if auto_fit_no_wrap {
+        intrinsic_text_width.max(20.0)
+    } else if wrap_text {
+        available_text_width
+    } else {
+        (safe_width - horizontal_inset * 2.0).max(20.0)
+    };
     let total_text_height: f64 = line_heights.iter().map(|h| *h as f64).sum();
     let available_height = (safe_height - top_inset - bottom_inset).max(0.0);
     let mut vertical_scale = if total_text_height > available_height && total_text_height > 0.0 {
@@ -320,10 +419,21 @@ fn render_text_box_svg_impl(
             break;
         }
         let text_align = paragraph.align.unwrap_or(ParagraphAlignment::Left);
-        let (anchor, x) = match text_align {
-            ParagraphAlignment::Center => ("middle", safe_width / 2.0),
-            ParagraphAlignment::Right => ("end", safe_width - right_inset),
-            _ => ("start", horizontal_inset),
+        let (anchor, x) = if auto_fit_no_wrap {
+            let remaining_width = (intrinsic_text_width - estimated_text_width).max(0.0);
+            ("start", horizontal_inset + match text_align {
+                ParagraphAlignment::Center => remaining_width / 2.0,
+                ParagraphAlignment::Right => remaining_width,
+                _ => 0.0,
+            })
+        } else {
+            match text_align {
+                ParagraphAlignment::Center => ("middle", if wrap_text {
+                    horizontal_inset + available_text_width / 2.0
+                } else { safe_width / 2.0 }),
+                ParagraphAlignment::Right => ("end", safe_width - right_inset),
+                _ => ("start", horizontal_inset),
+            }
         };
         let text_decoration = [
             paragraph
@@ -344,8 +454,16 @@ fn render_text_box_svg_impl(
         .collect::<Vec<_>>()
         .join(" ");
         if !paragraph.text.is_empty() {
+            let mut text_defs = String::new();
+            let effect_attributes = super::text_effects::svg_attributes(
+                paragraph.style.as_ref(), &format!("text-effect-{paragraph_index}"),
+                safe_width, safe_height, &mut text_defs,
+            );
+            if !text_defs.is_empty() {
+                lines.push(format!("<defs>{text_defs}</defs>"));
+            }
             lines.push(format!(
-                r#"<text xml:space="preserve" x="{x:.0}" y="{cursor_y:.0}" text-anchor="{anchor}" font-size="{fitted_font_size_px:.0}" fill="{}" font-family="{}" font-weight="{}" font-style="{}"{}{}>{}</text>"#,
+                r#"<text xml:space="preserve" x="{x:.0}" y="{cursor_y:.0}" text-anchor="{anchor}" font-size="{fitted_font_size_px:.0}" fill="{}" font-family="{}" font-weight="{}" font-style="{}"{}{}{effect_attributes}>{}</text>"#,
                 paragraph.style.as_ref().and_then(|s| s.color.clone()).unwrap_or_else(|| "#111111".to_string()),
                 escape_xml_text(&resolve_svg_font_family(paragraph.style.as_ref().and_then(|s| s.font_family.as_deref()))),
                 if paragraph.style.as_ref().and_then(|s| s.bold).unwrap_or(false) { "700" } else { "400" },
@@ -371,7 +489,7 @@ fn render_text_box_svg_impl(
             } else {
                 horizontal_inset
             };
-            for image in &paragraph.images {
+            for image in paragraph.images {
                 let width = image.width_px.min(available_width).max(1.0);
                 let scale = width / image.width_px.max(1.0);
                 let height = (image.height_px * scale).min(line_height).max(1.0);
@@ -1008,6 +1126,7 @@ pub fn render_standalone_word_shape_svg(
                 elements.push(drawing.wrap(format!(r#"<g{shared_transform}>{svg}</g>"#)));
                 continue;
             }
+            context.push_warning("Shape appearance uses a reduced rendering fallback; original DrawingML is preserved");
             let fill = drawing
                 .bitmap_fill_supported
                 .then(|| {
@@ -1151,7 +1270,8 @@ pub fn render_standalone_word_shape_svg(
         }
         if !elements.is_empty() {
             if affine {
-                let [x, y, right, bottom] = paint_canvas;
+                let [x, y, right, bottom] = [paint_canvas[0].floor(), paint_canvas[1].floor(),
+                    paint_canvas[2].ceil(), paint_canvas[3].ceil()];
                 let width = right - x;
                 let height = bottom - y;
                 return Some(format!(
@@ -1177,6 +1297,7 @@ pub fn render_standalone_word_shape_svg(
     ) {
         return Some(rendered.svg);
     }
+    context.push_warning("Shape appearance uses a reduced rendering fallback; original DrawingML is preserved");
     if re::get(r"(?i)<w:txbxContent\b").is_some_and(|re| re.is_match(&shape_xml)) {
         return None;
     }
@@ -1326,18 +1447,42 @@ fn render_shared_shape(
     rendered.svg = rendered.svg.replacen("<svg ", r#"<svg data-office-art="true" "#, 1);
     let paragraphs = parse_text_box_paragraphs(shape, context);
     if !paragraphs.is_empty() {
-        let text = render_bounded_text_box_svg(&paragraphs, width, height, parse_text_box_layout(shape).as_ref());
-        let transform = if transform_text {
-            let xml = crate::xml::direct_child_tag(properties, "a:xfrm").unwrap_or_default();
-            let angle = get_attribute(xml, "rot").and_then(|value| value.parse::<f64>().ok()).filter(|value| value.is_finite()).unwrap_or(0.0) / 60000.0;
-            let flip_x = if get_attribute(xml, "flipH").is_some_and(|value| matches!(value.as_str(), "1" | "true")) { -1 } else { 1 };
-            let flip_y = if get_attribute(xml, "flipV").is_some_and(|value| matches!(value.as_str(), "1" | "true")) { -1 } else { 1 };
-            format!("translate({} {}) rotate({angle}) scale({flip_x} {flip_y}) translate({} {})", width / 2.0, height / 2.0, -width / 2.0, -height / 2.0)
+        let shape_transform = if transform_text {
+            DrawingAffine::frame(0.0, 0.0, width, height,
+                crate::xml::direct_child_tag(properties, "a:xfrm").unwrap_or_default())?
         } else {
-            String::new()
+            DrawingAffine([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])
         };
+        let text_frame = independent_text_frame(shape, width, height);
+        if crate::xml::direct_child_tag(shape, "wps:txXfrm").is_some() && text_frame.is_none() {
+            context.push_warning("SmartArt text transform could not be mapped to the shape dimensions; text uses the shape frame");
+        }
+        let (text_width, text_height, local_transform) = text_frame
+            .unwrap_or((width, height, DrawingAffine([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])));
+        let transform = shape_transform.compose(local_transform);
+        let text = render_bounded_text_box_svg(&paragraphs, text_width, text_height,
+            parse_text_box_layout(shape).as_ref());
+        if text_frame.is_some() {
+            let old = rendered.paint_bounds.as_ref();
+            let mut bounds = old.map_or([0.0, 0.0, width, height], |bounds|
+                [bounds.x_px, bounds.y_px, bounds.x_px + bounds.width_px, bounds.y_px + bounds.height_px]);
+            include_group_paint(&mut bounds, transform, [0.0, 0.0, text_width, text_height])?;
+            let [left, top, right, bottom] = [bounds[0].floor(), bounds[1].floor(), bounds[2].ceil(), bounds[3].ceil()];
+            let opening_end = crate::xml::tag_token_end(&rendered.svg, 0)?;
+            let mut opening = rendered.svg[..opening_end].to_string();
+            for (name, value) in [("width", (right - left).to_string()), ("height", (bottom - top).to_string()),
+                ("viewBox", format!("{left} {top} {} {}", right - left, bottom - top))] {
+                let old = get_attribute(&opening, name)?;
+                opening = opening.replacen(&format!(r#"{name}="{old}""#), &format!(r#"{name}="{value}""#), 1);
+            }
+            rendered.svg.replace_range(..opening_end, &opening);
+            rendered.paint_bounds = Some(rust_office_art::PaintBounds {
+                x_px: left, y_px: top, width_px: right - left, height_px: bottom - top,
+                layout_width_px: width, layout_height_px: height,
+            });
+        }
         let ending = rendered.svg.rfind("</svg>")?;
-        rendered.svg.insert_str(ending, &format!(r#"<g transform="{transform}">{text}</g>"#));
+        rendered.svg.insert_str(ending, &format!(r#"<g transform="{}">{text}</g>"#, transform.markup()));
     }
     if crate::xml::extract_balanced_tag_slices(shape, "a:prstTxWarp").into_iter().any(|warp| {
         get_attribute(warp, "prst").is_some_and(|preset| !matches!(preset.as_str(), "textNoShape" | "textPlain"))
@@ -1345,6 +1490,32 @@ fn render_shared_shape(
         context.push_warning("WordArt text deformation is preserved but not applied to text layout");
     }
     Some(rendered)
+}
+
+fn independent_text_frame(shape: &str, width: f64, height: f64) -> Option<(f64, f64, DrawingAffine)> {
+    let text = crate::xml::direct_child_tag(shape, "wps:txXfrm")?;
+    let properties = crate::xml::direct_child_tag(shape, "wps:spPr")?;
+    let shape_transform = crate::xml::direct_child_tag(properties, "a:xfrm")?;
+    let number = |xml, tag, name| {
+        let node = crate::xml::direct_child_tag(xml, tag)?;
+        get_attribute(node, name)?.parse::<f64>().ok().filter(|value| value.is_finite())
+    };
+    let shape_width = number(shape_transform, "a:ext", "cx")?;
+    let shape_height = number(shape_transform, "a:ext", "cy")?;
+    if shape_width <= 0.0 || shape_height <= 0.0 {
+        return None;
+    }
+    let scale_x = width / shape_width;
+    let scale_y = height / shape_height;
+    let x = (number(text, "a:off", "x")? - number(shape_transform, "a:off", "x")?) * scale_x;
+    let y = (number(text, "a:off", "y")? - number(shape_transform, "a:off", "y")?) * scale_y;
+    let text_width = number(text, "a:ext", "cx")? * scale_x;
+    let text_height = number(text, "a:ext", "cy")? * scale_y;
+    if [x, y, text_width, text_height].into_iter().any(|value| !value.is_finite() || value.abs() > 100_000_000.0)
+        || text_width <= 0.0 || text_height <= 0.0 {
+        return None;
+    }
+    Some((text_width, text_height, DrawingAffine::frame(x, y, text_width, text_height, text)?))
 }
 
 fn render_grouped_picture_svg_element(

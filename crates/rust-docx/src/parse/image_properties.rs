@@ -163,7 +163,7 @@ fn collect_assets(
     let local = node.name.rsplit(':').next().unwrap_or(&node.name);
     if matches!(
         local,
-        "blip" | "svgBlip" | "imgLayer" | "imagedata" | "fill" | "image"
+        "blip" | "svgBlip" | "imgLayer" | "imagedata" | "fill" | "image" | "model3d"
     ) {
         for (name, kind) in [
             ("r:embed", "embedded"),
@@ -276,6 +276,7 @@ pub(super) fn parse_image_presentation(
         xml,
         &[
             "pic:pic",
+            "am3d:model3d",
             "wps:spPr",
             "wps:style",
             "wpg:grpSpPr",

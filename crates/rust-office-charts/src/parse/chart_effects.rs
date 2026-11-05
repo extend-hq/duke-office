@@ -269,7 +269,52 @@ impl Effects {
         bounds: [f64; 4],
         body: &str,
     ) {
-        if let Some(list) = properties.and_then(|p| drawing_child(p, "effectLst")) {
+        let list = properties.and_then(|p| drawing_child(p, "effectLst"));
+        if let Some(properties) = properties {
+            if drawing_child(properties, "effectDag").is_some()
+                || list.is_some_and(|list| {
+                    list.children().any(|n| {
+                        drawing(n)
+                            && matches!(
+                                n.tag_name().name(),
+                                "innerShdw" | "reflection" | "softEdge" | "blur"
+                            )
+                    })
+                })
+            {
+                let [x, y, width, height] = bounds;
+                let context = crate::parse::art::Context {
+                    theme,
+                    images: None,
+                    theme_xml: None,
+                    theme_override: None,
+                };
+                let properties = crate::parse::art::canonical(properties);
+                let local = format!(r#"<g transform="translate({} {})">{body}</g>"#, -x, -y);
+                let rendered = rust_office_art::render_effects(
+                    &properties,
+                    &local,
+                    width.max(1.0),
+                    height.max(1.0),
+                    &context,
+                );
+                if let Some(rendered) = rendered {
+                    let id = self.next_id.get();
+                    self.next_id.set(id + 1);
+                    if let Some(scoped) =
+                        crate::parse::art::scoped_svg(&rendered.svg, &format!("cae{id}-"))
+                    {
+                        if let Some(inner) = crate::parse::art::inner_svg(&scoped) {
+                            write!(svg, r#"<g transform="translate({x} {y})">{inner}</g>"#)
+                                .unwrap();
+                            return;
+                        }
+                    }
+                }
+                svg.push_str("<desc>Some chart effects could not be rendered.</desc>");
+            }
+        }
+        if let Some(list) = list {
             for effect in list.children().filter(|n| drawing(*n)) {
                 self.effect(svg, effect, theme, bounds, body);
             }

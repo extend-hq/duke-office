@@ -68,6 +68,17 @@ impl Transport<'_> {
     }
 
     fn image(&mut self, image: &mut ImageRunNode) {
+        if let Some(asset) = image.model_3d.as_mut().and_then(|model| model.asset.as_mut()) {
+            self.at("model3d", |this| {
+                this.at("asset", |this| {
+                    this.payload(
+                        &mut None,
+                        asset.data.take().map(|data| data.into_vec()),
+                        Some(&asset.part_name),
+                    );
+                });
+            });
+        }
         self.payload(
             &mut image.src,
             image.data.take(),

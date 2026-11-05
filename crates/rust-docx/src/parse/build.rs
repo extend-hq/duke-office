@@ -20,6 +20,14 @@ use super::sections::{
 };
 use super::styles::{acquire_document_style_sheet, release_document_style_metadata};
 
+pub fn build_doc_model_with_options(pkg: &OoxmlPackage, options: &crate::ParseOptions) -> DocModel {
+    let mut model = build_doc_model(pkg);
+    if options.include_3d_models {
+        super::model3d::attach_models(&mut model, pkg, options);
+    }
+    model
+}
+
 pub fn build_doc_model(pkg: &OoxmlPackage) -> DocModel {
     #[cfg(not(target_arch = "wasm32"))]
     {

@@ -1,4 +1,6 @@
-use rust_pptx::{detect_format, parse_presentation as parse_core_presentation, ParseLimits};
+use rust_pptx::{
+    detect_format, parse_presentation_with_options as parse_core_presentation, ParseLimits,
+};
 use serde::Serialize;
 use serde_wasm_bindgen::Serializer;
 use wasm_bindgen::prelude::*;
@@ -17,8 +19,13 @@ pub fn detect_presentation_format(bytes: &[u8]) -> Result<String, JsValue> {
 }
 
 #[wasm_bindgen]
-pub fn parse_presentation(bytes: &[u8]) -> Result<JsValue, JsValue> {
-    let document = parse_core_presentation(bytes, &ParseLimits::default())
+pub fn parse_presentation(bytes: &[u8], options: Option<JsValue>) -> Result<JsValue, JsValue> {
+    let options = match options.filter(|value| !value.is_null() && !value.is_undefined()) {
+        Some(value) => serde_wasm_bindgen::from_value(value)
+            .map_err(|error| JsValue::from_str(&format!("Invalid parser options: {error}")))?,
+        None => rust_pptx::ParseOptions::default(),
+    };
+    let document = parse_core_presentation(bytes, &ParseLimits::default(), &options)
         .map_err(|error| JsValue::from_str(&error.to_string()))?;
 
     // The TypeScript model exposes keyed collections as `Record<string, T>` rather than

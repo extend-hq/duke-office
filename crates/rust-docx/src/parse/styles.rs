@@ -1137,6 +1137,8 @@ pub fn merge_text_styles(
         contextual_alternates: None,
         vertical_align: None,
         run_border: None,
+        text_shadow: None,
+        text_outline: None,
     };
 
     for style in [inherited, direct].into_iter().flatten() {
@@ -1255,6 +1257,12 @@ pub fn merge_text_styles(
         if style.run_border.is_some() {
             merged.run_border = style.run_border;
         }
+        if style.text_shadow.is_some() {
+            merged.text_shadow = style.text_shadow;
+        }
+        if style.text_outline.is_some() {
+            merged.text_outline = style.text_outline;
+        }
     }
 
     let has_any = merged.bold.is_some()
@@ -1295,7 +1303,9 @@ pub fn merge_text_styles(
         || merged.ligatures.is_some()
         || merged.contextual_alternates.is_some()
         || merged.vertical_align.is_some()
-        || merged.run_border.is_some();
+        || merged.run_border.is_some()
+        || merged.text_shadow.is_some()
+        || merged.text_outline.is_some();
 
     if has_any {
         Some(merged)
@@ -1747,6 +1757,8 @@ pub(crate) fn parse_definition_style_uncached(
         contextual_alternates: super::style::parse_contextual_alternates_from_xml(xml),
         vertical_align: None,
         run_border: None,
+        text_shadow: None,
+        text_outline: None,
     };
 
     style.character_scale_percent = super::style::parse_character_scale_percent_from_xml(xml);
@@ -1922,6 +1934,7 @@ pub(crate) fn parse_definition_style_uncached(
     }
 
     style.run_border = parse_text_run_border_style(run_border_tag.as_deref());
+    super::text_effects::parse_into(&mut style, xml);
 
     merge_text_styles(None, Some(style))
 }

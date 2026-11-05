@@ -26,6 +26,7 @@ export interface RenderOptions {
   styleXml?: string;
   colorStyleXml?: string;
   images?: Readonly<Record<string, string>>;
+  drawings?: Readonly<Record<string, { xml: string; images?: Readonly<Record<string, string>> }>>;
   legacyDefaults?: boolean;
   spreadsheetDefaults?: boolean;
   interactive?: boolean;

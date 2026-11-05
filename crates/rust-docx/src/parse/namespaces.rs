@@ -34,6 +34,7 @@ pub(crate) fn prefix(uri: &str) -> Option<&'static str> {
         "http://schemas.microsoft.com/office/drawing/2008/diagram" => Some("dsp"),
         "http://schemas.microsoft.com/office/drawing/2010/main" => Some("a14"),
         "http://schemas.microsoft.com/office/drawing/2016/SVG/main" => Some("asvg"),
+        "http://schemas.microsoft.com/office/drawing/2017/model3d" => Some("am3d"),
         "urn:schemas-microsoft-com:vml" => Some("v"),
         "urn:schemas-microsoft-com:office:office" => Some("o"),
         "urn:schemas-microsoft-com:office:word" => Some("w10"),

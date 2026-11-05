@@ -66,6 +66,15 @@ pub fn resolve_drawing_color_from_xml(
     let srgb = find_drawing_attribute_value(color_xml, "a:srgbClr", "val")
         .as_deref()
         .and_then(|value| normalize_hex_color(Some(value)));
+    let linear_rgb = ["r", "g", "b"]
+        .into_iter()
+        .map(|channel| {
+            let raw = find_drawing_attribute_value(color_xml, "a:scrgbClr", channel)?;
+            let value = raw.parse::<f64>().ok().filter(|value| value.is_finite())?;
+            Some((self::srgb((value / 100_000.0).clamp(0.0, 1.0)) * 255.0).round() as u8)
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(|rgb| format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2]));
     let sys = find_drawing_attribute_value(color_xml, "a:sysClr", "lastClr")
         .as_deref()
         .and_then(|value| normalize_hex_color(Some(value)));
@@ -84,7 +93,7 @@ pub fn resolve_drawing_color_from_xml(
             _ => None,
         }
     });
-    let color = apply_drawing_color_transforms(&srgb.or(sys).or(scheme).or(preset)?, color_xml)?;
+    let color = apply_drawing_color_transforms(&srgb.or(linear_rgb).or(sys).or(scheme).or(preset)?, color_xml)?;
 
     let alpha_raw = find_drawing_attribute_value(color_xml, "a:alpha", "val");
     let alpha = alpha_raw.and_then(|raw| raw.parse::<f64>().ok());
@@ -112,7 +121,7 @@ fn apply_drawing_color_transforms(color: &str, xml: &str) -> Option<String> {
         }
         Some((tag.tag_name, value / 100_000.0))
     });
-    transform_rgb(color, values, false)
+    transform_rgb(color, values, true)
 }
 
 fn linear(c: f64) -> f64 {

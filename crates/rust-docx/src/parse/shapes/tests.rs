@@ -232,6 +232,7 @@ mod textbox_fit_tests {
 
     fn layout(bottom: f64, anchor: &str) -> ParsedTextBoxLayout {
         ParsedTextBoxLayout {
+            auto_fit_no_wrap: false, wrap_text: false,
             padding_left_px: Some(6.0), padding_top_px: Some(2.0),
             padding_right_px: Some(6.0), padding_bottom_px: Some(bottom),
             vertical_anchor: Some(anchor.to_owned()),
@@ -340,6 +341,7 @@ mod image_paint_bounds_tests {
     fn nested_paint_offsets_and_extents_scale_without_changing_logical_advance() {
         for width in [220.0, 70.0] {
             let layout = ParsedTextBoxLayout {
+                auto_fit_no_wrap: false, wrap_text: false,
                 padding_left_px: Some(10.0), padding_top_px: Some(10.0),
                 padding_right_px: Some(10.0), padding_bottom_px: Some(10.0),
                 vertical_anchor: None,

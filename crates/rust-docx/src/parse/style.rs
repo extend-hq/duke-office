@@ -274,6 +274,8 @@ fn parse_text_style_with_scripts(
         contextual_alternates: None,
         vertical_align: None,
         run_border: None,
+        text_shadow: None,
+        text_outline: None,
     };
     let mut has_any = false;
 
@@ -528,6 +530,8 @@ fn parse_text_style_with_scripts(
         style.run_border = Some(border);
         has_any = true;
     }
+
+    has_any |= super::text_effects::parse_into(&mut style, xml);
 
     if has_any {
         Some(style)
@@ -1058,6 +1062,7 @@ fn resolve_run_style_with_scripts(
         style.strike = strike;
         style.all_caps = all_caps;
         style.small_caps = small_caps;
+        super::text_effects::resolve(&mut style, &context.styles().theme_colors);
         SharedTextStyle::from(style)
     });
     if let Some(xml) = properties.filter(|xml| xml.len() <= 8192) {

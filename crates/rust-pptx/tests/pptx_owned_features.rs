@@ -1123,7 +1123,7 @@ fn smartart_pptx(data_xml: &[u8], drawing_xml: Option<&[u8]>) -> Vec<u8> {
 }
 
 #[test]
-fn materialized_smartart_uses_drawing_geometry_and_semantic_text_mapping() {
+fn materialized_smartart_uses_drawing_geometry_and_authoritative_cached_text() {
     let data = br#"<dgm:dataModel xmlns:dgm="dgm" xmlns:a="a" xmlns:dsp="dsp"><dgm:ptLst>
       <dgm:pt modelId="semantic-1"><dgm:prSet/><dgm:spPr/><dgm:t><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr sz="1600"/><a:t>Mapped label</a:t></a:r></a:p></dgm:t></dgm:pt>
       <dgm:pt modelId="presentation-1" type="pres"><dgm:prSet presAssocID="semantic-1"/><dgm:spPr/></dgm:pt>
@@ -1163,7 +1163,10 @@ fn materialized_smartart_uses_drawing_geometry_and_semantic_text_mapping() {
     assert_eq!(transform.rotation, Some(1.0));
     assert_eq!(geometry.preset.as_deref(), Some("roundRect"));
     assert!(matches!(fill, Some(FillStyle::Solid { color }) if color.value == "#336699"));
-    assert_eq!(paragraphs[0].runs[0].text, "Mapped label");
+    assert!(paragraphs
+        .iter()
+        .flat_map(|paragraph| &paragraph.runs)
+        .all(|run| run.text.is_empty()));
     assert!(!document.slides[0]
         .warnings
         .iter()

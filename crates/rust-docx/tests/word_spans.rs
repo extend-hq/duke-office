@@ -61,6 +61,7 @@ fn word_spans_are_opt_in_without_changing_default_blocks() {
         &model,
         ExtractDocumentBlocksOptions {
             include_words: true,
+            ..Default::default()
         },
     );
     assert_eq!(with_words.geometry_status, "requires_layout");
@@ -76,6 +77,7 @@ fn unicode_words_keep_source_ranges_across_style_runs() {
         &model,
         ExtractDocumentBlocksOptions {
             include_words: true,
+            ..Default::default()
         },
     );
     let block = &output.blocks[0];
@@ -155,6 +157,7 @@ fn nested_and_auxiliary_story_words_use_their_own_source_nodes() {
         &model,
         ExtractDocumentBlocksOptions {
             include_words: true,
+            ..Default::default()
         },
     );
     let flat = blocks(&output.blocks);
@@ -184,6 +187,7 @@ fn byte_parsing_keeps_word_ids_stable_and_old_api_unchanged() {
     let bytes = rust_docx::package_to_bytes(&source).unwrap();
     let options = ExtractDocumentBlocksOptions {
         include_words: true,
+        ..Default::default()
     };
     let first = parse_document_blocks_with_options(&bytes, options).unwrap();
     let second = parse_document_blocks_with_options(&bytes, options).unwrap();

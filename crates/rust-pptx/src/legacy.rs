@@ -728,6 +728,7 @@ impl ShapeCollector<'_> {
                 && transform.width as u64 >= self.slide_size.width_emu.saturating_mul(95) / 100
                 && transform.height as u64 >= self.slide_size.height_emu.saturating_mul(95) / 100;
             self.nodes.push(SlideNode::Image {
+                model_3d: None,
                 id,
                 name: format!("Legacy picture {}", parts.spid),
                 transform,
@@ -765,6 +766,7 @@ impl ShapeCollector<'_> {
             text_insets: None,
             autofit: None,
             text_rotation: None,
+            text_transform: None,
             vertical_text: None,
             horizontal_overflow: None,
             vertical_overflow: None,
@@ -1066,6 +1068,7 @@ fn normalize_fallback_slide(
             text_insets: None,
             autofit: None,
             text_rotation: None,
+            text_transform: None,
             vertical_text: None,
             horizontal_overflow: None,
             vertical_overflow: None,

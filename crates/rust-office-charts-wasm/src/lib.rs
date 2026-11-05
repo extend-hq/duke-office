@@ -1,4 +1,4 @@
-use rust_office_charts::{render_chart, ChartData, RenderOptions};
+use rust_office_charts::{render_chart, ChartData, ChartDrawing, RenderOptions};
 use serde::Deserialize;
 use std::collections::HashMap;
 use wasm_bindgen::prelude::*;
@@ -15,6 +15,7 @@ struct Options {
     style_xml: Option<String>,
     color_style_xml: Option<String>,
     images: Option<HashMap<String, String>>,
+    drawings: Option<HashMap<String, ChartDrawing>>,
     legacy_defaults: bool,
     spreadsheet_defaults: bool,
     interactive: bool,
@@ -35,6 +36,7 @@ pub fn render_chart_svg(xml: &str, options_json: &str) -> Result<Option<String>,
         style_xml: options.style_xml.as_deref(),
         color_style_xml: options.color_style_xml.as_deref(),
         images: options.images.as_ref(),
+        drawings: options.drawings.as_ref(),
         legacy_defaults: options.legacy_defaults,
         spreadsheet_defaults: options.spreadsheet_defaults,
         interactive: options.interactive,

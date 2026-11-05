@@ -523,7 +523,7 @@ fn resolve_preferred_drawing_relationship_id(
     context: &ParseContext<'_, impl std::borrow::Borrow<super::context::ParsedStyleSheet>>,
 ) -> Option<String> {
     let mut candidates = Vec::new();
-    for name in ["asvg:svgBlip", "a:blip", "v:imagedata", "v:fill"] {
+    for name in ["asvg:svgBlip", "am3d:blip", "a:blip", "v:imagedata", "v:fill"] {
         for tag in extract_balanced_tag_blocks(run_xml, name) {
             for attribute in ["r:embed", "r:link", "r:id", "o:relid", "r:href"] {
                 if let Some(id) = get_attribute(&tag, attribute).filter(|id| !id.is_empty()) {
@@ -2025,6 +2025,7 @@ fn vml_group_image_with_owner(
         canvas.0, canvas.1
     );
     Some(ImageRunNode {
+        model_3d: None,
         presentation: None,
         chart_data: None,
         chart_part_name: None,
@@ -2062,6 +2063,9 @@ pub fn parse_run_image_block(
     ).or(image.presentation);
     if let Some(presentation) = image.presentation.as_mut() {
         presentation.transform_applied = transform_applied;
+    }
+    if rust_office_art::model3d::model3d_xml(image.source_xml.as_deref().unwrap_or(run_xml)).is_some() {
+        image.semantic_kind = Some("model_3d".into());
     }
     Some(image)
 }
@@ -2167,6 +2171,7 @@ fn parse_run_image_block_inner(
                 parse_text_box_layout(active_run_xml).as_ref(),
             ));
             return Some(ImageRunNode {
+        model_3d: None,
         presentation: None,
                 chart_data: None,
                 chart_part_name: None,
@@ -2238,6 +2243,7 @@ fn parse_run_image_block_inner(
             drawing_group_paint_bounds(svg, width, height)
         });
         return Some(ImageRunNode {
+        model_3d: None,
             presentation: contains_grouped_or_standalone_shape.then(|| Box::new(crate::model::ImagePresentation {
                 transform_applied: true,
                 ..Default::default()
@@ -2289,6 +2295,7 @@ fn parse_run_image_block_inner(
             .and_then(|name| crate::chart::render_chart_part(name, context, width_px, height_px))
         {
             return Some(ImageRunNode {
+        model_3d: None,
         presentation: None,
                 chart_data: Some(Box::new(chart_data)),
                 chart_part_name,
@@ -2316,7 +2323,8 @@ fn parse_run_image_block_inner(
         }
     }
 
-    if relationship_id.is_none() && part_name.is_none() {
+    if relationship_id.is_none() && part_name.is_none()
+        && rust_office_art::model3d::model3d_xml(active_run_xml).is_none() {
         let text_box_paragraphs = parse_text_box_paragraphs(active_run_xml, context);
         if text_box_paragraphs.is_empty() {
             return None;
@@ -2329,6 +2337,7 @@ fn parse_run_image_block_inner(
             parse_text_box_layout(active_run_xml).as_ref(),
         ));
         return Some(ImageRunNode {
+        model_3d: None,
         presentation: None,
             chart_data: None,
             chart_part_name: None,
@@ -2412,6 +2421,7 @@ fn parse_run_image_block_inner(
     }
 
     Some(ImageRunNode {
+        model_3d: None,
         presentation: transform_applied.then(|| Box::new(crate::model::ImagePresentation {
             transform_applied: true,
             ..Default::default()
@@ -2537,7 +2547,20 @@ pub fn parse_run_image_tokens(
                     if let Some(presentation) = preview.presentation.as_mut() {
                         presentation.transform_applied = transform_applied;
                     }
+                    super::ink::apply_cached_ink_metadata(alternate, &mut preview, context);
                     image = Some(preview);
+                }
+            }
+        }
+        if let Some(image) = image.as_mut() {
+            if let Some(&(alternate, _)) = previews.get_or_insert_with(|| alternate_chart_previews(original_run)).get(&source_start)
+                .filter(|(alternate, _)| rust_office_art::model3d::model3d_xml(alternate).is_some()) {
+                image.source_xml = Some(alternate.to_owned());
+                image.semantic_kind = Some("model_3d".into());
+                let transform_applied = image.presentation.as_ref().is_some_and(|value| value.transform_applied);
+                image.presentation = super::image_properties::parse_image_presentation(alternate, context);
+                if let Some(presentation) = image.presentation.as_mut() {
+                    presentation.transform_applied = transform_applied;
                 }
             }
         }

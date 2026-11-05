@@ -52,6 +52,8 @@ pub struct SourceRef {
 pub struct ExtractDocumentBlocksOptions {
     #[serde(default)]
     pub include_words: bool,
+    #[serde(default, rename = "include3dModels")]
+    pub include_3d_models: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -490,6 +492,7 @@ struct Extractor<'a> {
     part_name: String,
     story: String,
     include_words: bool,
+    include_3d_models: bool,
     review: Option<RevisionCollector>,
 }
 
@@ -710,6 +713,11 @@ impl Extractor<'_> {
                     let mut details = json!({"kind":image.semantic_kind.as_deref().unwrap_or(if image.synthetic_text_box == Some(true) {"text_box"} else {"image"}), "mathMl":image.math_ml, "asset":image.part_name, "alt":image.alt, "contentType":image.content_type, "width":image.width_px, "height":image.height_px, "floating":image.floating});
                     if let Some(part_name) = &image.chart_part_name {
                         details["chartPartName"] = json!(part_name);
+                    }
+                    if self.include_3d_models {
+                        if let Some(model) = &image.model_3d {
+                            details["model3d"] = json!(model);
+                        }
                     }
                     if let Some(paint_bounds) = image.paint_bounds.as_ref() {
                         details
@@ -957,6 +965,7 @@ fn extract(
         part_name: source_part(model, "document"),
         story: "body".into(),
         include_words: options.include_words,
+        include_3d_models: options.include_3d_models,
         review: include_revisions.then(RevisionCollector::default),
     };
     let mut blocks = extractor.story_nodes(&model.nodes, None);
@@ -1089,7 +1098,7 @@ mod typed_table_tests {
         for include_words in [false, true] {
             let blocks = super::extract_document_blocks_with_options(
                 &model,
-                super::ExtractDocumentBlocksOptions { include_words },
+                super::ExtractDocumentBlocksOptions { include_words, ..Default::default() },
             );
             let value = serde_json::to_value(&blocks).unwrap();
             let imported: super::StructuredDocument =
@@ -1160,7 +1169,7 @@ mod inplace_block_cleanup_tests {
         let extractor = Extractor {
             lists: ListDefinitions::new(None),
             document_id: "document".into(), part_name: "part".into(),
-            story: "body".into(), include_words: false, review: None,
+            story: "body".into(), include_words: false, include_3d_models: false, review: None,
         };
         let figure = extractor.block("figure".into(), BlockType::Figure, String::new(),
             json!({}), Vec::new(), Some("container"));

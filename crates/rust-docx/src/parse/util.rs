@@ -274,6 +274,8 @@ pub(crate) fn merge_text_style_refs(styles: &[Option<&TextStyle>]) -> Option<Tex
         contextual_alternates: None,
         vertical_align: None,
         run_border: None,
+        text_shadow: None,
+        text_outline: None,
     };
     let mut has_any = false;
 
@@ -393,6 +395,12 @@ pub(crate) fn merge_text_style_refs(styles: &[Option<&TextStyle>]) -> Option<Tex
         }
         if merged.run_border.is_none() {
             merged.run_border = style.run_border.clone();
+        }
+        if merged.text_shadow.is_none() {
+            merged.text_shadow = style.text_shadow.clone();
+        }
+        if merged.text_outline.is_none() {
+            merged.text_outline = style.text_outline.clone();
         }
     }
 

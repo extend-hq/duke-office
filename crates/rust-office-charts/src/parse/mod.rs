@@ -1,9 +1,11 @@
+mod art;
 #[cfg(feature = "extended-charts")]
 mod bubble_chart;
 mod cartesian_chart;
 #[cfg(feature = "extended-charts")]
 mod chart_3d;
 mod chart_colors;
+mod chart_drawing;
 mod chart_svg;
 #[cfg(feature = "extended-charts")]
 mod chartex;
@@ -80,10 +82,9 @@ pub fn render_chart(xml: &str, options: &RenderOptions<'_>) -> Option<RenderedCh
             )
         })
     }?;
-    Some(RenderedChart {
-        svg: colors.with_definitions(svg),
-        data,
-    })
+    let mut svg = art::expand_effects(colors.with_definitions(svg));
+    chart_drawing::append(&mut svg, root, options, &colors, width, height);
+    Some(RenderedChart { svg, data })
 }
 
 fn render_empty_chart(

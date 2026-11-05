@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use rust_docx::{
-    build_doc_model, model_to_document_xml, package_to_bytes, parse_document_bytes,
+    build_doc_model_with_options, model_to_document_xml, package_to_bytes, parse_document_bytes,
     try_serialize_doc_model, DocModel, ImageRunNode, OoxmlPackage, OoxmlPart,
 };
 use js_sys::{Array, Object, Reflect};
@@ -250,28 +250,43 @@ pub fn parse_docx_wasm(bytes: &[u8]) -> Result<JsValue, JsValue> {
     package_to_js(&pkg)
 }
 
+fn parse_options(value: Option<JsValue>) -> Result<rust_docx::ParseOptions, JsValue> {
+    let Some(value) = value.filter(|value| !value.is_null() && !value.is_undefined()) else {
+        return Ok(Default::default());
+    };
+    let json = js_sys::JSON::stringify(&value)?;
+    serde_json::from_str(&json.as_string().unwrap_or_default())
+        .map_err(|error| JsValue::from_str(&format!("Invalid parser options: {error}")))
+}
+
 #[wasm_bindgen]
-pub fn build_doc_model_from_package(package: &JsValue) -> Result<String, JsValue> {
+pub fn build_doc_model_from_package(
+    package: &JsValue,
+    options: Option<JsValue>,
+) -> Result<String, JsValue> {
     let pkg = value_to_ooxml_package(package)?;
-    let model = build_doc_model(&pkg);
+    let model = build_doc_model_with_options(&pkg, &parse_options(options)?);
     serde_json::to_string(&model)
         .map_err(|error| JsValue::from_str(&format!("Model serialization failed: {error}")))
 }
 
 #[wasm_bindgen]
-pub fn build_doc_model_from_package_js(package: &JsValue) -> Result<JsValue, JsValue> {
+pub fn build_doc_model_from_package_js(
+    package: &JsValue,
+    options: Option<JsValue>,
+) -> Result<JsValue, JsValue> {
     let pkg = value_to_ooxml_package(package)?;
-    let model = build_doc_model(&pkg);
+    let model = build_doc_model_with_options(&pkg, &parse_options(options)?);
     let assets = Reflect::get(package, &JsValue::from_str("binaryAssets"))?;
     model_transport::model_to_js(model, &pkg, &assets)
 }
 
 #[wasm_bindgen]
-pub fn build_doc_model_from_bytes(bytes: &[u8]) -> Result<JsValue, JsValue> {
+pub fn build_doc_model_from_bytes(bytes: &[u8], options: Option<JsValue>) -> Result<JsValue, JsValue> {
     let started_at = performance_now();
     let pkg = parse_document_bytes(bytes).map_err(|error| JsValue::from_str(&error))?;
     let parsed_at = performance_now();
-    let model = build_doc_model(&pkg);
+    let model = build_doc_model_with_options(&pkg, &parse_options(options)?);
     let package_started_at = performance_now();
     let package_js = package_to_js(&pkg)?;
     let package_ms = performance_now() - package_started_at;

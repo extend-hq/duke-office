@@ -1,4 +1,5 @@
 import { sourceDigest } from "./source-digest.mjs";
+import { thirdPartyNotices } from "./notices.mjs";
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -46,3 +47,4 @@ for (const extended of [false, true]) {
 }
 if (digest !== sourceDigest()) throw new Error("Renderer inputs changed during build; rerun the build.");
 writeFileSync(resolve(generated, "sources.sha256"), digest + "\n");
+writeFileSync(resolve(root, "THIRD-PARTY-NOTICES.txt"), thirdPartyNotices(root));

@@ -183,6 +183,10 @@ impl TextLigatures {
 #[serde(rename_all = "camelCase")]
 pub struct TextStyle {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_shadow: Option<TextShadow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_outline: Option<TextOutline>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub bold: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub italic: Option<bool>,
@@ -266,6 +270,33 @@ pub struct TextStyle {
     pub vertical_align: Option<VerticalAlign>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_border: Option<TextRunBorderStyle>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextShadow {
+    pub color: String,
+    pub opacity: f64,
+    pub offset_x_px: f64,
+    pub offset_y_px: f64,
+    pub blur_radius_px: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_xml: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_color: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextOutline {
+    pub color: String,
+    pub opacity: f64,
+    pub width_px: f64,
+    pub line_join: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_xml: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_color: Option<String>,
 }
 
 /// Fully resolved formatting shared until a caller edits its value.
@@ -541,6 +572,8 @@ pub struct ImagePresentation {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageRunNode {
+    #[serde(default, rename = "model3d", skip_serializing_if = "Option::is_none")]
+    pub model_3d: Option<Box<rust_office_art::model3d::Model3D>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub presentation: Option<Box<ImagePresentation>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

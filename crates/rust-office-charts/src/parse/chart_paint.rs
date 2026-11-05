@@ -1,12 +1,19 @@
 use super::{color, drawing, drawing_child, ThemeColorMap};
+use crate::parse::art;
 use roxmltree::{Node, NodeId};
 use std::collections::HashMap;
 use std::fmt::Write;
+
+struct Bitmap {
+    xml: String,
+    source: String,
+}
 
 #[derive(Default)]
 pub(super) struct PaintServers {
     ids: HashMap<NodeId, usize>,
     markup: String,
+    bitmaps: HashMap<usize, Bitmap>,
 }
 
 impl PaintServers {
@@ -23,7 +30,39 @@ impl PaintServers {
                 continue;
             }
             let markup = if node.tag_name().name() == "blipFill" {
-                image_fill(node, &id.to_string(), images)
+                let blip = drawing_child(node, "blip");
+                let source = blip.and_then(|n| n.attributes().find(|a| matches!(a.name(), "embed" | "link") && matches!(a.namespace(), Some(art::REL | "http://purl.oclc.org/ooxml/officeDocument/relationships"))))
+                    .and_then(|a| images?.get(a.value())).and_then(|s| art::safe_image(s));
+                let advanced = drawing_child(node, "tile").is_some()
+                    || drawing_child(node, "stretch").is_none()
+                    || blip.is_some_and(|n| {
+                        n.children().any(|n| {
+                            drawing(n) && !matches!(n.tag_name().name(), "alphaModFix" | "extLst")
+                        })
+                    })
+                    || source.as_ref().is_some_and(|s| {
+                        blip.and_then(|n| n.attribute((art::REL, "embed")))
+                            .and_then(|id| images?.get(id))
+                            != Some(s)
+                    });
+                if advanced {
+                    if let Some(source) = source {
+                        paints.bitmaps.insert(
+                            id,
+                            Bitmap {
+                                xml: art::canonical(node),
+                                source,
+                            },
+                        );
+                        Some(format!(
+                            r#"<pattern id="cp{id}" width="1" height="1" patternContentUnits="objectBoundingBox"></pattern>"#
+                        ))
+                    } else {
+                        None
+                    }
+                } else {
+                    image_fill(node, &id.to_string(), images)
+                }
             } else {
                 definition_for_mode(node, theme, &id.to_string(), spreadsheet)
             };
@@ -55,6 +94,83 @@ impl PaintServers {
         } else {
             format!("<defs>{}</defs>", self.markup)
         }
+    }
+
+    pub(super) fn apply_images(&self, mut svg: String, theme: &ThemeColorMap) -> String {
+        if self.bitmaps.is_empty() {
+            return svg;
+        }
+        let Ok(document) = roxmltree::Document::parse(&svg) else {
+            return svg;
+        };
+        let root = document.root_element();
+        let viewport = ["width", "height"].map(|name| {
+            root.attribute(name)
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(1.0)
+        });
+        let context = art::Context {
+            theme,
+            images: None,
+            theme_xml: None,
+            theme_override: None,
+        };
+        let mut edits = Vec::new();
+        let mut definitions = String::new();
+        let mut cache = HashMap::<(usize, u64, u64), Option<String>>::new();
+        for node in root.descendants().filter(Node::is_element) {
+            let Some([_, _, width, height]) = art::geometry_bounds(node, viewport) else {
+                continue;
+            };
+            for name in ["fill", "stroke"] {
+                let Some(value) = node.ancestors().find_map(|n| n.attribute(name)) else {
+                    continue;
+                };
+                let Some(id) = value
+                    .strip_prefix("url(#cp")
+                    .and_then(|v| v.strip_suffix(')'))
+                    .and_then(|s| s.parse::<usize>().ok())
+                else {
+                    continue;
+                };
+                let Some(bitmap) = self.bitmaps.get(&id) else {
+                    continue;
+                };
+                let key = (id, width.to_bits(), height.to_bits());
+                let next = cache.len();
+                let replacement = cache.entry(key).or_insert_with(|| {
+                    let doc = roxmltree::Document::parse(&bitmap.xml).ok()?;
+                    let rendered = art::picture(doc.root_element(), None, &bitmap.source, width, height, &context)?;
+                    let prefix = format!("caf{next}-");
+                    let scoped = art::scoped_svg(&rendered.svg, &prefix)?;
+                    let inner = art::inner_svg(&scoped)?;
+                    write!(definitions, r#"<pattern id="{prefix}fill" width="1" height="1" patternContentUnits="objectBoundingBox"><svg width="1" height="1" viewBox="0 0 {width} {height}" preserveAspectRatio="none">{inner}</svg></pattern>"#).unwrap();
+                    Some(format!("url(#{prefix}fill)"))
+                });
+                let Some(value) = replacement else {
+                    continue;
+                };
+                if let Some(attr) = node.attributes().find(|a| a.name() == name) {
+                    edits.push((attr.range_value(), value.clone()));
+                } else {
+                    let start = node.range().start + 1 + node.tag_name().name().len();
+                    edits.push((start..start, format!(r#" {name}="{value}""#)));
+                }
+            }
+        }
+        if cache.values().any(Option::is_none) {
+            definitions.push_str("<desc>Some picture fills could not be rendered.</desc>");
+        }
+        edits.sort_by_key(|(r, _)| r.start);
+        for (range, replacement) in edits.into_iter().rev() {
+            svg.replace_range(range, &replacement);
+        }
+        if !definitions.is_empty() {
+            if let Some(start) = svg.find('>') {
+                svg.insert_str(start + 1, &format!("<defs>{definitions}</defs>"));
+            }
+        }
+        svg
     }
 }
 

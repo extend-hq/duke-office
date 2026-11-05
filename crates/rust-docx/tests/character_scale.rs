@@ -41,6 +41,7 @@ fn scale_retains_content_word_ranges_and_structured_style() {
         &model,
         ExtractDocumentBlocksOptions {
             include_words: true,
+            ..Default::default()
         },
     );
     let block = &output.blocks[0];
@@ -68,6 +69,7 @@ fn scale_retains_content_word_ranges_and_structured_style() {
         &normal,
         ExtractDocumentBlocksOptions {
             include_words: true,
+            ..Default::default()
         },
     );
     assert_eq!(normal_output.blocks[0].words, block.words);

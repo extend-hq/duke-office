@@ -36,6 +36,7 @@ fn shape(
         text_insets: None,
         autofit: None,
         text_rotation: None,
+        text_transform: None,
         vertical_text: None,
         horizontal_overflow: None,
         vertical_overflow: None,
@@ -101,6 +102,7 @@ fn absent_shape_styles_are_omitted() {
 #[test]
 fn image_fields_serialize_to_the_typescript_model_contract() {
     let node = SlideNode::Image {
+        model_3d: None,
         id: "image-1".into(),
         name: "Picture".into(),
         transform: Transform {

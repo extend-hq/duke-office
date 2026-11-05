@@ -1,6 +1,6 @@
 [package]
 name = "rust-office-art"
-version = "0.1.2"
+version = "0.1.3"
 edition.workspace = true
 license = "MIT AND Apache-2.0"
 repository.workspace = true
@@ -14,4 +14,6 @@ include = ["src/**", "Cargo.toml", "README.md", "LICENSE"]
 base64 = "0.22"
 image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "gif", "bmp", "tiff", "webp"] }
 serde.workspace = true
+serde_bytes.workspace = true
+quick-xml.workspace = true
 roxmltree = "0.20"

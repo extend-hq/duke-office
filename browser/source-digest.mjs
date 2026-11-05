@@ -13,8 +13,8 @@ function rustSources(dir) {
 }
 
 export function sourceDigest() {
-  const files = ["Cargo.toml", "Cargo.lock", "browser/build.mjs", "browser/source-digest.mjs"];
-  for (const crate of ["rust-office-charts", "rust-office-charts-wasm"]) {
+  const files = ["Cargo.toml", "Cargo.lock", "browser/build.mjs", "browser/source-digest.mjs", "browser/notices.mjs"];
+  for (const crate of ["rust-office-art", "rust-office-charts", "rust-office-charts-wasm"]) {
     files.push(`crates/${crate}/Cargo.toml`, ...rustSources(`crates/${crate}/src`));
   }
   const hash = createHash("sha256");

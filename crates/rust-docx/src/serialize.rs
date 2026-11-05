@@ -622,6 +622,8 @@ fn run_properties_xml(style: Option<&TextStyle>, state: &ImageSerializationState
         }
     }
 
+    fragments.extend(crate::parse::text_effects::serialize(style));
+
     if let Some(ligatures) = style.ligatures {
         fragments.push(format!(
             r#"<w14:ligatures w14:val="{}"/>"#,
@@ -1665,6 +1667,10 @@ fn picture_source_namespaces(
         ("a", DRAWING_MAIN_NS),
         ("wp", DRAWING_WORD_NS),
         ("pic", DRAWING_PICTURE_NS),
+        ("dgm", "http://schemas.openxmlformats.org/drawingml/2006/diagram"),
+        ("am3d", "http://schemas.microsoft.com/office/drawing/2017/model3d"),
+        ("aink", "http://schemas.microsoft.com/office/drawing/2016/ink"),
+        ("wpi", "http://schemas.microsoft.com/office/word/2010/wordprocessingInk"),
         ("v", VML_NS),
         ("o", "urn:schemas-microsoft-com:office:office"),
         ("w10", VML_WORD_NS),
@@ -1799,13 +1805,26 @@ fn preserved_picture_run_xml(
         {
             continue;
         }
-        if !matches!(attribute.name(), "id" | "embed" | "link" | "href" | "relid") {
+        let diagram_relationship = node.has_tag_name((
+            "http://schemas.openxmlformats.org/drawingml/2006/diagram", "relIds",
+        )).then(|| match attribute.name() {
+            "dm" => Some("diagramData"),
+            "lo" => Some("diagramLayout"),
+            "qs" => Some("diagramQuickStyle"),
+            "cs" => Some("diagramColors"),
+            _ => None,
+        }).flatten();
+        if diagram_relationship.is_none()
+            && !matches!(attribute.name(), "id" | "embed" | "link" | "href" | "relid") {
             return None;
         }
         let mut matching = relationships
             .iter()
             .filter(|relationship| relationship.id == attribute.value());
         let Some(relationship) = matching.next() else {
+            if diagram_relationship.is_some() {
+                return None;
+            }
             if let Some(index) = attribute
                 .value()
                 .strip_prefix("rId")
@@ -1821,7 +1840,31 @@ fn preserved_picture_run_xml(
         }
         let hyperlink = node.tag_name().namespace() == Some(DRAWING_MAIN_NS)
             && matches!(node.tag_name().name(), "hlinkClick" | "hlinkHover");
-        if hyperlink {
+        let visual_source_relationship = if node.has_tag_name((
+            "http://schemas.microsoft.com/office/drawing/2017/model3d", "model3d",
+        )) && attribute.name() == "embed" {
+            Some(("http://schemas.microsoft.com/office/2017/06/relationships/model3d", false))
+        } else if node.has_tag_name((WORD_2010_NS, "contentPart")) && attribute.name() == "id" {
+            Some(("http://schemas.openxmlformats.org/officeDocument/2006/relationships/customXml", true))
+        } else {
+            None
+        };
+        if let Some(kind) = diagram_relationship {
+            if relationship.r#type != format!("{OFFICE_REL_NS}/{kind}")
+                || !matches!(relationship.target_mode.as_deref(), None | Some("Internal"))
+                || !package.parts.contains_key(&crate::parse::resolve_part_path(owner_part_name, &relationship.target))
+            {
+                return None;
+            }
+        } else if let Some((kind, xml_part)) = visual_source_relationship {
+            let target = crate::parse::resolve_part_path(owner_part_name, &relationship.target);
+            if relationship.r#type != kind
+                || !matches!(relationship.target_mode.as_deref(), None | Some("Internal"))
+                || if xml_part { !package.parts.contains_key(&target) } else { !package.binary_assets.contains_key(&target) }
+            {
+                return None;
+            }
+        } else if hyperlink {
             if relationship.r#type != REL_TYPE_HYPERLINK
                 || relationship.target_mode.as_deref() != Some("External")
             {
@@ -3610,6 +3653,8 @@ const MARK_MANAGED_PROPERTIES: &[&str] = &[
     "w:kern",
     "w:vertAlign",
     "w:bdr",
+    "w14:shadow",
+    "w14:textOutline",
     "w14:ligatures",
     "w14:cntxtAlts",
 ];
@@ -3702,6 +3747,11 @@ fn merge_mark_properties_xml(source: &str, generated: &str) -> String {
             continue;
         }
         let block = &source[range.start..range.end];
+        if matches!(name.as_str(), "w14:shadow" | "w14:textOutline")
+            && !crate::parse::text_effects::supports(block, &name)
+        {
+            continue;
+        }
         let replacement = generated_children
             .iter()
             .enumerate()
@@ -3709,7 +3759,9 @@ fn merge_mark_properties_xml(source: &str, generated: &str) -> String {
         if let Some((index, (_, generated_range))) = replacement {
             consumed.insert(index);
             let generated_block = &generated[generated_range.start..generated_range.end];
-            let merged = {
+            let merged = if matches!(name.as_str(), "w14:shadow" | "w14:textOutline") {
+                generated_block.to_string()
+            } else {
                 let end = opening_tag_end(block, 0).unwrap_or(block.len());
                 let generated_end =
                     opening_tag_end(generated_block, 0).unwrap_or(generated_block.len());
