@@ -717,6 +717,10 @@ impl Extractor<'_> {
                             .unwrap()
                             .insert("paintBounds".into(), json!(paint_bounds));
                     }
+                    if let Some(presentation) = image.presentation.as_ref() {
+                        details.as_object_mut().unwrap()
+                            .insert("presentation".into(), json!(presentation));
+                    }
                     if let Some(url) = image_url(image) {
                         if let Some((rendered, presentation)) = presented_image_url(image, &url) {
                             details["sourceImageUrl"] = Value::String(url);

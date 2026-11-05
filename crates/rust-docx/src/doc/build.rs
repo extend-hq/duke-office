@@ -1792,6 +1792,7 @@ impl<'a> DocBuilder<'a> {
                 "tiff" => "image/tiff",
                 "emf" => "image/x-emf",
                 "wmf" => "image/x-wmf",
+                "pict" => "image/x-pict",
                 _ => continue,
             };
             content_types.push_str(&format!(

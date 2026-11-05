@@ -14,30 +14,31 @@ pub struct InlineImage {
 
 fn read_u16(bytes: &[u8], offset: usize) -> Option<u16> {
     bytes
-        .get(offset..offset + 2)
+        .get(offset..offset.checked_add(2)?)
         .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
 }
 
 fn read_u32(bytes: &[u8], offset: usize) -> Option<u32> {
     bytes
-        .get(offset..offset + 4)
+        .get(offset..offset.checked_add(4)?)
         .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
 }
 
 pub fn extract_image(data_stream: &[u8], fc: u32) -> Option<InlineImage> {
-    let base = fc as usize;
-    let lcb = read_u32(data_stream, base)? as usize;
-    let cb_header = read_u16(data_stream, base + 4)? as usize;
+    let data = data_stream.get(fc as usize..)?;
+    let lcb = read_u32(data, 0)? as usize;
+    let cb_header = read_u16(data, 4)? as usize;
     if cb_header < 0x2C || lcb < cb_header {
         return None;
     }
-    let mm = read_u16(data_stream, base + 6)?;
+    let data = data.get(..lcb)?;
+    let mm = read_u16(data, 6)?;
 
     // Display size: dxaGoal/dyaGoal twips scaled by mx/my (per-mille).
-    let dxa_goal = read_u16(data_stream, base + 28)? as i64;
-    let dya_goal = read_u16(data_stream, base + 30)? as i64;
-    let mx = read_u16(data_stream, base + 32)? as i64;
-    let my = read_u16(data_stream, base + 34)? as i64;
+    let dxa_goal = read_u16(data, 28)? as i64;
+    let dya_goal = read_u16(data, 30)? as i64;
+    let mx = read_u16(data, 32)? as i64;
+    let my = read_u16(data, 34)? as i64;
     let scale = |goal: i64, factor: i64| -> u64 {
         let factor = if factor == 0 { 1000 } else { factor };
         let twips = goal * factor / 1000;
@@ -46,7 +47,7 @@ pub fn extract_image(data_stream: &[u8], fc: u32) -> Option<InlineImage> {
     let width_emu = scale(dxa_goal, mx);
     let height_emu = scale(dya_goal, my);
 
-    let payload = data_stream.get(base + cb_header..base + lcb)?;
+    let payload = data.get(cb_header..)?;
 
     // mm 0x64/0x66: OfficeArt inline shape; otherwise legacy metafile storage
     // we do not support.
@@ -70,41 +71,41 @@ pub fn extract_image(data_stream: &[u8], fc: u32) -> Option<InlineImage> {
 }
 
 /// Walks an OfficeArt record stream (descending into containers) until a
-/// renderable blip record is found.
+/// supported blip payload is found.
 fn find_blip(bytes: &[u8], depth: usize) -> Option<(Vec<u8>, &'static str, &'static str)> {
     if depth > 8 {
         return None;
     }
     let mut pos = 0usize;
-    while pos + 8 <= bytes.len() {
+    while bytes.len().saturating_sub(pos) >= 8 {
         let ver_inst = read_u16(bytes, pos)?;
         let rec_type = read_u16(bytes, pos + 2)?;
         let rec_len = read_u32(bytes, pos + 4)? as usize;
         let body_start = pos + 8;
+        let body_end = body_start.checked_add(rec_len)?;
+        let body = bytes.get(body_start..body_end)?;
         let is_container = ver_inst & 0x000F == 0x000F;
         let instance = ver_inst >> 4;
 
         if (0xF018..=0xF117).contains(&rec_type) {
-            let body = bytes.get(body_start..(body_start + rec_len).min(bytes.len()))?;
             if let Some(result) = decode_blip(rec_type, instance, body) {
                 return Some(result);
             }
         } else if rec_type == 0xF007 {
             // OfficeArtFBSE: 36-byte header, embedded blip may follow.
             if rec_len > 36 {
-                let name_len = usize::from(*bytes.get(body_start + 33)?);
-                let body = bytes.get(body_start + 36 + name_len..body_start + rec_len)?;
+                let name_len = usize::from(*body.get(33)?);
+                let body = body.get(36 + name_len..)?;
                 if let Some(result) = find_blip(body, depth + 1) {
                     return Some(result);
                 }
             }
         } else if is_container {
-            let body = bytes.get(body_start..(body_start + rec_len).min(bytes.len()))?;
             if let Some(result) = find_blip(body, depth + 1) {
                 return Some(result);
             }
         }
-        pos = body_start + rec_len;
+        pos = body_end;
     }
     None
 }
@@ -130,7 +131,15 @@ fn decode_blip(
     };
 
     match rec_type {
-        0xF01D => tagged(0x46A, "jpeg", "image/jpeg"),
+        0xF01D => tagged(
+            if matches!(instance, 0x6E2 | 0x6E3) {
+                0x6E2
+            } else {
+                0x46A
+            },
+            "jpeg",
+            "image/jpeg",
+        ),
         0xF02A => tagged(0x6E2, "jpeg", "image/jpeg"), // JPEG (CMYK variant record)
         0xF01E => tagged(0x6E0, "png", "image/png"),
         0xF029 => tagged(0x6E4, "tiff", "image/tiff"),
@@ -141,32 +150,32 @@ fn decode_blip(
             let dib = body.get(data_start..)?;
             Some((dib_to_bmp(dib)?, "bmp", "image/bmp"))
         }
-        0xF01A | 0xF01B => {
-            let base_instance = if rec_type == 0xF01A { 0x3D4 } else { 0x216 };
+        0xF01A | 0xF01B | 0xF01C => {
+            let (base_instance, extension, mime) = match rec_type {
+                0xF01A => (0x3D4, "emf", "image/x-emf"),
+                0xF01B => (0x216, "wmf", "image/x-wmf"),
+                _ => (0x542, "pict", "image/x-pict"),
+            };
             let offset = if instance == base_instance + 1 {
                 32
             } else {
                 16
             };
             let size = read_u32(body, offset)? as usize;
-            if size > 64 * 1024 * 1024 {
+            if size == 0 || size > 64 * 1024 * 1024 {
                 return None;
             }
             let saved = read_u32(body, offset + 28)? as usize;
-            let data = body.get(offset + 34..offset + 34 + saved)?;
+            let data_start = offset + 34;
+            let data = body.get(data_start..data_start.checked_add(saved)?)?;
             let data = match *body.get(offset + 32)? {
                 0 => miniz_oxide::inflate::decompress_to_vec_zlib_with_limit(data, size).ok()?,
-                0xFE => data.to_vec(),
+                0xFE if saved == size => data.to_vec(),
                 _ => return None,
             };
             if data.len() != size {
                 return None;
             }
-            let (extension, mime) = if rec_type == 0xF01A {
-                ("emf", "image/x-emf")
-            } else {
-                ("wmf", "image/x-wmf")
-            };
             Some((data, extension, mime))
         }
         _ => None,
@@ -175,25 +184,82 @@ fn decode_blip(
 
 fn dib_to_bmp(dib: &[u8]) -> Option<Vec<u8>> {
     let bi_size = read_u32(dib, 0)? as usize;
-    if bi_size < 40 || dib.len() < bi_size {
+    if !matches!(bi_size, 12 | 40 | 52 | 56 | 108 | 124) || dib.len() < bi_size {
         return None;
     }
-    let bit_count = read_u16(dib, 14)? as usize;
-    let clr_used = read_u32(dib, 32)? as usize;
+    let (width, height, planes, bit_count, compression, clr_used, palette_stride) = if bi_size == 12
+    {
+        (
+            usize::from(read_u16(dib, 4)?),
+            usize::from(read_u16(dib, 6)?),
+            read_u16(dib, 8)?,
+            usize::from(read_u16(dib, 10)?),
+            0,
+            0,
+            3,
+        )
+    } else {
+        let width = read_u32(dib, 4)? as i32;
+        let height = read_u32(dib, 8)? as i32;
+        if width <= 0 || height == 0 {
+            return None;
+        }
+        (
+            width as usize,
+            height.checked_abs()? as usize,
+            read_u16(dib, 12)?,
+            usize::from(read_u16(dib, 14)?),
+            read_u32(dib, 16)?,
+            read_u32(dib, 32)? as usize,
+            4,
+        )
+    };
+    if width == 0 || height == 0 || planes != 1 {
+        return None;
+    }
+    match compression {
+        0 if matches!(bit_count, 1 | 2 | 4 | 8 | 16 | 24 | 32) => {}
+        1 if bit_count == 8 => {}
+        2 if bit_count == 4 => {}
+        3 | 6 if matches!(bit_count, 16 | 32) => {}
+        4 | 5 if bit_count == 0 => {}
+        _ => return None,
+    }
     let palette_entries = if clr_used != 0 {
         clr_used
-    } else if bit_count <= 8 {
+    } else if (1..=8).contains(&bit_count) {
         1usize << bit_count
     } else {
         0
     };
-    let pixel_offset = 14 + bi_size + palette_entries * 4;
+    if (1..=8).contains(&bit_count) && palette_entries > 1usize << bit_count {
+        return None;
+    }
+    let mask_end = match compression {
+        3 => bi_size.max(52),
+        6 => bi_size.max(56),
+        _ => bi_size,
+    };
+    let pixel_offset = mask_end.checked_add(palette_entries.checked_mul(palette_stride)?)?;
+    let pixels = dib.get(pixel_offset..)?;
+    if matches!(compression, 0 | 3 | 6) {
+        let stride = width.checked_mul(bit_count)?.checked_add(31)? / 32 * 4;
+        pixels.get(..stride.checked_mul(height)?)?;
+    } else {
+        let image_size = read_u32(dib, 20)? as usize;
+        if image_size == 0 {
+            return None;
+        }
+        pixels.get(..image_size)?;
+    }
+    let file_size = u32::try_from(dib.len().checked_add(14)?).ok()?;
+    let file_pixel_offset = u32::try_from(pixel_offset.checked_add(14)?).ok()?;
 
-    let mut bmp = Vec::with_capacity(14 + dib.len());
+    let mut bmp = Vec::with_capacity(file_size as usize);
     bmp.extend_from_slice(b"BM");
-    bmp.extend_from_slice(&((14 + dib.len()) as u32).to_le_bytes());
+    bmp.extend_from_slice(&file_size.to_le_bytes());
     bmp.extend_from_slice(&0u32.to_le_bytes());
-    bmp.extend_from_slice(&(pixel_offset as u32).to_le_bytes());
+    bmp.extend_from_slice(&file_pixel_offset.to_le_bytes());
     bmp.extend_from_slice(dib);
     Some(bmp)
 }

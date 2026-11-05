@@ -449,10 +449,100 @@ pub struct ImagePaintBounds {
     pub layout_height_px: f64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImagePropertyAttribute {
+    pub name: String,
+    pub value: String,
+}
+
+/// Ordered presentation data, including extension properties not rendered by the viewer.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImagePropertyNode {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attributes: Vec<ImagePropertyAttribute>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<ImagePropertyNode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageAssetReference {
+    pub element: String,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relationship_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    pub embedded_asset_available: bool,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageTransform {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rotation_degrees: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flip_horizontal: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flip_vertical: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset_x_emu: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset_y_emu: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width_emu: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height_emu: Option<f64>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageTile {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset_x_emu: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset_y_emu: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scale_x: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scale_y: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alignment: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub flip: Option<String>,
+}
+
+/// Parsed properties describe source intent independently of rendering coverage.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImagePresentation {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub transform_applied: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub assets: Vec<ImageAssetReference>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transform: Option<ImageTransform>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_rectangle: Option<ImageCrop>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill_rectangle: Option<ImageCrop>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tile: Option<ImageTile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub properties: Vec<ImagePropertyNode>,
+}
+
 /// Mirrors TypeScript `ImageRunNode`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImageRunNode {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presentation: Option<Box<ImagePresentation>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chart_part_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

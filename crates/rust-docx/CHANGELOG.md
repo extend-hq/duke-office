@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.6
+
+- Render picture transforms and effects through the shared native/WebAssembly `rust-office-art` crate, preserving source presentation properties for export.
+- Expand image relationships, legacy bitmap headers, and grouped picture rendering; retain explicit fallbacks where native appearance is not implemented.
+
 ## 0.2.5
 
 - Render opaque 24-bit and 32-bit EMF bitmap transfers as PNG-backed SVG previews in native and WebAssembly parsing.

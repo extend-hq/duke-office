@@ -879,11 +879,12 @@ pub fn rasterize_windows_metafile_to_png_data_uri(
     None
 }
 
-/// Converts supported EMF drawing records to an SVG data URI. WMF and EMFs containing
-/// unsupported drawing records return `None` so the caller
-/// keeps the unsupported-image placeholder.
+/// Converts supported metafile drawing records while retaining opaque payloads
+/// when playback is unavailable.
 pub fn windows_metafile_to_svg_data_uri(bytes: &[u8]) -> Option<String> {
-    crate::emf::emf_to_svg(bytes).map(|svg| svg_data_uri(&svg))
+    crate::emf::emf_to_svg(bytes)
+        .or_else(|| crate::wmf::wmf_bitmap_preview_to_svg(bytes))
+        .map(|svg| svg_data_uri(&svg))
 }
 
 pub fn resolve_theme_font(theme_token: Option<&str>, theme_fonts: &ThemeFontMap) -> Option<String> {

@@ -1,6 +1,6 @@
 [package]
 name = "rust-docx"
-version = "0.2.5"
+version = "0.2.6"
 edition.workspace = true
 license.workspace = true
 description = "Rust parser, document model, and serializer for DOCX and legacy Word documents"
@@ -16,6 +16,7 @@ default = ["native-deflate"]
 native-deflate = ["dep:libdeflater"]
 
 [dependencies]
+rust-office-art = { version = "=0.1.0", path = "../rust-office-art" }
 rust-office-charts = { version = "=0.1.3", path = "../rust-office-charts" }
 itoa = "1"
 serde = { workspace = true, features = ["rc"] }

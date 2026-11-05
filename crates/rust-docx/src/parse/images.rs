@@ -7,7 +7,7 @@ use crate::parse::context::ParseContext;
 use crate::parse::re;
 use crate::parse::relationships::content_type_for_part;
 use crate::parse::shapes::{
-    parse_text_box_layout, parse_text_box_paragraphs, render_bounded_text_box_svg,
+    drawing_group_paint_bounds, parse_text_box_layout, parse_text_box_paragraphs, render_bounded_text_box_svg,
     render_standalone_word_shape_svg, render_text_box_svg,
 };
 use crate::parse::util::{
@@ -256,7 +256,7 @@ fn drawing_duotone_svg(
     }
     let [dark, light] = endpoints;
     Some(svg_data_uri(&format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1" height="1" viewBox="0 0 1 1" preserveAspectRatio="none"><defs><filter id="duotone" x="0" y="0" width="100%" height="100%" color-interpolation-filters="linearRGB"><feColorMatrix type="matrix" values="0.299 0.587 0.114 0 0 0.299 0.587 0.114 0 0 0.299 0.587 0.114 0 0 0 0 0 1 0"/><feComponentTransfer><feFuncR type="table" tableValues="{} {}"/><feFuncG type="table" tableValues="{} {}"/><feFuncB type="table" tableValues="{} {}"/></feComponentTransfer></filter></defs><image xlink:href="{}" width="1" height="1" preserveAspectRatio="none" filter="url(#duotone)"/></svg>"#,
+        r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="1" height="1" viewBox="0 0 1 1" preserveAspectRatio="none"><defs><filter id="duotone" x="0" y="0" width="100%" height="100%" color-interpolation-filters="sRGB"><feColorMatrix type="matrix" values="0.2125 0.7154 0.0721 0 0 0.2125 0.7154 0.0721 0 0 0.2125 0.7154 0.0721 0 0 0 0 0 1 0"/><feComponentTransfer><feFuncR type="table" tableValues="{} {}"/><feFuncG type="table" tableValues="{} {}"/><feFuncB type="table" tableValues="{} {}"/></feComponentTransfer></filter></defs><image xlink:href="{}" width="1" height="1" preserveAspectRatio="none" filter="url(#duotone)"/></svg>"#,
         dark[0],
         light[0],
         dark[1],
@@ -282,11 +282,11 @@ pub fn parse_drawing_image_crop(run_xml: &str) -> Option<ImageCrop> {
 
     let parse_crop_fraction = |attribute_name: &str| -> Option<f64> {
         let raw_value = get_attribute(&src_rect_tag, attribute_name)?;
-        let value: f64 = raw_value.parse().ok()?;
+        let value: f64 = raw_value.trim().trim_end_matches('%').parse().ok()?;
         if !value.is_finite() {
             return None;
         }
-        Some(clamp(value / 100_000.0, 0.0, 1.0))
+        Some(value / if raw_value.trim().ends_with('%') { 100.0 } else { 100_000.0 })
     };
 
     let crop = ImageCrop {
@@ -304,7 +304,7 @@ pub fn parse_drawing_image_crop(run_xml: &str) -> Option<ImageCrop> {
     ]
     .into_iter()
     .flatten()
-    .any(|value| value.is_finite() && value > 0.0);
+    .any(|value| value.is_finite() && value != 0.0);
 
     if has_crop {
         Some(crop)
@@ -518,24 +518,42 @@ fn chart_relationship(xml: &str) -> Option<String> {
     get_attribute(&tag, "r:id")
 }
 
-fn resolve_preferred_drawing_relationship_id(run_xml: &str) -> Option<String> {
-    regex_capture(
-        run_xml,
-        r#"(?is)<a:ext\b[^>]*>[\s\S]*?<asvg:svgBlip\b[^>]*r:embed="([^"]+)""#,
-    )
-    .or_else(|| {
-        regex_capture(
-            run_xml,
-            r#"(?is)<a:ext\b[^>]*>[\s\S]*?<asvg:svgBlip\b[^>]*r:link="([^"]+)""#,
-        )
-    })
-    .or_else(|| regex_capture(run_xml, r#"(?i)<a:blip\b[^>]*r:embed="([^"]+)""#))
-    .or_else(|| regex_capture(run_xml, r#"(?i)<a:blip\b[^>]*r:link="([^"]+)""#))
+fn resolve_preferred_drawing_relationship_id(
+    run_xml: &str,
+    context: &ParseContext<'_, impl std::borrow::Borrow<super::context::ParsedStyleSheet>>,
+) -> Option<String> {
+    let mut candidates = Vec::new();
+    for name in ["asvg:svgBlip", "a:blip", "v:imagedata", "v:fill"] {
+        for tag in extract_balanced_tag_blocks(run_xml, name) {
+            for attribute in ["r:embed", "r:link", "r:id", "o:relid", "r:href"] {
+                if let Some(id) = get_attribute(&tag, attribute).filter(|id| !id.is_empty()) {
+                    candidates.push(id);
+                }
+            }
+        }
+    }
+    candidates.iter().find(|id| {
+        context.relationships.get(*id).is_some_and(|target| {
+            context.binary_assets.get(target).is_some_and(|bytes| !bytes.is_empty())
+        })
+    }).cloned().or_else(|| {
+        candidates.iter().find(|id| {
+            context.relationships.get(*id).is_some_and(|target| external_image_source(target).is_some())
+        }).cloned()
+    }).or_else(|| candidates.into_iter().next())
+}
+
+fn external_image_source(target: &str) -> Option<String> {
+    let normalized = target.trim().to_ascii_lowercase();
+    (normalized.starts_with("https://") || normalized.starts_with("http://"))
+        .then(|| target.trim().to_string())
 }
 
 fn resolve_run_image_layout(run_xml: &str) -> (Option<f64>, Option<f64>, Option<ImageFloating>) {
-    let extent_cx = regex_capture(run_xml, r#"(?i)<wp:extent\b[^>]*cx="(\d+)""#);
-    let extent_cy = regex_capture(run_xml, r#"(?i)<wp:extent\b[^>]*cy="(\d+)""#);
+    let extent_cx = regex_capture(run_xml, r#"(?i)<wp:extent\b[^>]*cx="(\d+)""#)
+        .or_else(|| regex_capture(run_xml, r#"(?i)<a:ext\b[^>]*cx="(\d+)""#));
+    let extent_cy = regex_capture(run_xml, r#"(?i)<wp:extent\b[^>]*cy="(\d+)""#)
+        .or_else(|| regex_capture(run_xml, r#"(?i)<a:ext\b[^>]*cy="(\d+)""#));
     let vml_style = vml_shape_style(run_xml);
     let vml_size = parse_vml_size_from_style(vml_style.as_deref().unwrap_or_default());
     let drawing_width_px = extent_cx
@@ -557,9 +575,10 @@ fn resolve_run_image_layout(run_xml: &str) -> (Option<f64>, Option<f64>, Option<
 }
 
 fn resolve_doc_pr_alt(run_xml: &str) -> Option<String> {
-    let doc_pr_tag = regex_capture_tag(run_xml, r"(?i)<wp:docPr\b[^>]*>")?;
+    let doc_pr_tag = regex_capture_tag(run_xml, r"(?i)<(?:wp:docPr|pic:cNvPr|v:imagedata)\b[^>]*>")?;
     get_attribute(&doc_pr_tag, "descr")
         .or_else(|| get_attribute(&doc_pr_tag, "title"))
+        .or_else(|| get_attribute(&doc_pr_tag, "o:title"))
         .or_else(|| get_attribute(&doc_pr_tag, "name"))
 }
 
@@ -1416,7 +1435,7 @@ fn vml_group_image_with_owner(
         {
             return None;
         }
-        let relationship = resolve_preferred_drawing_relationship_id(xml)
+        let relationship = resolve_preferred_drawing_relationship_id(xml, context)
             .or_else(|| regex_capture(xml, r#"(?i)<v:imagedata\b[^>]*r:id="([^"]+)""#))
             .or_else(|| chart_relationship(xml))?;
         let part_name = context.relationships.get(&relationship)?;
@@ -2006,6 +2025,7 @@ fn vml_group_image_with_owner(
         canvas.0, canvas.1
     );
     Some(ImageRunNode {
+        presentation: None,
         chart_data: None,
         chart_part_name: None,
         width_px: Some(if paint_bounds.is_some() { width } else { width_px }),
@@ -2035,6 +2055,21 @@ pub fn parse_run_image_block(
     run_xml: &str,
     context: &ParseContext<'_, impl std::borrow::Borrow<super::context::ParsedStyleSheet>>,
 ) -> Option<ImageRunNode> {
+    let mut image = parse_run_image_block_inner(run_xml, context)?;
+    let transform_applied = image.presentation.as_ref().is_some_and(|value| value.transform_applied);
+    image.presentation = super::image_properties::parse_image_presentation(
+        image.source_xml.as_deref().unwrap_or(run_xml), context,
+    ).or(image.presentation);
+    if let Some(presentation) = image.presentation.as_mut() {
+        presentation.transform_applied = transform_applied;
+    }
+    Some(image)
+}
+
+fn parse_run_image_block_inner(
+    run_xml: &str,
+    context: &ParseContext<'_, impl std::borrow::Borrow<super::context::ParsedStyleSheet>>,
+) -> Option<ImageRunNode> {
     let normalized_run_xml = prefer_alternate_content_choice(run_xml);
     let mut active_run_xml = normalized_run_xml.as_ref();
     let _drawing_index = if active_run_xml.len() > 8192
@@ -2054,16 +2089,14 @@ pub fn parse_run_image_block(
     let mut alt = resolve_doc_pr_alt(active_run_xml);
     let mut chart_relationship_id =
         chart_relationship(active_run_xml);
-    let mut relationship_id = resolve_preferred_drawing_relationship_id(active_run_xml)
-        .or_else(|| regex_capture(active_run_xml, r#"(?i)<v:imagedata\b[^>]*r:id="([^"]+)""#))
+    let mut relationship_id = resolve_preferred_drawing_relationship_id(active_run_xml, context)
         .or_else(|| chart_relationship_id.clone());
 
     if relationship_id.is_none() && normalized_run_xml != run_xml {
         active_run_xml = run_xml;
         chart_relationship_id =
             chart_relationship(active_run_xml);
-        relationship_id = resolve_preferred_drawing_relationship_id(active_run_xml)
-            .or_else(|| regex_capture(active_run_xml, r#"(?i)<v:imagedata\b[^>]*r:id="([^"]+)""#))
+        relationship_id = resolve_preferred_drawing_relationship_id(active_run_xml, context)
             .or_else(|| chart_relationship_id.clone());
         (width_px, height_px, floating) = resolve_run_image_layout(active_run_xml);
         alt = resolve_doc_pr_alt(active_run_xml);
@@ -2071,7 +2104,12 @@ pub fn parse_run_image_block(
 
     let part_name = relationship_id
         .as_deref()
-        .and_then(|id| context.relationships.get(id).cloned());
+        .and_then(|id| context.relationships.get(id).cloned())
+        .or_else(|| {
+            let tag = regex_capture_tag(active_run_xml, r"(?i)<v:(?:imagedata|fill)\b[^>]*>")?;
+            let target = get_attribute(&tag, "src")?;
+            external_image_source(&target).or_else(|| context.binary_assets.contains_key(&target).then_some(target))
+        });
     if relationship_id.is_some() && part_name.is_none() {
         context.push_warning(format!(
             "Missing relationship target for {}",
@@ -2085,8 +2123,8 @@ pub fn parse_run_image_block(
     let binary = part_name
         .as_deref()
         .and_then(|name| context.binary_assets.get(name).map(Vec::as_slice));
-    let crop = parse_drawing_image_crop(active_run_xml);
-    let css_filter = parse_drawing_image_css_filter(active_run_xml);
+    let mut crop = parse_drawing_image_crop(active_run_xml);
+    let mut css_filter = parse_drawing_image_css_filter(active_run_xml);
     let css_opacity = parse_drawing_image_opacity(active_run_xml);
 
     let likely_chart_part = chart_relationship_id.is_some()
@@ -2125,6 +2163,7 @@ pub fn parse_run_image_block(
                 parse_text_box_layout(active_run_xml).as_ref(),
             ));
             return Some(ImageRunNode {
+        presentation: None,
                 chart_data: None,
                 chart_part_name: None,
                 paint_bounds: None,
@@ -2186,18 +2225,23 @@ pub fn parse_run_image_block(
                 height_px = Some(height);
             }
         }
+        let paint_bounds = width_px.zip(height_px).and_then(|(width, height)| {
+            drawing_group_paint_bounds(svg, width, height)
+        });
         return Some(ImageRunNode {
+            presentation: contains_grouped_or_standalone_shape.then(|| Box::new(crate::model::ImagePresentation {
+                transform_applied: true,
+                ..Default::default()
+            })),
             chart_data: None,
             chart_part_name: None,
-            paint_bounds: None,
+            paint_bounds,
             r#type: ImageRunNodeType::Image,
             block_id: None,
             content_nodes: None,
             semantic_kind: None,
             math_ml: None,
-            src: Some(svg_data_uri(
-                standalone_shape_svg.as_deref().unwrap_or_default(),
-            )),
+            src: Some(svg_data_uri(svg)),
             alt: Some(alt.unwrap_or_else(|| {
                 if contains_text_box_content {
                     "Text box".to_string()
@@ -2236,6 +2280,7 @@ pub fn parse_run_image_block(
             .and_then(|name| crate::chart::render_chart_part(name, context, width_px, height_px))
         {
             return Some(ImageRunNode {
+        presentation: None,
                 chart_data: Some(Box::new(chart_data)),
                 chart_part_name,
                 paint_bounds: None,
@@ -2262,7 +2307,7 @@ pub fn parse_run_image_block(
         }
     }
 
-    if relationship_id.is_none() {
+    if relationship_id.is_none() && part_name.is_none() {
         let text_box_paragraphs = parse_text_box_paragraphs(active_run_xml, context);
         if text_box_paragraphs.is_empty() {
             return None;
@@ -2275,6 +2320,7 @@ pub fn parse_run_image_block(
             parse_text_box_layout(active_run_xml).as_ref(),
         ));
         return Some(ImageRunNode {
+        presentation: None,
             chart_data: None,
             chart_part_name: None,
             paint_bounds: None,
@@ -2300,7 +2346,7 @@ pub fn parse_run_image_block(
         });
     }
 
-    let mut src: Option<String> = None;
+    let mut src: Option<String> = part_name.as_deref().and_then(external_image_source);
     let mut resolved_content_type = content_type.clone();
     let mut resolved_css_opacity = css_opacity;
     if let Some(binary) = binary {
@@ -2313,12 +2359,10 @@ pub fn parse_run_image_block(
             src = windows_metafile_to_svg_data_uri(binary);
             if src.is_some() {
                 resolved_content_type = Some("image/svg+xml".to_string());
-                resolved_css_opacity = None;
             } else {
                 src = rasterize_windows_metafile_to_png_data_uri(binary, part_name.as_deref());
                 if src.is_some() {
                     resolved_content_type = Some("image/png".to_string());
-                    resolved_css_opacity = None;
                 }
             }
         }
@@ -2329,18 +2373,45 @@ pub fn parse_run_image_block(
         }
     }
 
+    let mut paint_bounds = None;
+    let mut transform_applied = false;
     if let Some(source) = src.as_deref() {
-        if let Some(duotone) = drawing_duotone_svg(active_run_xml, source, context) {
+        let paint = width_px.zip(height_px).and_then(|(width, height)| {
+            super::picture::render_picture(active_run_xml, source, width, height, context)
+                .or_else(|| super::vml_picture::render_vml_picture(active_run_xml, source, width, height, context))
+        });
+        if let Some(paint) = paint {
+            transform_applied = true;
+            src = Some(paint.src);
+            resolved_content_type = Some("image/svg+xml".to_owned());
+            paint_bounds = paint.paint_bounds;
+            crop = None;
+            css_filter = None;
+            resolved_css_opacity = None;
+        } else if let Some(duotone) = drawing_duotone_svg(active_run_xml, source, context) {
             src = Some(duotone);
+            resolved_content_type = Some("image/svg+xml".to_owned());
+        } else if matches!(resolved_content_type.as_deref(), Some("image/tiff" | "image/tif")) {
+            if let Some(normalized) = rust_office_art::normalize_raster(source) {
+                src = Some(normalized);
+                resolved_content_type = Some("image/png".to_owned());
+            }
         }
+    }
+    if !transform_applied && super::picture::has_picture_effects(active_run_xml) {
+        context.push_warning("OfficeArt picture appearance retained but not fully rendered");
     }
 
     Some(ImageRunNode {
+        presentation: transform_applied.then(|| Box::new(crate::model::ImagePresentation {
+            transform_applied: true,
+            ..Default::default()
+        })),
         chart_data: chart_part_name.as_ref().and_then(|name| {
             rust_office_charts::parse_chart_xml(&context.parts.get(name)?.content).map(Box::new)
         }),
         chart_part_name,
-        paint_bounds: None,
+        paint_bounds,
         r#type: ImageRunNodeType::Image,
         block_id: None,
         content_nodes: None,
@@ -2405,33 +2476,6 @@ fn alternate_chart_previews(run_xml: &str) -> std::collections::HashMap<usize, (
     previews
 }
 
-fn region_map_preview(
-    part_name: &str,
-    fallback: &str,
-    context: &ParseContext<'_, impl std::borrow::Borrow<super::context::ParsedStyleSheet>>,
-) -> Option<ImageRunNode> {
-    use crate::chart::CHARTEX_NS;
-    let xml = roxmltree::Document::parse(&context.parts.get(part_name)?.content).ok()?;
-    let root = xml.root_element();
-    if !root.has_tag_name((CHARTEX_NS, "chartSpace")) {
-        return None;
-    }
-    let plot = ["chart", "plotArea", "plotAreaRegion"]
-        .into_iter()
-        .try_fold(root, |parent, tag| {
-            parent.children().find(|node| node.has_tag_name((CHARTEX_NS, tag)))
-        })?;
-    if !plot.children().any(|series| {
-        series.has_tag_name((CHARTEX_NS, "series")) && series.attribute("layoutId") == Some("regionMap")
-    }) {
-        return None;
-    }
-    parse_run_image_block(fallback, context).filter(|preview| {
-        preview.src.as_deref().is_some_and(|url| url.starts_with("data:image/"))
-            && preview.data.as_ref().is_some_and(|bytes| !bytes.is_empty())
-    })
-}
-
 pub fn parse_run_image_tokens(
     run_xml: &str,
     context: &ParseContext<'_, impl std::borrow::Borrow<super::context::ParsedStyleSheet>>,
@@ -2463,28 +2507,34 @@ pub fn parse_run_image_tokens(
     let mut images = Vec::new();
     let mut previews = None;
     for (source_start, candidate_xml) in candidate_xml_blocks {
-        let Some(mut image) = parse_run_image_block(candidate_xml, context) else {
-            continue;
-        };
-        if image.src.is_none() && run_xml.len() < original_run.len() {
-            let preview = image.chart_part_name.as_deref().and_then(|part| {
-                let &(alternate, fallback) = previews
-                    .get_or_insert_with(|| alternate_chart_previews(original_run))
-                    .get(&source_start)?;
-                Some((alternate, region_map_preview(part, fallback, context)?))
-            });
-            if let Some((alternate, preview)) = preview {
-                image.src = preview.src;
-                image.data = preview.data;
-                image.part_name = preview.part_name;
-                image.content_type = preview.content_type;
-                image.crop = preview.crop;
-                image.css_filter = preview.css_filter;
-                image.css_opacity = preview.css_opacity;
-                image.source_xml = Some(alternate.to_owned());
+        let mut image = parse_run_image_block(candidate_xml, context);
+        let requires_preview = image.as_ref().is_none_or(|image| {
+            image.src.is_none() || matches!(image.content_type.as_deref(),
+                Some("image/wmf" | "image/x-wmf" | "image/emf" | "image/x-emf" | "image/x-pict" | "image/vnd.ms-photo"))
+        });
+        if requires_preview && run_xml.len() < original_run.len() {
+            if let Some(&(alternate, fallback)) = previews
+                .get_or_insert_with(|| alternate_chart_previews(original_run))
+                .get(&source_start)
+            {
+                if let Some(mut preview) = parse_run_image_block(fallback, context).filter(|image| image.src.is_some()) {
+                    if let Some(original) = image {
+                        preview.chart_data = original.chart_data;
+                        preview.chart_part_name = original.chart_part_name;
+                    }
+                    preview.source_xml = Some(alternate.to_owned());
+                    let transform_applied = preview.presentation.as_ref().is_some_and(|value| value.transform_applied);
+                    preview.presentation = super::image_properties::parse_image_presentation(alternate, context);
+                    if let Some(presentation) = preview.presentation.as_mut() {
+                        presentation.transform_applied = transform_applied;
+                    }
+                    image = Some(preview);
+                }
             }
         }
-        images.push((source_start, image));
+        if let Some(image) = image {
+            images.push((source_start, image));
+        }
     }
 
     images

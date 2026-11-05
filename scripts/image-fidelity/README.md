@@ -1,0 +1,21 @@
+# Picture appearance comparison
+
+Generate a fixed picture matrix and capture it with the installed Microsoft Word:
+
+```sh
+python3 scripts/image-fidelity/generate.py --output artifacts/word-image-parity-20261105
+python3 scripts/image-fidelity/capture.py --directory artifacts/word-image-parity-20261105
+python3 scripts/image-fidelity/compare.py --reference-directory artifacts/word-image-parity-20261105 --candidate-directory /absolute/path/to/pages --output /absolute/path/to/comparison --label 'React DOCX'
+```
+
+The generator records deterministic input hashes and one case per 432 × 432 pixel page. Each picture has a 192 × 128 pixel layout frame at (120, 120), using 96 pixels per inch. Compare the full 336 × 336 pixel region beginning at (48, 48) so rotation, borders, shadows and reflection remain visible. Do not normalize each image to its own ink bounds; doing so hides geometry differences.
+
+The capture opens only the matrix, disables external-link updates while it is open, restores the prior application settings, and closes only the opened document. Existing native references cannot be overwritten. The receipt records Word version, input and output hashes, page count, and rasterizer DPI.
+
+Candidate pages must have the same 432 × 432 pixel dimensions and use `page-01.png` through `page-40.png`; a different name pattern can be passed with `--candidate-pattern`. The comparison retains missing, size-mismatched, and blank outputs in the report. It verifies the native PNG hashes before scoring and produces a per-case JSON ledger and HTML gallery with difference images. Color agreement is evaluated over the union of visible ink, avoiding inflated scores from white page margins.
+
+This is a synthetic appearance matrix. It is not an exhaustive image-format corpus or a claim of Word rendering parity. Compare each output to the retained Word pages and report unsupported cases without excluding them from the denominator.
+
+Extract the native model with `cargo run -p rust-docx --example image_fidelity -- INPUT.docx MODEL.json ROUNDTRIP.docx`. The optional third path reconstructs the document after clearing paragraph source XML, exercising image source preservation.
+
+Use `prepare-pages.py --directory DIR --model MODEL.json` to produce fixed browser pages from the native model. Serve the directory locally, then generate a CLI function with `prepare-capture.py --directory DIR --target parser --base-url URL`. For the running React DOCX playground use `--target viewer`. Run the generated function with `playwright-cli run-code --filename PATH`. Both capture routes use the same page dimensions and retain all cases.

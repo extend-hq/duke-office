@@ -1627,6 +1627,270 @@ const VML_NS: &str = "urn:schemas-microsoft-com:vml";
 const VML_WORD_NS: &str = "urn:schemas-microsoft-com:office:word";
 const VML_SOURCE_NAMESPACES: &str = r#"xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w10="urn:schemas-microsoft-com:office:word" xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006""#;
 
+fn picture_source_namespaces(
+    package: &OoxmlPackage,
+    owner_part_name: &str,
+) -> Option<std::collections::BTreeMap<String, String>> {
+    let mut namespaces = std::collections::BTreeMap::new();
+    if let Some(part) = package.parts.get(owner_part_name) {
+        let mut reader = quick_xml::Reader::from_str(&part.content);
+        loop {
+            match reader.read_event().ok()? {
+                quick_xml::events::Event::Start(tag) | quick_xml::events::Event::Empty(tag) => {
+                    for attribute in tag.attributes() {
+                        let attribute = attribute.ok()?;
+                        let name = attribute.key.as_ref();
+                        if name == "xmlns" {
+                            namespaces.insert(
+                                String::new(),
+                                decode_xml_entities(attribute.value.as_ref()),
+                            );
+                        } else if let Some(prefix) = name.strip_prefix("xmlns:") {
+                            namespaces.insert(
+                                prefix.to_owned(),
+                                decode_xml_entities(attribute.value.as_ref()),
+                            );
+                        }
+                    }
+                    break;
+                }
+                quick_xml::events::Event::Eof => return None,
+                _ => {}
+            }
+        }
+    }
+    for (prefix, uri) in [
+        ("w", WORD_MAIN_NS),
+        ("r", OFFICE_REL_NS),
+        ("a", DRAWING_MAIN_NS),
+        ("wp", DRAWING_WORD_NS),
+        ("pic", DRAWING_PICTURE_NS),
+        ("v", VML_NS),
+        ("o", "urn:schemas-microsoft-com:office:office"),
+        ("w10", VML_WORD_NS),
+        ("w14", WORD_2010_NS),
+        ("mc", MARKUP_COMPATIBILITY_NS),
+        (
+            "a14",
+            "http://schemas.microsoft.com/office/drawing/2010/main",
+        ),
+        (
+            "asvg",
+            "http://schemas.microsoft.com/office/drawing/2016/SVG/main",
+        ),
+        (
+            "wp14",
+            "http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing",
+        ),
+        (
+            "wps",
+            "http://schemas.microsoft.com/office/word/2010/wordprocessingShape",
+        ),
+        (
+            "wpg",
+            "http://schemas.microsoft.com/office/word/2010/wordprocessingGroup",
+        ),
+    ] {
+        namespaces
+            .entry(prefix.to_owned())
+            .or_insert_with(|| uri.to_owned());
+    }
+    Some(namespaces)
+}
+
+fn preserved_picture_run_xml(
+    image: &ImageRunNode,
+    owner_part_name: &str,
+    relationships: &[Relationship],
+    package: &OoxmlPackage,
+) -> Option<(String, i64)> {
+    if image.synthetic_text_box == Some(true)
+        || image.content_nodes.is_some()
+        || image.text_box_text.is_some()
+        || image.math_ml.is_some()
+        || image.chart_part_name.is_some()
+        || image.chart_data.is_some()
+        || !valid_image_paint_geometry(image)
+    {
+        return None;
+    }
+    let source = image.source_xml.as_deref()?;
+    let namespaces = picture_source_namespaces(package, owner_part_name)?;
+    let declarations = namespaces
+        .iter()
+        .map(|(prefix, uri)| {
+            if prefix.is_empty() {
+                format!(" xmlns=\"{}\"", escape_xml(uri))
+            } else {
+                format!(" xmlns:{prefix}=\"{}\"", escape_xml(uri))
+            }
+        })
+        .collect::<String>();
+    let open = format!("<root{declarations}>");
+    let wrapped = format!("{open}{source}</root>");
+    let document = roxmltree::Document::parse(&wrapped).ok()?;
+    let root = document.root_element();
+    if root
+        .children()
+        .any(|node| node.is_text() && node.text().is_some_and(|text| !text.trim().is_empty()))
+    {
+        return None;
+    }
+    let top: Vec<_> = root.children().filter(|node| node.is_element()).collect();
+    let [top] = top.as_slice() else {
+        return None;
+    };
+    let is_visual = |node: roxmltree::Node<'_, '_>| {
+        node.has_tag_name((WORD_MAIN_NS, "drawing"))
+            || node.has_tag_name((WORD_MAIN_NS, "pict"))
+            || node.has_tag_name((MARKUP_COMPATIBILITY_NS, "AlternateContent"))
+    };
+    let is_run = top.has_tag_name((WORD_MAIN_NS, "r"));
+    if is_run {
+        let children: Vec<_> = top.children().filter(|node| node.is_element()).collect();
+        if children.iter().filter(|node| is_visual(**node)).count() != 1
+            || children
+                .iter()
+                .any(|node| !is_visual(*node) && !node.has_tag_name((WORD_MAIN_NS, "rPr")))
+        {
+            return None;
+        }
+    } else if !is_visual(*top) {
+        return None;
+    }
+    if document
+        .descendants()
+        .filter(|node| node.is_element() && *node != root)
+        .any(|node| {
+            if node.tag_name().namespace() != Some(WORD_MAIN_NS) {
+                return false;
+            }
+            if (node == *top && is_run) || matches!(node.tag_name().name(), "drawing" | "pict") {
+                return false;
+            }
+            let inside_run_properties = is_run
+                && node.ancestors().any(|ancestor| {
+                    ancestor.has_tag_name((WORD_MAIN_NS, "rPr")) && ancestor.parent() == Some(*top)
+                });
+            !inside_run_properties
+        })
+    {
+        return None;
+    }
+
+    let mut targets = HashMap::new();
+    for relationship in relationships {
+        let target = if relationship.target_mode.as_deref() == Some("External") {
+            relationship.target.clone()
+        } else {
+            crate::parse::resolve_part_path(owner_part_name, &relationship.target)
+        };
+        targets.insert(relationship.id.clone(), target);
+    }
+    let mut reserved_relationship_index = 1i64;
+    for (node, attribute) in document
+        .descendants()
+        .flat_map(|node| node.attributes().map(move |attribute| (node, attribute)))
+    {
+        let namespace = attribute.namespace();
+        if namespace != Some(OFFICE_REL_NS)
+            && !(namespace == Some("urn:schemas-microsoft-com:office:office")
+                && attribute.name() == "relid")
+        {
+            continue;
+        }
+        if !matches!(attribute.name(), "id" | "embed" | "link" | "href" | "relid") {
+            return None;
+        }
+        let mut matching = relationships
+            .iter()
+            .filter(|relationship| relationship.id == attribute.value());
+        let Some(relationship) = matching.next() else {
+            if let Some(index) = attribute
+                .value()
+                .strip_prefix("rId")
+                .and_then(|value| value.parse::<i64>().ok())
+            {
+                reserved_relationship_index =
+                    reserved_relationship_index.max(index.checked_add(1)?);
+            }
+            continue;
+        };
+        if matching.next().is_some() || relationship.target.is_empty() {
+            return None;
+        }
+        let hyperlink = node.tag_name().namespace() == Some(DRAWING_MAIN_NS)
+            && matches!(node.tag_name().name(), "hlinkClick" | "hlinkHover");
+        if hyperlink {
+            if relationship.r#type != REL_TYPE_HYPERLINK
+                || relationship.target_mode.as_deref() != Some("External")
+            {
+                return None;
+            }
+        } else if relationship.r#type != REL_TYPE_IMAGE
+            || !matches!(
+                relationship.target_mode.as_deref(),
+                None | Some("Internal" | "External")
+            )
+        {
+            return None;
+        }
+    }
+    let context = crate::parse::ParseContext {
+        relationships: targets,
+        content_types: crate::parse::parse_content_types(package),
+        parts: &package.parts,
+        binary_assets: &package.binary_assets,
+        style_sheet: crate::parse::parse_style_sheet(package),
+        warnings: std::cell::RefCell::new(Vec::new()),
+    };
+    let parsed = crate::parse::parse_run_images(source, &context);
+    let [parsed] = parsed.as_slice() else {
+        return None;
+    };
+    if parsed.src.is_none()
+        || parsed.src != image.src
+        || parsed.alt != image.alt
+        || parsed.width_px != image.width_px
+        || parsed.height_px != image.height_px
+        || parsed.part_name != image.part_name
+        || parsed.content_type != image.content_type
+        || parsed.data != image.data
+        || parsed.crop != image.crop
+        || parsed.css_filter != image.css_filter
+        || parsed.css_opacity != image.css_opacity
+        || parsed.paint_bounds != image.paint_bounds
+        || parsed.floating != image.floating
+        || parsed.presentation != image.presentation
+        || parsed.synthetic_text_box != image.synthetic_text_box
+    {
+        return None;
+    }
+    if is_run {
+        let start = top.range().start - open.len();
+        let end = opening_tag_end(source, start)?;
+        let mut tag = source[start..end].to_owned();
+        for (prefix, uri) in namespaces {
+            if prefix.is_empty() {
+                if get_attribute(&tag, "xmlns").is_none() {
+                    tag.insert_str(tag.len() - 1, &format!(" xmlns=\"{}\"", escape_xml(&uri)));
+                }
+            } else {
+                tag = ensure_namespace(&tag, &prefix, &escape_xml(&uri));
+            }
+        }
+        Some((
+            format!("{}{}{}", &source[..start], tag, &source[end..]),
+            reserved_relationship_index,
+        ))
+    } else {
+        Some((
+            format!("<w:r{declarations}>{source}</w:r>"),
+            reserved_relationship_index,
+        ))
+    }
+}
+
 fn vml_source_frame(root: roxmltree::Node<'_, '_>) -> Option<(f64, f64, Option<ImageFloating>)> {
     let style = root.attribute("style")?;
     let mut declarations = HashMap::new();
@@ -1814,7 +2078,7 @@ fn finite_coordinates<const N: usize>(value: &str) -> Option<[f64; N]> {
     values.try_into().ok()
 }
 
-fn valid_image_paint_bounds(image: &ImageRunNode) -> bool {
+fn valid_image_paint_geometry(image: &ImageRunNode) -> bool {
     let Some(bounds) = image.paint_bounds.as_deref() else {
         return true;
     };
@@ -1839,7 +2103,6 @@ fn valid_image_paint_bounds(image: &ImageRunNode) -> bool {
         && image
             .height_px
             .is_some_and(|value| value.is_finite() && value > 0.0)
-        && image.floating.is_none()
         && [
             scale_x,
             scale_y,
@@ -1854,6 +2117,10 @@ fn valid_image_paint_bounds(image: &ImageRunNode) -> bool {
         && (bounds.y_px + bounds.height_px).is_finite()
         && (bounds.x_px * scale_x + bounds.width_px * scale_x).is_finite()
         && (bounds.y_px * scale_y + bounds.height_px * scale_y).is_finite()
+}
+
+fn valid_image_paint_bounds(image: &ImageRunNode) -> bool {
+    valid_image_paint_geometry(image) && (image.paint_bounds.is_none() || image.floating.is_none())
 }
 
 fn vml_paint_matches_source(
@@ -2460,6 +2727,10 @@ fn drawing_run_xml(
     state: &mut ImageSerializationState<'_>,
     run_id: i64,
 ) -> String {
+    if let Some((source, next_relationship_index)) = preserved_picture_run_xml(image, &state.owner_part_name, &state.relationships, state.pkg) {
+        state.next_relationship_index = state.next_relationship_index.max(next_relationship_index);
+        return source;
+    }
     if let Some(source) = edited_vml_textbox_run_xml(image, state, run_id) {
         return source;
     }
@@ -6593,7 +6864,7 @@ pub fn can_preserve_image_paint_source(
     base_package: Option<&OoxmlPackage>,
     owner_part_name: &str,
 ) -> bool {
-    if image.paint_bounds.is_none() || !valid_image_paint_bounds(image) {
+    if image.paint_bounds.is_none() || !valid_image_paint_geometry(image) {
         return false;
     }
     let default_package;
@@ -6613,7 +6884,9 @@ pub fn can_preserve_image_paint_source(
         .get(&relationship_part_name_for_word_part(owner))
         .map(|part| parse_relationships_xml(&part.content))
         .unwrap_or_default();
-    edited_vml_textbox_source_plan(image, owner, &relationships, package).is_some()
+    preserved_picture_run_xml(image, owner, &relationships, package).is_some()
+        || (valid_image_paint_bounds(image)
+            && edited_vml_textbox_source_plan(image, owner, &relationships, package).is_some())
 }
 
 pub fn validate_image_paint_bounds(
@@ -6699,12 +6972,13 @@ pub fn validate_image_paint_bounds(
         }
     }
     for (image, owner) in images {
+        if can_preserve_image_paint_source(image, Some(package), &owner) {
+            continue;
+        }
         if !valid_image_paint_bounds(image) {
             return Err("Inline image paint bounds require finite positive geometry and an inline layout frame".into());
         }
-        if !can_preserve_image_paint_source(image, Some(package), &owner)
-            && paint_png_bytes(image).is_none()
-        {
+        if paint_png_bytes(image).is_none() {
             return Err("Inline image paint cannot be preserved from source; a current full-viewport PNG is required before export".into());
         }
     }

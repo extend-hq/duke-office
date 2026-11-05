@@ -447,7 +447,225 @@ struct GroupedDrawing<'a> {
     xml: &'a str,
     picture: bool,
     transform: DrawingGroupTransform,
+    affine: Option<DrawingAffine>,
     bitmap_fill_supported: bool,
+}
+
+#[derive(Clone, Copy)]
+struct DrawingAffine([f64; 6]);
+
+impl DrawingAffine {
+    fn compose(self, rhs: Self) -> Self {
+        let [a, b, c, d, e, f] = self.0;
+        let [g, h, i, j, k, l] = rhs.0;
+        Self([
+            a * g + c * h,
+            b * g + d * h,
+            a * i + c * j,
+            b * i + d * j,
+            a * k + c * l + e,
+            b * k + d * l + f,
+        ])
+    }
+
+    fn point(self, x: f64, y: f64) -> (f64, f64) {
+        let [a, b, c, d, e, f] = self.0;
+        (a * x + c * y + e, b * x + d * y + f)
+    }
+
+    fn frame(x: f64, y: f64, width: f64, height: f64, xml: &str) -> Option<Self> {
+        let rotation = get_attribute(xml, "rot")
+            .map(|raw| raw.parse::<f64>().ok())
+            .unwrap_or(Some(0.0))?
+            / 60_000.0;
+        if !rotation.is_finite() {
+            return None;
+        }
+        let flip = |name| match get_attribute(xml, name).as_deref() {
+            None | Some("0" | "false") => Some(1.0),
+            Some("1" | "true") => Some(-1.0),
+            _ => None,
+        };
+        let snap = |value: f64| if value.abs() < 1e-12 { 0.0 } else { value };
+        let (sin, cos) = (rotation % 360.0).to_radians().sin_cos();
+        let (sin, cos) = (snap(sin), snap(cos));
+        let (flip_x, flip_y) = (flip("flipH")?, flip("flipV")?);
+        let [a, b, c, d] = [cos * flip_x, sin * flip_x, -sin * flip_y, cos * flip_y];
+        Some(Self([
+            a,
+            b,
+            c,
+            d,
+            x + width / 2.0 - a * width / 2.0 - c * height / 2.0,
+            y + height / 2.0 - b * width / 2.0 - d * height / 2.0,
+        ]))
+    }
+
+    fn markup(self) -> String {
+        let [a, b, c, d, e, f] = self.0;
+        format!("matrix({a} {b} {c} {d} {e} {f})")
+    }
+}
+
+impl GroupedDrawing<'_> {
+    fn wrap(&self, element: String) -> String {
+        match self.affine {
+            Some(matrix) => format!(r#"<g transform="{}">{element}</g>"#, matrix.markup()),
+            None => element,
+        }
+    }
+}
+
+fn drawing_group_transform_xml(group: &str) -> Option<&str> {
+    crate::xml::direct_child_tag(group, "wpg:grpSpPr")
+        .and_then(|properties| crate::xml::direct_child_tag(properties, "a:xfrm"))
+}
+
+fn affine_group_matrix(xml: &str, frame: Option<(f64, f64)>) -> Option<DrawingAffine> {
+    let child_offset = crate::xml::direct_child_tag(xml, "a:chOff")?;
+    let child_extent = crate::xml::direct_child_tag(xml, "a:chExt")?;
+    let child_x = parse_integer_attribute(child_offset, "x")? as f64 / 9525.0;
+    let child_y = parse_integer_attribute(child_offset, "y")? as f64 / 9525.0;
+    let child_width = parse_integer_attribute(child_extent, "cx")? as f64 / 9525.0;
+    let child_height = parse_integer_attribute(child_extent, "cy")? as f64 / 9525.0;
+    let (x, y, width, height) = if let Some((width, height)) = frame {
+        (0.0, 0.0, width, height)
+    } else {
+        let offset = crate::xml::direct_child_tag(xml, "a:off")?;
+        let extent = crate::xml::direct_child_tag(xml, "a:ext")?;
+        (
+            parse_integer_attribute(offset, "x")? as f64 / 9525.0,
+            parse_integer_attribute(offset, "y")? as f64 / 9525.0,
+            parse_integer_attribute(extent, "cx")? as f64 / 9525.0,
+            parse_integer_attribute(extent, "cy")? as f64 / 9525.0,
+        )
+    };
+    if [width, height, child_width, child_height]
+        .into_iter()
+        .any(|value| value <= 0.0)
+    {
+        return None;
+    }
+    let scale_x = width / child_width;
+    let scale_y = height / child_height;
+    let matrix = DrawingAffine::frame(x, y, width, height, xml)?.compose(DrawingAffine([
+        scale_x,
+        0.0,
+        0.0,
+        scale_y,
+        -child_x * scale_x,
+        -child_y * scale_y,
+    ]));
+    matrix.0.into_iter().all(f64::is_finite).then_some(matrix)
+}
+
+fn collect_affine_grouped_drawings<'a>(
+    xml: &'a str,
+    matrix: DrawingAffine,
+    depth: usize,
+    output: &mut Vec<GroupedDrawing<'a>>,
+) -> Option<()> {
+    if depth > 64 {
+        return None;
+    }
+    for range in crate::xml::extract_direct_child_tag_ranges(xml) {
+        let child = &xml[range.start..range.end];
+        match range.tag_name.as_str() {
+            "pic:pic" | "wps:wsp" => output.push(GroupedDrawing {
+                xml: child,
+                picture: range.tag_name == "pic:pic",
+                transform: DrawingGroupTransform {
+                    scale_x: 1.0 / 9525.0,
+                    scale_y: 1.0 / 9525.0,
+                    origin_x: 0.0,
+                    origin_y: 0.0,
+                    integer_origin: Some((0, 0)),
+                },
+                affine: Some(matrix),
+                bitmap_fill_supported: true,
+            }),
+            "wpg:grpSp" => {
+                let child_matrix = matrix.compose(affine_group_matrix(
+                    drawing_group_transform_xml(child)?,
+                    None,
+                )?);
+                if !child_matrix.0.into_iter().all(f64::is_finite) {
+                    return None;
+                }
+                collect_affine_grouped_drawings(child, child_matrix, depth + 1, output)?;
+            }
+            "wpg:cNvPr" | "wpg:cNvGrpSpPr" | "wpg:grpSpPr" | "wpg:extLst" => {}
+            _ => return None,
+        }
+    }
+    Some(())
+}
+
+fn group_needs_affine(xml: &str) -> bool {
+    crate::xml::extract_balanced_tag_slices(xml, "a:xfrm")
+        .into_iter()
+        .any(|xml| {
+            ["rot", "flipH", "flipV"].into_iter().any(|name| {
+                get_attribute(xml, name)
+                    .is_some_and(|value| !matches!(value.as_str(), "0" | "false"))
+            })
+        })
+}
+
+fn include_group_paint(bounds: &mut [f64; 4], matrix: DrawingAffine, rect: [f64; 4]) -> Option<()> {
+    for (x, y) in [
+        (rect[0], rect[1]),
+        (rect[2], rect[1]),
+        (rect[0], rect[3]),
+        (rect[2], rect[3]),
+    ] {
+        let (x, y) = matrix.point(x, y);
+        if !x.is_finite() || !y.is_finite() || x.abs().max(y.abs()) > 100_000_000.0 {
+            return None;
+        }
+        bounds[0] = bounds[0].min(x);
+        bounds[1] = bounds[1].min(y);
+        bounds[2] = bounds[2].max(x);
+        bounds[3] = bounds[3].max(y);
+    }
+    Some(())
+}
+
+pub(crate) fn drawing_group_paint_bounds(
+    svg: &str,
+    width: f64,
+    height: f64,
+) -> Option<Box<ImagePaintBounds>> {
+    let opening = &svg[..crate::xml::tag_token_end(svg, 0)?];
+    if get_attribute(opening, "data-group-paint").as_deref() != Some("true") {
+        return None;
+    }
+    let values = get_attribute(opening, "viewBox")?
+        .split_whitespace()
+        .map(|value| value.parse::<f64>().ok())
+        .collect::<Option<Vec<_>>>()?;
+    let [x, y, paint_width, paint_height] = values.as_slice() else {
+        return None;
+    };
+    if ![*x, *y, *paint_width, *paint_height, width, height]
+        .into_iter()
+        .all(f64::is_finite)
+        || *paint_width <= 0.0
+        || *paint_height <= 0.0
+        || width <= 0.0
+        || height <= 0.0
+        || (*x == 0.0 && *y == 0.0 && *paint_width == width && *paint_height == height)
+    {
+        return None;
+    }
+    Some(Box::new(ImagePaintBounds {
+        x_px: *x,
+        y_px: *y,
+        width_px: *paint_width,
+        height_px: *paint_height,
+        layout_width_px: width,
+        layout_height_px: height,
+    }))
 }
 
 fn collect_grouped_drawings<'a>(
@@ -498,6 +716,7 @@ fn collect_grouped_drawings<'a>(
                 xml,
                 picture,
                 transform,
+                affine: None,
                 bitmap_fill_supported: true,
             });
             continue;
@@ -587,6 +806,7 @@ fn grouped_drawings<'a>(
             xml: &group_xml[range.start..range.end],
             picture: range.tag_name == "pic:pic",
             transform,
+            affine: None,
             bitmap_fill_supported: root_axis_aligned && !has_nested_groups,
         })
         .collect()
@@ -623,6 +843,7 @@ pub fn render_standalone_word_shape_svg(
         let scale_x = safe_width as f64 / child_extent_x as f64;
         let scale_y = safe_height as f64 / child_extent_y as f64;
         let mut elements = Vec::new();
+        let mut paint_canvas = [0.0, 0.0, safe_width as f64, safe_height as f64];
         let root_transform = DrawingGroupTransform {
             scale_x,
             scale_y,
@@ -630,17 +851,50 @@ pub fn render_standalone_word_shape_svg(
             origin_y: child_offset_y as f64,
             integer_origin: Some((child_offset_x, child_offset_y)),
         };
-        let grouped = grouped_drawings(&group_xml, root_transform);
+        let affine = group_needs_affine(&group_xml);
+        let grouped = if affine {
+            if !drawing_coordinates_are_exact(&group_xml) {
+                context.push_warning("Drawing group coordinates cannot be represented exactly");
+                return None;
+            }
+            let layout_width = width_px.unwrap_or(safe_width as f64);
+            let layout_height = height_px.unwrap_or(safe_height as f64);
+            if [layout_width, layout_height]
+                .into_iter()
+                .any(|value| !value.is_finite() || value <= 0.0 || value > 100_000_000.0)
+            {
+                return None;
+            }
+            paint_canvas = [0.0, 0.0, layout_width, layout_height];
+            let matrix = affine_group_matrix(
+                drawing_group_transform_xml(&group_xml)?,
+                Some((layout_width, layout_height)),
+            )?;
+            let mut grouped = Vec::new();
+            if collect_affine_grouped_drawings(&group_xml, matrix, 0, &mut grouped).is_none() {
+                context.push_warning("Drawing group transform or child is unsupported");
+                return None;
+            }
+            grouped
+        } else {
+            grouped_drawings(&group_xml, root_transform)
+        };
         for (shape_index, drawing) in grouped.iter().enumerate() {
             let shape_xml = drawing.xml;
             let transform = drawing.transform;
             let scale_x = transform.scale_x;
             let scale_y = transform.scale_y;
             if drawing.picture {
-                if let Some(element) =
-                    render_grouped_picture_svg_element(shape_xml, transform, context)
+                if let Some((element, bounds)) =
+                    render_grouped_picture_svg_element(shape_xml, transform, affine, context)
                 {
-                    elements.push(element);
+                    if let Some(matrix) = drawing.affine {
+                        include_group_paint(&mut paint_canvas, matrix, bounds)?;
+                    }
+                    elements.push(drawing.wrap(element));
+                } else if affine {
+                    context.push_warning("Drawing group picture could not be rendered");
+                    return None;
                 }
                 continue;
             }
@@ -704,6 +958,46 @@ pub fn render_standalone_word_shape_svg(
                 &format!("{shape_properties_xml}{style_xml}"),
                 &context.styles().theme_colors,
             );
+            if let Some(matrix) = drawing.affine {
+                let (x, y, width, height) = if preset.as_deref() == Some("line") {
+                    (
+                        off_x_px,
+                        off_y_px,
+                        ext_x_px as f64 * scale_x,
+                        ext_y_px as f64 * scale_y,
+                    )
+                } else {
+                    (x as f64, y as f64, shape_width as f64, shape_height as f64)
+                };
+                let half_stroke = get_attribute(&format!("<path {stroke}/>"), "stroke-width")
+                    .and_then(|value| value.parse::<f64>().ok())
+                    .unwrap_or(0.0)
+                    / 2.0;
+                let local = DrawingAffine::frame(x, y, width, height, &transform_xml)?;
+                if preset.as_deref() == Some("line") {
+                    let mut line_bounds = [f64::MAX, f64::MAX, f64::MIN, f64::MIN];
+                    include_group_paint(
+                        &mut line_bounds,
+                        matrix.compose(local),
+                        [0.0, 0.0, width, height],
+                    )?;
+                    paint_canvas[0] = paint_canvas[0].min(line_bounds[0] - half_stroke);
+                    paint_canvas[1] = paint_canvas[1].min(line_bounds[1] - half_stroke);
+                    paint_canvas[2] = paint_canvas[2].max(line_bounds[2] + half_stroke);
+                    paint_canvas[3] = paint_canvas[3].max(line_bounds[3] + half_stroke);
+                } else {
+                    include_group_paint(
+                        &mut paint_canvas,
+                        matrix.compose(local),
+                        [
+                            -half_stroke,
+                            -half_stroke,
+                            width + half_stroke,
+                            height + half_stroke,
+                        ],
+                    )?;
+                }
+            }
             let text_box_paragraphs = parse_text_box_paragraphs(&shape_xml, context);
             let text_box_svg = if !text_box_paragraphs.is_empty() {
                 Some(render_text_box_svg(
@@ -737,9 +1031,9 @@ pub fn render_standalone_word_shape_svg(
                 })
                 .flatten();
             if let Some(bitmap) = bitmap_fill {
-                elements.push(format!(
+                elements.push(drawing.wrap(format!(
                     r#"<g{shape_transform}>{bitmap}<rect x="0" y="0" width="{shape_width}" height="{shape_height}" fill="none" {stroke}/>{local_text_box_svg}</g>"#,
-                ));
+                )));
                 continue;
             }
 
@@ -753,35 +1047,44 @@ pub fn render_standalone_word_shape_svg(
                     line_height,
                     &transform_xml,
                 );
-                elements.push(format!(
+                elements.push(drawing.wrap(format!(
                     r#"<g{line_transform}><line x1="0" y1="0" x2="{line_width}" y2="{line_height}" {stroke} fill="none" vector-effect="non-scaling-stroke"/>{local_text_box_svg}</g>"#,
-                ));
+                )));
                 continue;
             }
 
             let path_data =
                 drawing_shape_resolved_path_data(&shape_properties_xml, shape_width, shape_height);
             if let Some(path_data) = path_data {
-                elements.push(format!(
+                elements.push(drawing.wrap(format!(
                     r#"{}<g{shape_transform}><path d="{path_data}" {} {stroke}/>{local_text_box_svg}</g>"#,
                     fill.defs.join(""),
                     fill.fill_attribute
-                ));
+                )));
             } else if let Some(preset_path_data) = preset_path_data {
-                elements.push(format!(
+                elements.push(drawing.wrap(format!(
                     r#"{}<g{shape_transform}><path d="{preset_path_data}" {} {stroke}/>{local_text_box_svg}</g>"#,
                     fill.defs.join(""),
                     fill.fill_attribute
-                ));
+                )));
             } else {
-                elements.push(format!(
+                elements.push(drawing.wrap(format!(
                     r#"{}<g{shape_transform}><rect x="0" y="0" width="{shape_width}" height="{shape_height}" {} {stroke}/>{local_text_box_svg}</g>"#,
                     fill.defs.join(""),
                     fill.fill_attribute
-                ));
+                )));
             }
         }
         if !elements.is_empty() {
+            if affine {
+                let [x, y, right, bottom] = paint_canvas;
+                let width = right - x;
+                let height = bottom - y;
+                return Some(format!(
+                    r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="{x} {y} {width} {height}" preserveAspectRatio="none" data-group-paint="true">{}</svg>"#,
+                    elements.join("")
+                ));
+            }
             return Some(format!(
                 r#"<svg xmlns="http://www.w3.org/2000/svg" width="{safe_width}" height="{safe_height}" viewBox="0 0 {safe_width} {safe_height}" preserveAspectRatio="none">{}</svg>"#,
                 elements.join("")
@@ -928,8 +1231,9 @@ pub fn render_standalone_word_shape_svg(
 fn render_grouped_picture_svg_element(
     picture_xml: &str,
     transform: DrawingGroupTransform,
+    precise: bool,
     context: &ParseContext<'_, impl std::borrow::Borrow<super::context::ParsedStyleSheet>>,
-) -> Option<String> {
+) -> Option<(String, [f64; 4])> {
     let picture_properties_xml = extract_balanced_tag_blocks(picture_xml, "pic:spPr")
         .into_iter()
         .next()
@@ -948,28 +1252,62 @@ fn render_grouped_picture_svg_element(
     );
     let ext_x_px = parse_integer_attribute(&ext_tag, "cx").unwrap_or(0);
     let ext_y_px = parse_integer_attribute(&ext_tag, "cy").unwrap_or(0);
-    let x = js_round(off_x_px);
-    let y = js_round(off_y_px);
-    let width_px = js_round(ext_x_px as f64 * scale_x).max(1);
-    let height_px = js_round(ext_y_px as f64 * scale_y).max(1);
-    let relationship_id = regex_capture(picture_xml, r#"(?i)<a:blip\b[^>]*r:embed="([^"]+)""#)
-        .or_else(|| regex_capture(picture_xml, r#"(?i)<a:blip\b[^>]*r:link="([^"]+)""#))?;
-
-    let Some(part_name) = context.relationships.get(&relationship_id) else {
-        context.push_warning(format!("Missing relationship target for {relationship_id}"));
-        return None;
+    let x = if precise {
+        off_x_px
+    } else {
+        js_round(off_x_px) as f64
     };
-
-    let Some(binary) = context.binary_assets.get(part_name) else {
-        context.push_warning(format!("Missing image asset {part_name}"));
-        return None;
+    let y = if precise {
+        off_y_px
+    } else {
+        js_round(off_y_px) as f64
     };
-
-    let mime_type = content_type_for_part(part_name, &context.content_types)
-        .unwrap_or_else(|| "application/octet-stream".to_string());
-    let src = format!("data:{mime_type};base64,{}", bytes_to_base64(binary));
-    Some(format!(
-        r#"<image href="{src}" x="{x}" y="{y}" width="{width_px}" height="{height_px}" preserveAspectRatio="none"/>"#
+    let size = |value: f64| {
+        if precise {
+            value.max(0.001)
+        } else {
+            js_round(value).max(1) as f64
+        }
+    };
+    let width_px = size(ext_x_px as f64 * scale_x);
+    let height_px = size(ext_y_px as f64 * scale_y);
+    let image = super::images::parse_run_image_block(picture_xml, context)?;
+    let source = escape_xml_text(image.src.as_deref()?);
+    if let Some(bounds) = image.paint_bounds.as_deref() {
+        let scale_x = width_px / bounds.layout_width_px;
+        let scale_y = height_px / bounds.layout_height_px;
+        let left = x + bounds.x_px * scale_x;
+        let top = y + bounds.y_px * scale_y;
+        let width = bounds.width_px * scale_x;
+        let height = bounds.height_px * scale_y;
+        return Some((
+            format!(
+                r#"<image href="{source}" x="{}" y="{}" width="{}" height="{}" preserveAspectRatio="none"/>"#,
+                left, top, width, height,
+            ),
+            [left, top, left + width, top + height],
+        ));
+    }
+    let crop = image.crop.as_ref();
+    let left = crop.and_then(|crop| crop.left_fraction).unwrap_or(0.0);
+    let right = crop.and_then(|crop| crop.right_fraction).unwrap_or(0.0);
+    let top = crop.and_then(|crop| crop.top_fraction).unwrap_or(0.0);
+    let bottom = crop.and_then(|crop| crop.bottom_fraction).unwrap_or(0.0);
+    let visible_width = 1.0 - left - right;
+    let visible_height = 1.0 - top - bottom;
+    if visible_width <= 0.0 || visible_height <= 0.0 {
+        return None;
+    }
+    let image_width = width_px / visible_width;
+    let image_height = height_px / visible_height;
+    Some((
+        format!(
+            r#"<svg x="{x}" y="{y}" width="{width_px}" height="{height_px}" viewBox="0 0 {width_px} {height_px}" overflow="hidden"><image href="{source}" x="{}" y="{}" width="{image_width}" height="{image_height}" opacity="{}" preserveAspectRatio="none"/></svg>"#,
+            -left * image_width,
+            -top * image_height,
+            image.css_opacity.unwrap_or(1.0),
+        ),
+        [x, y, x + width_px, y + height_px],
     ))
 }
 
