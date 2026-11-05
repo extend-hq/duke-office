@@ -528,7 +528,7 @@ checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
 name = "rust-docx"
-version = "0.2.4"
+version = "0.2.5"
 dependencies = [
  "arc-swap",
  "base64",
@@ -552,7 +552,7 @@ dependencies = [
 
 [[package]]
 name = "rust-docx-wasm"
-version = "0.2.5"
+version = "0.2.6"
 dependencies = [
  "js-sys",
  "rust-docx",

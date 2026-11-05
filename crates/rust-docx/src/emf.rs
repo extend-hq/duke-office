@@ -1,11 +1,90 @@
-//! EMF (Enhanced Metafile) to SVG conversion for the vector path-drawing
+//! EMF (Enhanced Metafile) to SVG conversion for the supported drawing
 //! record subset: window/viewport mapping, paths, solid brushes/pens,
 //! positioned Unicode text, solid raster-operation fills, saved device
-//! contexts, fill modes, and clipping. Records outside the
+//! contexts, fill modes, clipping, and opaque bitmap transfers. Records outside the
 //! supported set abort the conversion so the caller can fall back to the
 //! unsupported-image placeholder instead of rendering something wrong.
 
 use std::fmt::Write as _;
+
+use base64::Engine as _;
+
+fn png_chunk(output: &mut Vec<u8>, kind: &[u8; 4], payload: &[u8]) {
+    output.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+    let start = output.len();
+    output.extend_from_slice(kind);
+    output.extend_from_slice(payload);
+    let crc = crate::zip::crc32(&output[start..]);
+    output.extend_from_slice(&crc.to_be_bytes());
+}
+
+fn dib_png(header: &[u8], bits: &[u8], pixel_budget: &mut usize) -> Option<(String, i32, i32)> {
+    if header.len() != 40
+        || read_u32(header, 0)? != 40
+        || read_i16(header, 12)? != 1
+        || read_u32(header, 16)? != 0
+        || read_u32(header, 32)? != 0
+    {
+        return None;
+    }
+    let width = read_i32(header, 4)?;
+    let signed_height = read_i32(header, 8)?;
+    let height = signed_height.checked_abs()?;
+    if width <= 0 || height == 0 {
+        return None;
+    }
+    let bytes_per_pixel = match read_i16(header, 14)? {
+        24 => 3usize,
+        32 => 4usize,
+        _ => return None,
+    };
+    let count = (width as usize).checked_mul(height as usize)?;
+    *pixel_budget = pixel_budget.checked_sub(count)?;
+    let stride = (width as usize)
+        .checked_mul(bytes_per_pixel)?
+        .checked_add(3)?
+        & !3;
+    let expected_size = stride.checked_mul(height as usize)?;
+    let declared_size = read_u32(header, 20)? as usize;
+    if bits.len() != expected_size || (declared_size != 0 && declared_size != expected_size) {
+        return None;
+    }
+    let mut rows = Vec::with_capacity(count.checked_mul(3)?.checked_add(height as usize)?);
+    for y in 0..height as usize {
+        let stored_y = if signed_height > 0 {
+            height as usize - y - 1
+        } else {
+            y
+        };
+        let row = &bits[stored_y * stride..(stored_y + 1) * stride];
+        rows.push(1);
+        let mut previous = [0u8; 3];
+        for pixel in row[..width as usize * bytes_per_pixel].chunks_exact(bytes_per_pixel) {
+            // BI_RGB's fourth byte is reserved; SRCCOPY is opaque.
+            for (channel, value) in [pixel[2], pixel[1], pixel[0]].into_iter().enumerate() {
+                rows.push(value.wrapping_sub(previous[channel]));
+                previous[channel] = value;
+            }
+        }
+    }
+    let mut png = b"\x89PNG\r\n\x1a\n".to_vec();
+    let mut ihdr = Vec::with_capacity(13);
+    ihdr.extend_from_slice(&(width as u32).to_be_bytes());
+    ihdr.extend_from_slice(&(height as u32).to_be_bytes());
+    ihdr.extend_from_slice(&[8, 2, 0, 0, 0]);
+    png_chunk(&mut png, b"IHDR", &ihdr);
+    png_chunk(
+        &mut png,
+        b"IDAT",
+        &miniz_oxide::deflate::compress_to_vec_zlib(&rows, 6),
+    );
+    png_chunk(&mut png, b"IEND", &[]);
+    Some((
+        base64::engine::general_purpose::STANDARD.encode(png),
+        width,
+        signed_height,
+    ))
+}
 
 fn read_u32(data: &[u8], offset: usize) -> Option<u32> {
     data.get(offset..offset + 4)
@@ -188,6 +267,7 @@ const EMR_SAVEDC: u32 = 33;
 const EMR_RESTOREDC: u32 = 34;
 const EMR_INTERSECTCLIPRECT: u32 = 30;
 const EMR_BITBLT: u32 = 76;
+const EMR_STRETCHDIBITS: u32 = 81;
 const EMR_EXTCREATEFONTINDIRECTW: u32 = 82;
 const EMR_EXTTEXTOUTW: u32 = 84;
 const EMR_EXTSELECTCLIPRGN: u32 = 75;
@@ -220,6 +300,56 @@ struct Converter<'a> {
 }
 
 impl<'a> Converter<'a> {
+    fn emit_bitmap(&mut self, record: &[u8], pixel_budget: &mut usize) -> Option<()> {
+        if record.len() < 80
+            || self.in_path
+            || read_u32(record, 64)? != 0
+            || read_u32(record, 68)? != 0x00cc0020
+        {
+            return None;
+        }
+        let source_x = read_i32(record, 32)?;
+        let source_y = read_i32(record, 36)?;
+        let source_width = read_i32(record, 40)?;
+        let source_height = read_i32(record, 44)?;
+        let dest_width = read_i32(record, 72)?;
+        let dest_height = read_i32(record, 76)?;
+        if source_width <= 0 || source_height <= 0 || dest_width <= 0 || dest_height <= 0 {
+            return None;
+        }
+        let header_start = read_u32(record, 48)? as usize;
+        let header_end = header_start.checked_add(read_u32(record, 52)? as usize)?;
+        let bits_start = read_u32(record, 56)? as usize;
+        let bits_end = bits_start.checked_add(read_u32(record, 60)? as usize)?;
+        if header_start < 80
+            || bits_start < 80
+            || (header_start < bits_end && bits_start < header_end)
+        {
+            return None;
+        }
+        let (png, width, signed_height) = dib_png(
+            record.get(header_start..header_end)?,
+            record.get(bits_start..bits_end)?,
+            pixel_budget,
+        )?;
+        let height = signed_height.checked_abs()?;
+        let source_top = if signed_height > 0 {
+            i64::from(height) - i64::from(source_y) - i64::from(source_height)
+        } else {
+            i64::from(source_y)
+        };
+        let (x, y) = self.mapping.map(
+            f64::from(read_i32(record, 24)?),
+            f64::from(read_i32(record, 28)?),
+        );
+        let sx = self.mapping.scale_x() * f64::from(dest_width) / f64::from(source_width);
+        let sy = self.mapping.scale_y() * f64::from(dest_height) / f64::from(source_height);
+        self.push_element(format!(
+            "<g transform=\"matrix({sx} 0 0 {sy} {x} {y})\"><svg width=\"{source_width}\" height=\"{source_height}\" viewBox=\"{source_x} {source_top} {source_width} {source_height}\" overflow=\"hidden\" preserveAspectRatio=\"none\"><image width=\"{width}\" height=\"{height}\" href=\"data:image/png;base64,{png}\"/></svg></g>"
+        ));
+        Some(())
+    }
+
     fn save_state(&self) -> SavedState {
         SavedState {
             mapping: self.mapping,
@@ -516,7 +646,7 @@ impl<'a> Converter<'a> {
 }
 
 /// Converts an EMF byte stream to an SVG document when every record falls in
-/// the supported vector subset; returns `None` otherwise so callers keep the
+/// the supported drawing subset; returns `None` otherwise so callers keep the
 /// placeholder fallback.
 pub fn emf_to_svg(data: &[u8]) -> Option<String> {
     if data.len() < 88 || read_u32(data, 0)? != EMR_HEADER {
@@ -555,6 +685,7 @@ pub fn emf_to_svg(data: &[u8]) -> Option<String> {
         bounds,
     };
 
+    let mut bitmap_pixel_budget = 16 * 1024 * 1024;
     let header_size = read_u32(data, 4)? as usize;
     let mut offset = header_size;
     while offset + 8 <= data.len() {
@@ -634,6 +765,9 @@ pub fn emf_to_svg(data: &[u8]) -> Option<String> {
                     "<rect {rect} fill=\"{}\"/>",
                     colorref_to_css(color)
                 ));
+            }
+            EMR_STRETCHDIBITS => {
+                converter.emit_bitmap(&data[offset..record_end], &mut bitmap_pixel_budget)?
             }
             EMR_EXTCREATEFONTINDIRECTW => {
                 if record_size < 104 {

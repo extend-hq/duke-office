@@ -424,7 +424,7 @@ fn create_crc32_table() -> [u32; 256] {
 
 static CRC32_TABLE: LazyLock<[u32; 256]> = LazyLock::new(create_crc32_table);
 
-fn crc32(bytes: &[u8]) -> u32 {
+pub(crate) fn crc32(bytes: &[u8]) -> u32 {
     let mut value = 0xffff_ffffu32;
     for byte in bytes {
         value = (value >> 8) ^ CRC32_TABLE[((value ^ u32::from(*byte)) & 0xff) as usize];
