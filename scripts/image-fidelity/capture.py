@@ -17,9 +17,11 @@ def digest(path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--directory', type=Path, required=True)
+    parser.add_argument('--manifest', default='manifest.json')
+    parser.add_argument('--show-alerts', action='store_true')
     args = parser.parse_args()
     directory = args.directory.resolve()
-    manifest = json.loads((directory / 'manifest.json').read_text())
+    manifest = json.loads((directory / args.manifest).read_text())
     document = directory / manifest['document']
     if digest(document) != manifest['documentSha256']:
         raise ValueError('Input digest does not match the manifest')
@@ -27,7 +29,10 @@ def main():
     receipt = directory / 'word-reference.json'
     if pdf.exists() or receipt.exists():
         raise FileExistsError('Native reference already exists; choose a new output directory')
-    captured = subprocess.run(['osascript', str(Path(__file__).with_suffix('.applescript')), str(document), str(pdf)], text=True, capture_output=True, timeout=210)
+    command = ['osascript', str(Path(__file__).with_suffix('.applescript')), str(document), str(pdf)]
+    if args.show_alerts:
+        command.append('interactive')
+    captured = subprocess.run(command, text=True, capture_output=True, timeout=210)
     if captured.returncode:
         raise RuntimeError(captured.stderr)
     metadata = json.loads(captured.stdout)

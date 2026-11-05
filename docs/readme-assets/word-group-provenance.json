@@ -1,0 +1,116 @@
+{
+  "label": "React DOCX workspace comparison",
+  "measuredAt": "2026-11-05T23:03:05.012557+00:00",
+  "buildInfo": {
+    "source": "workspace",
+    "rustDocxVersion": "0.2.9",
+    "rustDocxWasmVersion": "0.2.9",
+    "rustRevision": "9179fdde78485b9e072a7b4ceee42289ac777b22",
+    "rustSourceDirty": true,
+    "rustSourceSha256": "5b051e983b965f925c6148c674595383d78a0460b6fc51a4e198b9c00e076ac5",
+    "wasmSha256": "999aee8837dc084bc5497f26708520fd8733a3a32ab1e58df14fbfd7a1261509",
+    "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)"
+  },
+  "sourceType": "workspace",
+  "published": false,
+  "wasmReceipt": {
+    "status": 200,
+    "byteLength": 7766164,
+    "sha256": "999aee8837dc084bc5497f26708520fd8733a3a32ab1e58df14fbfd7a1261509"
+  },
+  "viewport": {
+    "width": 1440,
+    "height": 1600
+  },
+  "browserReceipt": {
+    "version": "157.0.8103.38",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.0.0 Safari/537.36",
+    "driver": "playwright-core",
+    "processOwnership": "direct runner owns launch and close"
+  },
+  "inputSha256": "f2beee6e88fb0e3a014c2b8a9c87fa76b588c9d1bcbcc398d405fd6c1bc0cc9b",
+  "captureProofSha256": "04f38afb70481496e7645cd8e2704a46c74205cdbe368bbe2d1f4ad54bfaa645",
+  "viewerSources": {
+    "editor.tsx": "e5ccbb02f7a58d0700aa3e6547e591972646f4aaedb20f866c5190a2b8936931",
+    "paint-bounds-image.tsx": "47bc08c176e27f2b2d881055d3b9defcaf56f5e8558a955da4a62d440a574427",
+    "page-pattern-paint.ts": "2ce0bdd7b50101718b0db61ae70ad2a0f7fd2b35dc2bb9bff1a69f1c212d53a2",
+    "inline-drawing-layout.ts": "7c276c4ee4ce19206374f9a9cb2f63c898d77b35551818178126fbc2262c0738"
+  },
+  "viewerSourceTreeSha256": "977a8ccc612caac1df3b5ad28de829f765120b56b3bc2ad3694a6897fb747213",
+  "candidatePages": [
+    {
+      "path": "viewer-pages-final-999aee88/page-01.png",
+      "sha256": "c124c8bf54bcdba1ee3868d831058641c963affc30c5929fc5aeff99b1a67ccc"
+    },
+    {
+      "path": "viewer-pages-final-999aee88/page-02.png",
+      "sha256": "d1460b160cbeeb0bc0deda0d88bad0940f561b258def34af63c29d5382e987e3"
+    },
+    {
+      "path": "viewer-pages-final-999aee88/page-03.png",
+      "sha256": "363b9e425bec63e7a6bba1814cf7dc9d7c4acaa27536c4064549685d10ff6dd5"
+    },
+    {
+      "path": "viewer-pages-final-999aee88/page-04.png",
+      "sha256": "e52196794a909bc36ec3fffd9489f03de09e77fe8f7be217d8a2965fb925951d"
+    },
+    {
+      "path": "viewer-pages-final-999aee88/page-05.png",
+      "sha256": "a167472adb99482506bd33651c0ff6a29a67af756b47b7f9f7d9f114e2a497b0"
+    }
+  ],
+  "reports": {
+    "cairo": {
+      "label": "React DOCX workspace 0.2.9, WASM 999aee88",
+      "inputSha256": "f2beee6e88fb0e3a014c2b8a9c87fa76b588c9d1bcbcc398d405fd6c1bc0cc9b",
+      "nativePdfSha256": "e89c5736a51da056254f784664d8c3be7c615d61860a6d0211a154c79924670b",
+      "wordVersion": "16.106.1",
+      "dpi": 96,
+      "regionPx": {
+        "x": 48,
+        "y": 48,
+        "width": 336,
+        "height": 336
+      },
+      "caseCount": 5,
+      "statuses": {
+        "compared": 5
+      },
+      "referenceReceipt": "word-cairo-reference.json",
+      "referenceRasterizer": "Microsoft Word save as PDF; existing native PDF rasterized with Poppler Cairo at96dpi",
+      "medianColorAgreementWithin16OnInkUnion": 0.9855072463768116,
+      "meanColorAgreementWithin16OnInkUnion": 0.9767091678326795,
+      "casesAtOrAbove96Percent": 4,
+      "comparisonSha256": "0cbde89a016ff264a1b0e7dc97f2bb2e0a4f5dde3e788bf89b5ffc470228caa7"
+    },
+    "splash": {
+      "label": "React DOCX workspace 0.2.9, WASM 999aee88",
+      "inputSha256": "f2beee6e88fb0e3a014c2b8a9c87fa76b588c9d1bcbcc398d405fd6c1bc0cc9b",
+      "nativePdfSha256": "e89c5736a51da056254f784664d8c3be7c615d61860a6d0211a154c79924670b",
+      "wordVersion": "16.106.1",
+      "dpi": 96,
+      "regionPx": {
+        "x": 48,
+        "y": 48,
+        "width": 336,
+        "height": 336
+      },
+      "caseCount": 5,
+      "statuses": {
+        "compared": 5
+      },
+      "referenceReceipt": "word-reference.json",
+      "referenceRasterizer": "Microsoft Word save as PDF; Poppler rasterized at 96 dpi",
+      "medianColorAgreementWithin16OnInkUnion": 0.9175927867477458,
+      "meanColorAgreementWithin16OnInkUnion": 0.9211402074716237,
+      "casesAtOrAbove96Percent": 0,
+      "comparisonSha256": "94089d9574de13dece7f49f2d04344da90b40f1b8c6646762477b29ae0b24d50"
+    }
+  },
+  "perImageAlignment": false,
+  "method": "Identical native page coordinates; RGB tolerance16 over visible ink union; no cases excluded.",
+  "limitations": [
+    "Synthetic matrix only; no universal Word parity claim.",
+    "Workspace capture does not establish registry availability."
+  ]
+}

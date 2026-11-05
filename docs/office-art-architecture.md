@@ -1,0 +1,27 @@
+# Shared OfficeArt rendering
+
+`rust-office-art` owns picture paint, DrawingML preset/custom geometry, shape and connector paint, style-reference hooks, and bounded SmartArt data/drawing readers. `rust-docx` and `rust-pptx` resolve package relationships and themes, supply images, and compose application-specific positioning and text. Their WASM bindings use the same Rust code. React viewers consume the resulting SVG and paint bounds while retaining source assets and editable text where available.
+
+The implementation covers all 187 preset geometry definitions, adjustment overrides, standard guide operators, multiple paths, elliptical arcs, markers, supported solid/gradient/pattern/bitmap fills and outlines, local transforms, and shared picture effects. It includes native pattern tiles, scaled linear and circular gradients, rectangular path gradients, and closed compound outlines. Preset geometry data is pinned to Apache POI with its license and notice. Parsing and rendering are bounded by XML, guide, path, command, coordinate and image-decoding limits.
+
+## Native evidence
+
+REA inspected the installed Word 16.106.1 and Excel 16.107.3 OfficeArt, Gfx and SmartArt frameworks. Both SmartArt implementations import `ShapeViewElement::CreateEffectWithStyles`, `ShapeStyleResolver::ResolveShapePropertyBag` and the shared style/property/color resolvers from OfficeArt. OfficeArt also exports connector routing and connector style interfaces. The inventories share 15,595 normalized OfficeArt symbols and 3,143 SmartArt symbols.
+
+This confirms common formatting and rendering interfaces in the inspected applications. Their binary hashes differ, so it does not establish identical rendering across builds. PowerPoint is not installed locally; its native binary behavior remains unverified. The common DrawingML format is documented by [Microsoft's Office Drawing specification](https://learn.microsoft.com/en-us/openspecs/office_standards/ms-odrawxml/). Binary slices and decompiler evidence remain local and are not distributed.
+
+## SmartArt and remaining boundaries
+
+Saved SmartArt drawings contain ordered shapes, connectors, pictures and groups. The shared reader retains those elements and source XML; adapters render the saved geometry and authoritative cached text. Empty or absent cached text bodies stay empty, while semantic text is reserved for the whole-diagram fallback. Explicit saved text transforms retain offset, extent, rotation and flips separately from shape paint. Incomplete transform dimensions use a warned fallback. Native agreement for that transform handling remains unmeasured. Package and theme relationship scopes remain owned by the document parser.
+
+DOCX text styles retain theme-resolved solid centered outlines and identity-scale outer shadows, with source effect XML for reconstruction. Both native SVG text and React text apply those typed effects. Transformed text shadows, non-solid or compound text outlines and 3D text effects remain outside that bounded implementation; native agreement is not yet measured.
+
+Reading a SmartArt data model is separate from generating its layout. Full graph-to-layout generation, warped WordArt text and 3D lighting/extrusion remain unsupported. The effect-tree evaluator handles bounded sequential containers, five blend modes, alpha modulation, and selected color operations; referenced effects, multiple sibling branches and geometry-expanding graph nodes retain fallback. Closed compound outlines are rendered as stroke bands; open compound paths and compound endpoint markers retain fallback. Shape-contour gradients are supported for rectangular geometry, with other contours still unsupported. Existing previews, source properties and explicit warnings distinguish preservation from implemented rendering. Connector rendering consumes saved geometry; it does not reproduce every native rerouting decision.
+
+Pattern fills carry page-origin metadata because their phase depends on mounted page placement. The 54 generated tile images exactly match the recovered native tile pixels, but this does not establish full-page parity or transformed/grouped phase. Gradient-stop transparency is retained; a native PDF export that omits that transparency remains an oracle uncertainty pending an on-screen Word comparison.
+
+## Validation scope
+
+The earlier renderer smoke covers all 187 presets plus supported custom, style, effect, bitmap and zero-axis connector cases. All 195 supported SVG outputs decode in Chromium; four deliberately unsupported cases return no shared rendering. The earlier PPTX atlas paints 284 of 299 cases and retains 15 warned fallbacks. The updated fill/outline probe produces 95 valid shared SVG outputs, including all 54 patterns and the closed compound styles. These are bounded rendering checks, not complete native visual scores. Native and WASM checks and existing parser/viewer suites exercise integration.
+
+These smoke counts are not native visual agreement. The retained Word picture and group comparisons have separate [metrics and provenance](picture-coverage.md). The downloadable manual atlas contains 589 labeled cases across seven editable Word documents, with new visual cases explicitly marked unmeasured.

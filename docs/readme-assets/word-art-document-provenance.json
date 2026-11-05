@@ -1,0 +1,53 @@
+{
+  "label": "React DOCX workspace0.2.9, WASM999aee88",
+  "reference": "Word PDF rasterized with Poppler Cairo at96dpi",
+  "method": "Identical fixed native page coordinates on both sides; label-free regions derived once from native table borders. No per-image alignment or resizing. Color threshold16 on visible ink union.",
+  "nativeCaseBoxesSha256": "e83b19f238c2228424fd506ebd3cc844e50664f2ee8cc9e9515fd6e2c9867441",
+  "totalSuppliedDrawings": 329,
+  "exactNativeReferenceDrawings": 123,
+  "unmeasuredDrawings": 206,
+  "unmeasuredReason": "Owned native capture attempts did not establish the two other exact input documents. No native reference was produced; derived opening probes are separate diagnostics and do not prove invalid input.",
+  "documents": [
+    {
+      "document": "01-office-art-tour",
+      "documentSha256": "29b96942aa7564b49e60ad9b7ed8155d697a195ed730f2d3cad7e466cd64d8df",
+      "nativePdfSha256": "9a9ec35929f45540865c66fc366bfcc15c4879443c3688d01db21f0049863d3f",
+      "nativeReceiptSha256": "ca5f3f60bd91b0086b3c268020d6a2fe3e484354fee743d4f51baea6044d49ca",
+      "captureReceiptSha256": "eeb2f2b37da87c2a4e2ce2715ea100198b70052cbcb0ce396bf9201d03904cf1",
+      "wasmSha256": "999aee8837dc084bc5497f26708520fd8733a3a32ab1e58df14fbfd7a1261509",
+      "viewerSourceTreeSha256": "977a8ccc612caac1df3b5ad28de829f765120b56b3bc2ad3694a6897fb747213",
+      "caseCount": 28,
+      "comparedCount": 28,
+      "atLeast96Percent": 0,
+      "meanColorAgreement": 0.5838685108275736,
+      "medianColorAgreement": 0.7719114881280763
+    },
+    {
+      "document": "03-fills-and-outlines",
+      "documentSha256": "de54a12828391a764c0bbd5d9125d8ae37dbe9b677aa578a1e3652a6e205872e",
+      "nativePdfSha256": "38f14f3e20ef2eea3507f29315c7cc81c59f00bf27eca22c7e633c5d5bb33978",
+      "nativeReceiptSha256": "4b78233a399375d05ad5ecce53c1b7360d3368465efec5700bbb42b38b686bb1",
+      "captureReceiptSha256": "b734ef151bb12bd9aba5d36d9a141a966170459fcdd658d47844cf74ef2c11e4",
+      "wasmSha256": "999aee8837dc084bc5497f26708520fd8733a3a32ab1e58df14fbfd7a1261509",
+      "viewerSourceTreeSha256": "977a8ccc612caac1df3b5ad28de829f765120b56b3bc2ad3694a6897fb747213",
+      "caseCount": 95,
+      "comparedCount": 95,
+      "atLeast96Percent": 0,
+      "meanColorAgreement": 0.4753395640880022,
+      "medianColorAgreement": 0.47662304662685806
+    }
+  ],
+  "caseCount": 123,
+  "comparedCount": 123,
+  "atLeast96Percent": 0,
+  "meanColorAgreement": 0.5000453405815632,
+  "medianColorAgreement": 0.5083619973905824,
+  "comparisonSha256": "9d86145e4669183689e1b6bf13d663b358ed8524804daecfca3458b7720a8548",
+  "published": false,
+  "sourceType": "workspace",
+  "limitations": [
+    "Fixed native page regions include table and paragraph placement differences.",
+    "Two further exact inputs have no successful native reference; no substituted or repaired inputs are included.",
+    "This broader corpus is distinct from the61controlled standalone matrix cases."
+  ]
+}

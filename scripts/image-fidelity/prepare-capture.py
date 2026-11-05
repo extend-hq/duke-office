@@ -10,19 +10,23 @@ def main():
     parser.add_argument('--directory', type=Path, required=True)
     parser.add_argument('--target', choices=['parser', 'viewer'], required=True)
     parser.add_argument('--base-url', required=True)
+    parser.add_argument('--output-directory', type=Path)
+    parser.add_argument('--script-output', type=Path)
     args = parser.parse_args()
     directory = args.directory.resolve()
-    count = len(json.loads((directory / 'manifest.json').read_text())['cases'])
-    output = directory / (args.target + '-pages')
-    output.mkdir(exist_ok=True)
-    config = json.dumps(dict(url=args.base_url, directory=str(directory), output=str(output), count=count, target=args.target))
+    manifest = json.loads((directory / 'manifest.json').read_text())
+    count = len(manifest['cases'])
+    output = args.output_directory.resolve() if args.output_directory else directory / (args.target + '-pages')
+    output.mkdir(parents=True, exist_ok=True)
+    config = json.dumps(dict(url=args.base_url, directory=str(directory), document=manifest['document'], output=str(output), count=count, target=args.target))
     code = r'''async (page) => {
   const config = CONFIG;
-  await page.setViewportSize({ width: 1440, height: 1200 });
+  await page.setViewportSize({ width: 1440, height: 1600 });
   await page.goto(config.url);
   if (config.target === 'viewer') {
-    await page.locator('input[type="file"][accept*=".doc"]').setInputFiles(config.directory + '/image-matrix.docx');
+    await page.locator('input[type="file"][accept*=".doc"]').setInputFiles(config.directory + '/' + config.document);
     await page.locator('[data-docx-page-surface="true"]').first().waitFor({ timeout: 120000 });
+    await page.locator('[data-docx-page-surface="true"] img').first().waitFor({ timeout: 120000 });
   }
   for (let index = 0; index < config.count; index++) {
     if (config.target === 'viewer') {
@@ -52,7 +56,8 @@ def main():
   return { pages: config.count, target: config.target };
 }
 '''.replace('CONFIG', config)
-    path = directory / ('capture-' + args.target + '.js')
+    path = args.script_output.resolve() if args.script_output else directory / ('capture-' + args.target + '.js')
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(code)
     print(path)
 

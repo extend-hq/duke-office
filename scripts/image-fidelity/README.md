@@ -21,3 +21,17 @@ Extract the native model with `cargo run -p rust-docx --example image_fidelity -
 Use `prepare-pages.py --directory DIR --model MODEL.json` to produce fixed browser pages from the native model. Serve the directory locally, then generate a CLI function with `prepare-capture.py --directory DIR --target parser --base-url URL`. For the running React DOCX playground use `--target viewer`. Run the generated function with `playwright-cli run-code --filename PATH`. Both capture routes use the same page dimensions and retain all cases.
 
 `compare.py --reference-receipt RECEIPT.json` selects a separately recorded rasterization of the same Word PDF. The receipt lists exact page paths and hashes; the input DOCX and PDF hashes are also checked. Retain both reports when comparing rasterizers. The original Splash rasterizer can resample an integer-sized bitmap into one extra output pixel; Cairo avoids that artifact in the unchanged-picture control. This is a reference rasterization distinction, not an image alignment or scoring adjustment.
+
+## Shapes, connectors and manual fixtures
+
+Generate the 16-page native shape matrix, the broader manual atlas, or the saved SmartArt probes independently:
+
+```sh
+python3 scripts/image-fidelity/generate-shape-matrix.py --output artifacts/word-shape-parity-20261105
+python3 scripts/image-fidelity/generate_office_art_atlas.py --output artifacts/office-art-fixtures-20261105
+python3 scripts/image-fidelity/generate_smartart_docx.py --output artifacts/office-art-fixtures-20261105/smartart
+```
+
+The 589-case atlas distinguishes implemented rendering, preserved properties, fallbacks and unmeasured behavior. It includes seven editable Word documents and a machine-readable manifest. Its case count is not a native agreement score. The SmartArt probes exercise saved geometry, semantic text, namespace aliases and independent text transforms; they do not establish full SmartArt layout parity.
+
+`gallery.py` builds picture/group or shape/connector galleries from unchanged native references and captured React pages. Supply the actual runtime build provenance with `--capture-proof`, the matching version with `--runtime-version`, and either `--runtime-source registry` or `--runtime-source workspace`. Picture galleries also require `--group-capture-proof`. The tool verifies the input, served WASM and every candidate page against those receipts. The gallery rescales both columns equally for display, while measurements use the original fixed-coordinate crops. Keep full per-case reports alongside the representative gallery. Viewer captures use a 1440 × 1600 viewport so a complete Letter page fits below the application controls.

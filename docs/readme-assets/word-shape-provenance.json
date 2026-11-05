@@ -1,0 +1,160 @@
+{
+  "label": "React DOCX workspace comparison",
+  "measuredAt": "2026-11-05T23:03:09.178689+00:00",
+  "buildInfo": {
+    "source": "workspace",
+    "rustDocxVersion": "0.2.9",
+    "rustDocxWasmVersion": "0.2.9",
+    "rustRevision": "9179fdde78485b9e072a7b4ceee42289ac777b22",
+    "rustSourceDirty": true,
+    "rustSourceSha256": "5b051e983b965f925c6148c674595383d78a0460b6fc51a4e198b9c00e076ac5",
+    "wasmSha256": "999aee8837dc084bc5497f26708520fd8733a3a32ab1e58df14fbfd7a1261509",
+    "rustc": "rustc 1.93.1 (01f6ddf75 2026-02-11)"
+  },
+  "sourceType": "workspace",
+  "published": false,
+  "wasmReceipt": {
+    "status": 200,
+    "byteLength": 7766164,
+    "sha256": "999aee8837dc084bc5497f26708520fd8733a3a32ab1e58df14fbfd7a1261509"
+  },
+  "viewport": {
+    "width": 1440,
+    "height": 1600
+  },
+  "browserReceipt": {
+    "version": "157.0.8103.38",
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/157.0.0.0 Safari/537.36",
+    "driver": "playwright-core",
+    "processOwnership": "direct runner owns launch and close"
+  },
+  "inputSha256": "f9e4a5593db9bba50e48b830838cf39defd1bbb184574fa0924cf0c9868a2056",
+  "captureProofSha256": "d8f474190608fb1a3881bfcefc8a3f24c342272173a8b107a09be94a874fff7c",
+  "viewerSources": {
+    "editor.tsx": "e5ccbb02f7a58d0700aa3e6547e591972646f4aaedb20f866c5190a2b8936931",
+    "paint-bounds-image.tsx": "47bc08c176e27f2b2d881055d3b9defcaf56f5e8558a955da4a62d440a574427",
+    "page-pattern-paint.ts": "2ce0bdd7b50101718b0db61ae70ad2a0f7fd2b35dc2bb9bff1a69f1c212d53a2",
+    "inline-drawing-layout.ts": "7c276c4ee4ce19206374f9a9cb2f63c898d77b35551818178126fbc2262c0738"
+  },
+  "viewerSourceTreeSha256": "977a8ccc612caac1df3b5ad28de829f765120b56b3bc2ad3694a6897fb747213",
+  "candidatePages": [
+    {
+      "path": "viewer-pages-final-999aee88/page-01.png",
+      "sha256": "7281e9c5336715995cde1e675cc351efcf90352b24ea7a0577d52de1f3928575"
+    },
+    {
+      "path": "viewer-pages-final-999aee88/page-02.png",
+      "sha256": "98dad36c7ef1f73d0e29166518dd0c7c31d9bbca5e292b9b2da45110a52c88eb"
+    },
+    {
+      "path": "viewer-pages-final-999aee88/page-03.png",
+      "sha256": "12c442185bf4b93fc417f4acbbc149bca2ffde89dfd7825c65e2a43879a50cfc"
+    },
+    {
+      "path": "viewer-pages-final-999aee88/page-04.png",
+      "sha256": "6c2af27eceb2517b26f60cd998e2917cce82c6e891bf478da86c1861f00dac5a"
+    },
+    {
+      "path": "viewer-pages-final-999aee88/page-05.png",
+      "sha256": "0d32e78e2d99e85b321ee27f31db5a56562addc9cf298df754f7cd1e10cb7aec"
+    },
+    {
+      "path": "viewer-pages-final-999aee88/page-06.png",
+      "sha256": "a32525f0e6e50886ccc4c0b4f246dd36a934e9cb3c90815500b20c231bf8c2d8"
+    },
+    {
+      "path": "viewer-pages-final-999aee88/page-07.png",
+      "sha256": "87015c1d4b7d92a52c077df7e92bfda498d2484877c250dd76d0e6903ab18939"
+    },
+    {
+      "path": "viewer-pages-final-999aee88/page-08.png",
+      "sha256": "c42c9b4a21d963d25abc4ba463b89a509f4abd9fbf488a674fe2eb03a22c0084"
+    },
+    {
+      "path": "viewer-pages-final-999aee88/page-09.png",
+      "sha256": "bd7d59ec8b1d25506f74c25504c2b1e23045ce46e76e21a5927caf96a485ee35"
+    },
+    {
+      "path": "viewer-pages-final-999aee88/page-10.png",
+      "sha256": "ebe72739b1c22ab3ce728389e01d58ca1ea2d2de752ef8f6756f4e701fbe210b"
+    },
+    {
+      "path": "viewer-pages-final-999aee88/page-11.png",
+      "sha256": "5f45638e697447f919198bc51f266f201f464e7fc616047aed5779ec4e9c6732"
+    },
+    {
+      "path": "viewer-pages-final-999aee88/page-12.png",
+      "sha256": "0ae9ac7bdb6c2bb5e5b701953098f2fe3ac882ed3a6e8f5796c021faf6d6cda1"
+    },
+    {
+      "path": "viewer-pages-final-999aee88/page-13.png",
+      "sha256": "a5691e4e6e9e0d40bf4b6c69aa3e2625b2ee1f2117252e53ef096c06dc34104c"
+    },
+    {
+      "path": "viewer-pages-final-999aee88/page-14.png",
+      "sha256": "c6ac20e240b7ec4d5cd37592da696c80b11f63ce8931db538f4ea55216358e43"
+    },
+    {
+      "path": "viewer-pages-final-999aee88/page-15.png",
+      "sha256": "be801422bf40803901355440bcb576377720121b385f6ef9ba758648a2fd3eec"
+    },
+    {
+      "path": "viewer-pages-final-999aee88/page-16.png",
+      "sha256": "1e22f7bec1be531584249d5c4f6d6481d44e2848005a66cbd355fdc0e166424b"
+    }
+  ],
+  "reports": {
+    "cairo": {
+      "label": "React DOCX workspace 0.2.9, WASM 999aee88",
+      "inputSha256": "f9e4a5593db9bba50e48b830838cf39defd1bbb184574fa0924cf0c9868a2056",
+      "nativePdfSha256": "3f565b5129d786535697a016f3e7a3b1096de04739812723d21c3d0181d020c3",
+      "wordVersion": "16.106.1",
+      "dpi": 96,
+      "regionPx": {
+        "x": 48,
+        "y": 48,
+        "width": 336,
+        "height": 336
+      },
+      "caseCount": 16,
+      "statuses": {
+        "compared": 16
+      },
+      "referenceReceipt": "word-cairo-reference.json",
+      "referenceRasterizer": "Microsoft Word save as PDF; existing native PDF rasterized with Poppler Cairo at96dpi",
+      "medianColorAgreementWithin16OnInkUnion": 0.9751224057102603,
+      "meanColorAgreementWithin16OnInkUnion": 0.9377684474792248,
+      "casesAtOrAbove96Percent": 10,
+      "comparisonSha256": "7accec397bea6afd6c26b539df7e1f5fafef1cea323da88e850f7ca9cba2a8ee"
+    },
+    "splash": {
+      "label": "React DOCX workspace 0.2.9, WASM 999aee88",
+      "inputSha256": "f9e4a5593db9bba50e48b830838cf39defd1bbb184574fa0924cf0c9868a2056",
+      "nativePdfSha256": "3f565b5129d786535697a016f3e7a3b1096de04739812723d21c3d0181d020c3",
+      "wordVersion": "16.106.1",
+      "dpi": 96,
+      "regionPx": {
+        "x": 48,
+        "y": 48,
+        "width": 336,
+        "height": 336
+      },
+      "caseCount": 16,
+      "statuses": {
+        "compared": 16
+      },
+      "referenceReceipt": "word-reference.json",
+      "referenceRasterizer": "Microsoft Word save as PDF; Poppler rasterized at 96 dpi",
+      "medianColorAgreementWithin16OnInkUnion": 0.9581620271079891,
+      "meanColorAgreementWithin16OnInkUnion": 0.8895433209478207,
+      "casesAtOrAbove96Percent": 8,
+      "comparisonSha256": "2ead5135497cc71174a156bb2dfdfef38fd782a6606141ab38d66b70155bb116"
+    }
+  },
+  "perImageAlignment": false,
+  "method": "Identical native page coordinates; RGB tolerance16 over visible ink union; no cases excluded.",
+  "limitations": [
+    "Synthetic matrix only; no universal Word parity claim.",
+    "Workspace capture does not establish registry availability."
+  ]
+}
