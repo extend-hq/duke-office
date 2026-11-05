@@ -2,6 +2,14 @@ use super::*;
 use crate::chart::child;
 use std::collections::BTreeMap;
 
+#[path = "../cartesian_labels.rs"]
+mod data_labels;
+use data_labels::DataLabels;
+
+fn val<'a>(node: Node<'a, 'a>, name: &str) -> Option<&'a str> {
+    setting(node, name)
+}
+
 fn setting<'a>(node: Node<'a, 'a>, name: &str) -> Option<&'a str> {
     child(node, name)?.attribute("val")
 }
@@ -52,24 +60,234 @@ struct Strip {
     top: f64,
 }
 
+#[derive(Clone, Copy)]
 struct Extrusion<'a> {
     scene: &'a Scene,
     near: f64,
     far: f64,
     fill: &'a str,
     stroke: &'a str,
+    material: Material,
+    gradient: &'a [(f64, String)],
+    paint_id: &'a str,
+    value_range: [f64; 2],
+    bevel: Option<[f64; 2]>,
+    top_cap: bool,
+    bottom_cap: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Material {
+    Matte,
+    Flat,
+    TranslucentPowder,
+}
+
+fn gradient_at(stops: &[(f64, String)], position: f64) -> String {
+    let Some(first) = stops.first() else {
+        return String::new();
+    };
+    let mut previous = first;
+    for stop in stops.iter().skip(1) {
+        if position <= stop.0 {
+            let t = ((position - previous.0) / (stop.0 - previous.0).max(f64::MIN_POSITIVE))
+                .clamp(0., 1.);
+            let mut color = String::from("#");
+            for channel in [1, 3, 5] {
+                let a = previous
+                    .1
+                    .get(channel..channel + 2)
+                    .and_then(|v| u8::from_str_radix(v, 16).ok())
+                    .unwrap_or(0);
+                let b = stop
+                    .1
+                    .get(channel..channel + 2)
+                    .and_then(|v| u8::from_str_radix(v, 16).ok())
+                    .unwrap_or(0);
+                write!(
+                    color,
+                    "{:02x}",
+                    (f64::from(a) * (1. - t) + f64::from(b) * t).round() as u8
+                )
+                .unwrap();
+            }
+            return color;
+        }
+        previous = stop;
+    }
+    previous.1.clone()
+}
+
+fn material(properties: Option<Node>, fallback: Option<&str>) -> Material {
+    match properties
+        .and_then(|sp| sp.children().find(|n| n.tag_name().name() == "sp3d"))
+        .and_then(|sp| sp.attribute("prstMaterial"))
+        .or(fallback)
+    {
+        Some("flat") => Material::Flat,
+        Some("translucentPowder") => Material::TranslucentPowder,
+        _ => Material::Matte,
+    }
+}
+
+fn floor_shadow(
+    out: &mut String,
+    scene: &Scene,
+    colors: &ChartColors,
+    shadow: Node,
+    category: [f64; 2],
+    depth: [f64; 2],
+    caster_height: f64,
+    shape: &str,
+    source: usize,
+    index: u32,
+) {
+    let Some(color) = colors.solid_color(shadow) else {
+        return;
+    };
+    let attribute = |name, fallback| number(shadow.attribute(name)).unwrap_or(fallback);
+    let blur = (attribute("blurRad", 0.) / 9525.).clamp(0., 256.) / 2.;
+    let distance = attribute("dist", 0.) / 9525.;
+    let angle = (attribute("dir", 0.) / 60000.).to_radians();
+    let floor = [
+        scene.project(0., 0., 0.),
+        scene.project(1., 0., 0.),
+        scene.project(1., 0., 1.),
+        scene.project(0., 0., 1.),
+    ];
+    let x = floor.iter().map(|p| p.x).fold(f64::INFINITY, f64::min);
+    let y = floor.iter().map(|p| p.y).fold(f64::INFINITY, f64::min);
+    let width = floor.iter().map(|p| p.x).fold(f64::NEG_INFINITY, f64::max) - x;
+    let height = floor.iter().map(|p| p.y).fold(f64::NEG_INFINITY, f64::max) - y;
+    if width <= 0. || height <= 0. {
+        return;
+    }
+    let id = format!("c3df{source}_{index}");
+    write!(out, r#"<defs><clipPath id="{id}c">"#).unwrap();
+    polygon(out, &floor, "white", "none");
+    write!(out, r#"</clipPath><filter id="{id}" filterUnits="userSpaceOnUse" x="{x:.2}" y="{y:.2}" width="{width:.2}" height="{height:.2}" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="{blur:.3}"/></filter></defs><g data-chart-effect="true" pointer-events="none" clip-path="url(#{id}c)"><g filter="url(#{id})" transform="translate({:.3} {:.3})">"#, angle.cos()*distance, angle.sin()*distance).unwrap();
+    let footprint = if matches!(shape, "cylinder" | "cone" | "coneToMax") {
+        (0..64)
+            .map(|i| {
+                let angle = i as f64 * std::f64::consts::TAU / 64.;
+                [
+                    (category[0] + category[1]) / 2.
+                        + (category[1] - category[0]) / 2. * angle.cos(),
+                    (depth[0] + depth[1]) / 2. + (depth[1] - depth[0]) / 2. * angle.sin(),
+                ]
+            })
+            .collect::<Vec<_>>()
+    } else {
+        vec![
+            [category[0], depth[0]],
+            [category[1], depth[0]],
+            [category[1], depth[1]],
+            [category[0], depth[1]],
+        ]
+    };
+    let cast = caster_height * scene.model_height / 0.6;
+    let mut points = footprint
+        .iter()
+        .copied()
+        .chain(footprint.iter().map(|p| {
+            [
+                p[0] + cast * angle.cos(),
+                p[1] + cast * angle.sin() / scene.model_depth,
+            ]
+        }))
+        .collect::<Vec<_>>();
+    points.sort_by(|a, b| a[0].total_cmp(&b[0]).then(a[1].total_cmp(&b[1])));
+    let cross = |a: [f64; 2], b: [f64; 2], c: [f64; 2]| {
+        (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+    };
+    let half = |points: &[[f64; 2]]| {
+        let mut hull = Vec::new();
+        for point in points {
+            while hull.len() >= 2 && cross(hull[hull.len() - 2], hull[hull.len() - 1], *point) <= 0.
+            {
+                hull.pop();
+            }
+            hull.push(*point);
+        }
+        hull.pop();
+        hull
+    };
+    let mut hull = half(&points);
+    points.reverse();
+    hull.extend(half(&points));
+    for (axis, edge, direction) in [(0, 0., 1.), (0, 1., -1.), (1, 0., 1.), (1, 1., -1.)] {
+        let mut clipped = Vec::new();
+        for (a, b) in hull
+            .iter()
+            .zip(hull.iter().cycle().skip(1))
+            .take(hull.len())
+        {
+            let inside_a = (a[axis] - edge) * direction >= 0.;
+            let inside_b = (b[axis] - edge) * direction >= 0.;
+            if inside_a {
+                clipped.push(*a);
+            }
+            if inside_a != inside_b {
+                let t = (edge - a[axis]) / (b[axis] - a[axis]);
+                clipped.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]);
+            }
+        }
+        hull = clipped;
+    }
+    let points = hull
+        .iter()
+        .map(|p| scene.project(p[0], 0., p[1]))
+        .collect::<Vec<_>>();
+    polygon(out, &points, &color, "none");
+    out.push_str("</g></g>");
 }
 
 impl Extrusion<'_> {
     fn face(&self, out: &mut String, points: &[[f64; 3]; 4], light: f64) {
-        let points = points.map(|[x, y, z]| self.scene.project(x, y, z));
-        let cross = points
+        let projected = points.map(|[x, y, z]| self.scene.project(x, y, z));
+        let cross = projected
             .iter()
-            .zip(points.iter().cycle().skip(1))
+            .zip(projected.iter().cycle().skip(1))
             .map(|(a, b)| a.x * b.y - b.x * a.y)
             .sum::<f64>();
         if cross < -1e-9 {
-            polygon(out, &points, &shade(self.fill, light), self.stroke);
+            let light = if self.material == Material::Flat {
+                1.
+            } else {
+                light
+            };
+            let fill = if self.gradient.is_empty() {
+                shade(self.fill, light)
+            } else if points.iter().all(|p| (p[1] - points[0][1]).abs() < 1e-9) {
+                let t = ((self.value_range[1] - points[0][1])
+                    / (self.value_range[1] - self.value_range[0]))
+                    .clamp(0., 1.);
+                shade(&gradient_at(self.gradient, t), light)
+            } else {
+                let id = format!("{}_{}", self.paint_id, out.len());
+                let x = points.iter().map(|p| p[0]).sum::<f64>() / 4.;
+                let z = points.iter().map(|p| p[2]).sum::<f64>() / 4.;
+                let top = self.scene.project(x, self.value_range[1], z);
+                let bottom = self.scene.project(x, self.value_range[0], z);
+                write!(out, r#"<defs><linearGradient id="{id}" gradientUnits="userSpaceOnUse" x1="{:.3}" y1="{:.3}" x2="{:.3}" y2="{:.3}">"#, top.x,top.y,bottom.x,bottom.y).unwrap();
+                for (offset, color) in self.gradient {
+                    write!(
+                        out,
+                        r#"<stop offset="{offset:.5}" stop-color="{}"/>"#,
+                        shade(color, light)
+                    )
+                    .unwrap();
+                }
+                out.push_str("</linearGradient></defs>");
+                format!("url(#{id})")
+            };
+            if self.material == Material::TranslucentPowder {
+                out.push_str(r#"<g fill-opacity="0.7">"#);
+            }
+            polygon(out, &projected, &fill, self.stroke);
+            if self.material == Material::TranslucentPowder {
+                out.push_str("</g>");
+            }
         }
     }
 
@@ -79,37 +297,109 @@ impl Extrusion<'_> {
         let (h0, h1) = (a.bottom.max(a.top), b.bottom.max(b.top));
         let (z0, z1) = (self.near, self.far);
 
-        self.face(
-            out,
-            &[[x0, y0, z0], [x1, y1, z0], [x1, h1, z0], [x0, h0, z0]],
-            1.,
-        );
-        self.face(
-            out,
-            &[[x0, y0, z1], [x0, h0, z1], [x1, h1, z1], [x1, y1, z1]],
-            0.70,
-        );
-        self.face(
-            out,
-            &[[x0, y0, z0], [x0, h0, z0], [x0, h0, z1], [x0, y0, z1]],
-            0.64,
-        );
-        self.face(
-            out,
-            &[[x1, y1, z0], [x1, y1, z1], [x1, h1, z1], [x1, h1, z0]],
-            0.64,
-        );
+        if let Some([width, height]) = self
+            .bevel
+            .filter(|_| self.top_cap && (h0 - h1).abs() < 1e-9)
+        {
+            let dx = (width / self.scene.scale).min((x1 - x0).abs() * 0.45);
+            let dz =
+                (width / self.scene.scale / self.scene.model_depth).min((z1 - z0).abs() * 0.45);
+            let dy =
+                (height / self.scene.scale / self.scene.model_height).min((h0 - y0).abs() * 0.45);
+            if dx > 0. && dz > 0. && dy > 0. {
+                let body = Extrusion {
+                    bevel: None,
+                    top_cap: false,
+                    ..*self
+                };
+                let a = Strip {
+                    index: a.index,
+                    x: x0,
+                    bottom: y0,
+                    top: h0 - dy,
+                };
+                let b = Strip {
+                    index: b.index,
+                    x: x1,
+                    bottom: y1,
+                    top: h1 - dy,
+                };
+                body.prism(out, &a, &b);
+                let ring = |i: usize| {
+                    let angle = i as f64 * std::f64::consts::FRAC_PI_2 / 4.;
+                    let inset = 1. - angle.cos();
+                    let y = h0 - dy + dy * angle.sin();
+                    [
+                        [x0 + dx * inset, y, z0 + dz * inset],
+                        [x1 - dx * inset, y, z0 + dz * inset],
+                        [x1 - dx * inset, y, z1 - dz * inset],
+                        [x0 + dx * inset, y, z1 - dz * inset],
+                    ]
+                };
+                for i in 0..4 {
+                    let lower = ring(i);
+                    let upper = ring(i + 1);
+                    for edge in 0..4 {
+                        let next = (edge + 1) % 4;
+                        let face = [lower[edge], lower[next], upper[next], upper[edge]];
+                        let a = [
+                            face[1][0] - face[0][0],
+                            (face[1][1] - face[0][1]) * self.scene.model_height,
+                            (face[1][2] - face[0][2]) * self.scene.model_depth,
+                        ];
+                        let b = [
+                            face[2][0] - face[0][0],
+                            (face[2][1] - face[0][1]) * self.scene.model_height,
+                            (face[2][2] - face[0][2]) * self.scene.model_depth,
+                        ];
+                        let n = [
+                            a[2] * b[1] - a[1] * b[2],
+                            a[0] * b[2] - a[2] * b[0],
+                            a[1] * b[0] - a[0] * b[1],
+                        ];
+                        let length = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+                        let light = 0.4
+                            + 0.75
+                                * ((-0.4 * n[0] + 0.6 * n[1] - n[2]) / (1.52_f64.sqrt() * length))
+                                    .max(0.);
+                        body.face(out, &face, light);
+                    }
+                }
+                body.face(out, &ring(4), 0.4 + 0.75 * 0.6 / 1.52_f64.sqrt());
+                return;
+            }
+        }
+
         let slope = (h1 - h0).atan2(x1 - x0);
-        self.face(
-            out,
-            &[[x0, h0, z0], [x1, h1, z0], [x1, h1, z1], [x0, h0, z1]],
-            0.75 - 0.10 * slope.sin(),
-        );
-        self.face(
-            out,
-            &[[x0, y0, z0], [x0, y0, z1], [x1, y1, z1], [x1, y1, z0]],
-            0.40,
-        );
+        let faces = [
+            ([[x0, y0, z0], [x1, y1, z0], [x1, h1, z0], [x0, h0, z0]], 1.),
+            (
+                [[x0, y0, z1], [x0, h0, z1], [x1, h1, z1], [x1, y1, z1]],
+                0.70,
+            ),
+            (
+                [[x0, y0, z0], [x0, h0, z0], [x0, h0, z1], [x0, y0, z1]],
+                0.64,
+            ),
+            (
+                [[x1, y1, z0], [x1, y1, z1], [x1, h1, z1], [x1, h1, z0]],
+                0.64,
+            ),
+            (
+                [[x0, h0, z0], [x1, h1, z0], [x1, h1, z1], [x0, h0, z1]],
+                0.75 - 0.10 * slope.sin(),
+            ),
+            (
+                [[x0, y0, z0], [x0, y0, z1], [x1, y1, z1], [x1, y1, z0]],
+                0.40,
+            ),
+        ];
+        for (index, (points, light)) in faces.iter().enumerate() {
+            if (index == 4 && !self.top_cap) || (index == 5 && !self.bottom_cap) {
+                continue;
+            }
+            self.face(out, points, *light);
+        }
     }
 
     fn shaped_bar(
@@ -123,7 +413,13 @@ impl Extrusion<'_> {
         end_radius: f64,
     ) {
         let pyramidal = matches!(shape, "pyramid" | "pyramidToMax");
-        let count = if pyramidal { 4 } else { 24 };
+        let count = if pyramidal {
+            4
+        } else if self.scene.spreadsheet {
+            64
+        } else {
+            24
+        };
         let shape_point = |i: usize, height: f64, radius: f64| {
             let angle = (i as f64 + if pyramidal { 0.5 } else { 0. }) * std::f64::consts::TAU
                 / count as f64;
@@ -162,8 +458,25 @@ impl Extrusion<'_> {
                 top.reverse();
             }
             self.face(out, &side, light);
-            self.face(out, &base, 0.40);
-            self.face(out, &top, 0.75);
+            let (base_cap, end_cap) = if value[1] < value[0] {
+                (self.top_cap, self.bottom_cap)
+            } else {
+                (self.bottom_cap, self.top_cap)
+            };
+            if base_cap {
+                self.face(out, &base, 0.40);
+            }
+            if end_cap {
+                self.face(
+                    out,
+                    &top,
+                    if self.scene.spreadsheet {
+                        0.4 + 0.75 / 3_f64.sqrt()
+                    } else {
+                        0.75
+                    },
+                );
+            }
         }
     }
 
@@ -186,6 +499,8 @@ pub(super) fn draw(
     data: &ChartData,
     group: Node,
     colors: &ChartColors,
+    font: &str,
+    canvas: (f64, f64),
     out: &mut String,
 ) {
     let group_type = group.tag_name().name();
@@ -234,8 +549,11 @@ pub(super) fn draw(
     }
     let nf = count as f64;
     let nseries = series.len() as f64;
-    let grouping =
-        setting(group, "grouping").unwrap_or(if bars { "clustered" } else { "standard" });
+    let grouping = setting(group, "grouping").unwrap_or(if bars && !scene.spreadsheet {
+        "clustered"
+    } else {
+        "standard"
+    });
     let percent = grouping == "percentStacked";
     let stacked = grouping == "stacked" || percent;
     let clustered = bars && !stacked && grouping != "standard";
@@ -285,6 +603,21 @@ pub(super) fn draw(
     }
     let mut sums = BTreeMap::<u32, (f64, f64)>::new();
     let mut drawn: Vec<(f64, String)> = Vec::new();
+    let mut labels = String::new();
+    let style_effects = colors
+        .style_effects_xml("dataPoint3D")
+        .and_then(|xml| roxmltree::Document::parse(xml).ok());
+    let inherited_shadow = style_effects.as_ref().and_then(|doc| {
+        doc.descendants()
+            .find(|node| node.tag_name().name() == "outerShdw")
+    });
+    let inherited_bevel = style_effects
+        .as_ref()
+        .and_then(|doc| doc.descendants().find(|n| n.tag_name().name() == "bevelT"));
+    let style_fill = colors
+        .style_fill_xml("dataPoint3D")
+        .and_then(|xml| roxmltree::Document::parse(xml).ok());
+    let mut shadows = String::new();
     for (order, (source, s)) in series.iter().enumerate() {
         let center = if layers == 1. {
             0.5
@@ -300,6 +633,17 @@ pub(super) fn draw(
             colors.fill(*source, None)
         };
         let stroke = colors.outline(*source, None).unwrap_or("none");
+        let data_labels = (scene.spreadsheet && bars)
+            .then(|| DataLabels::new(group, xml_series[order], font, canvas))
+            .flatten();
+        let series_material = if scene.spreadsheet {
+            material(
+                child(xml_series[order], "spPr"),
+                colors.style_material("dataPoint3D"),
+            )
+        } else {
+            Material::Matte
+        };
         let mut shapes = format!(r#"<g data-docx-series="{source}""#);
         colors.hit_attrs(&mut shapes, "series", *source, None);
         shapes.push('>');
@@ -350,9 +694,6 @@ pub(super) fn draw(
             let h0 = scene.value(base).clamp(0., 1.);
             let h1 = scene.value(base + value).clamp(0., 1.);
             if bars {
-                if (h0 - h1).abs() < 1e-12 {
-                    continue;
-                }
                 let shift = if clustered {
                     (order as f64 - (nseries - 1.) * 0.5) * band
                 } else {
@@ -361,16 +702,122 @@ pub(super) fn draw(
                 let mid = index as f64 + 0.5 + shift;
                 let lo = category((mid - band * 0.5) / nf);
                 let hi = category((mid + band * 0.5) / nf);
+                if let Some((labels_config, point)) = data_labels.as_ref().zip(
+                    s.points
+                        .binary_search_by_key(&index, |p| p.index)
+                        .ok()
+                        .map(|i| &s.points[i]),
+                ) {
+                    let category_center = (lo + hi) / 2.;
+                    let (start, end) = if horizontal {
+                        (
+                            scene.project(h0, category_center, center),
+                            scene.project(h1, category_center, center),
+                        )
+                    } else {
+                        (
+                            scene.project(category_center, h0, center),
+                            scene.project(category_center, h1, center),
+                        )
+                    };
+                    labels_config.draw(
+                        &mut labels,
+                        s,
+                        point,
+                        (end.x, end.y),
+                        (start.x, start.y),
+                        if stacked { "ctr" } else { "outEnd" },
+                        horizontal,
+                        0.,
+                        *source,
+                        colors,
+                    );
+                }
+                if (h0 - h1).abs() < 1e-12 {
+                    continue;
+                }
                 let (x0, x1, y0, y1) = if horizontal {
                     (h0.min(h1), h0.max(h1), lo.min(hi), lo.max(hi))
                 } else {
                     (lo.min(hi), lo.max(hi), h0.min(h1), h0.max(h1))
                 };
                 let ink = colors.fill(*source, Some(index));
+                let point = xml_series[order].children().find(|n| {
+                    chart_node(*n, "dPt") && num(Some(*n), "idx") == Some(f64::from(index))
+                });
                 let invert = scene.spreadsheet
                     && horizontal
                     && value < 0.
                     && on(setting(xml_series[order], "invertIfNegative"));
+                let gradient = if scene.spreadsheet
+                    && !horizontal
+                    && colors.explicit_fill(*source, Some(index)).is_none()
+                {
+                    style_fill
+                        .as_ref()
+                        .map(|doc| {
+                            doc.descendants()
+                                .filter(|n| n.tag_name().name() == "gs")
+                                .filter_map(|n| {
+                                    Some((
+                                        number(n.attribute("pos"))? / 100000.,
+                                        colors.style_solid_color(n, &ink)?,
+                                    ))
+                                })
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default()
+                } else {
+                    Vec::new()
+                };
+                let bevel = if scene.spreadsheet
+                    && !horizontal
+                    && series_material != Material::TranslucentPowder
+                {
+                    point
+                        .and_then(|p| child(p, "spPr"))
+                        .or_else(|| child(xml_series[order], "spPr"))
+                        .and_then(|p| p.descendants().find(|n| n.tag_name().name() == "bevelT"))
+                        .or(inherited_bevel)
+                        .map(|n| {
+                            [
+                                number(n.attribute("w")).unwrap_or(76200.) / 9525.,
+                                number(n.attribute("h")).unwrap_or(76200.) / 9525.,
+                            ]
+                        })
+                } else {
+                    None
+                };
+                let paint_id = format!("c3dp{source}_{index}");
+                let (top_cap, bottom_cap) = if scene.spreadsheet && stacked && !horizontal {
+                    let (low, high) = stack_extents.get(&index).copied().unwrap_or_default();
+                    let divisor = if percent {
+                        totals
+                            .get(&index)
+                            .copied()
+                            .unwrap_or(1.)
+                            .max(f64::MIN_POSITIVE)
+                    } else {
+                        1.
+                    };
+                    let (low, high) = (low / divisor, high / divisor);
+                    let epsilon = (high - low).max(1.) * 1e-9;
+                    let start = base.abs() < epsilon
+                        && if value > 0. {
+                            low.abs() < epsilon
+                        } else {
+                            high.abs() < epsilon
+                        };
+                    let end =
+                        ((base + value) - if value > 0. { high } else { low }).abs() < epsilon;
+                    if h1 > h0 {
+                        (end, start)
+                    } else {
+                        (start, end)
+                    }
+                } else {
+                    (true, true)
+                };
                 let paint = Extrusion {
                     scene,
                     near,
@@ -385,6 +832,13 @@ pub(super) fn draw(
                             "none"
                         })
                     },
+                    material: series_material,
+                    gradient: &gradient,
+                    paint_id: &paint_id,
+                    value_range: [h0.min(h1), h0.max(h1)],
+                    bevel,
+                    top_cap,
+                    bottom_cap,
                 };
                 if colors.interactive {
                     let middle = (lo + hi) / 2.;
@@ -395,6 +849,7 @@ pub(super) fn draw(
                     };
                     begin_point_hit(&mut shapes, colors, "bar3D", *source, index, top);
                 }
+                let mut geometry = String::new();
                 if matches!(
                     shape,
                     "cylinder" | "cone" | "coneToMax" | "pyramid" | "pyramidToMax"
@@ -428,7 +883,7 @@ pub(super) fn draw(
                         }
                     }
                     paint.shaped_bar(
-                        &mut shapes,
+                        &mut geometry,
                         [lo, hi],
                         [h0, h1],
                         horizontal,
@@ -444,14 +899,69 @@ pub(super) fn draw(
                         top: y1,
                     };
                     let end = Strip { x: x1, ..start };
-                    paint.prism(&mut shapes, &start, &end);
+                    paint.prism(&mut geometry, &start, &end);
+                }
+                let mut bounds = [
+                    f64::INFINITY,
+                    f64::INFINITY,
+                    f64::NEG_INFINITY,
+                    f64::NEG_INFINITY,
+                ];
+                for x in [x0, x1] {
+                    for y in [y0, y1] {
+                        for z in [near, far] {
+                            let p = scene.project(x, y, z);
+                            bounds[0] = bounds[0].min(p.x);
+                            bounds[1] = bounds[1].min(p.y);
+                            bounds[2] = bounds[2].max(p.x);
+                            bounds[3] = bounds[3].max(p.y);
+                        }
+                    }
+                }
+                bounds[2] -= bounds[0];
+                bounds[3] -= bounds[1];
+                if scene.spreadsheet {
+                    let properties = point
+                        .and_then(ChartColors::effect_properties)
+                        .or_else(|| ChartColors::effect_properties(xml_series[order]));
+                    if properties.is_none() && !horizontal && inherited_shadow.is_some() {
+                        if base == 0. && value > 0. {
+                            floor_shadow(
+                                &mut shadows,
+                                scene,
+                                colors,
+                                inherited_shadow.unwrap(),
+                                [lo, hi],
+                                [near, far],
+                                h1,
+                                shape,
+                                *source,
+                                index,
+                            );
+                        }
+                        shapes.push_str(&geometry);
+                    } else {
+                        colors.paint_styled_shape(
+                            &mut shapes,
+                            properties,
+                            "dataPoint3D",
+                            &ink,
+                            bounds,
+                            &geometry,
+                        );
+                    }
+                } else {
+                    shapes.push_str(&geometry);
                 }
                 colors.end_hit(&mut shapes);
             } else {
                 let x = category(
-                    if lines
+                    if (lines
                         && setting(child(plot, "valAx").unwrap_or(plot), "crossBetween")
-                            != Some("midCat")
+                            != Some("midCat"))
+                        || (scene.spreadsheet
+                            && setting(child(plot, "valAx").unwrap_or(plot), "crossBetween")
+                                == Some("between"))
                     {
                         (f64::from(index) + 0.5) / nf
                     } else if count == 1 {
@@ -489,6 +999,13 @@ pub(super) fn draw(
                         far,
                         fill: &fill,
                         stroke,
+                        material: series_material,
+                        gradient: &[],
+                        paint_id: "",
+                        value_range: [0., 1.],
+                        bevel: None,
+                        top_cap: true,
+                        bottom_cap: true,
                     };
                     let (a, b) = if prev.x < curr.x {
                         (prev, &curr)
@@ -544,7 +1061,9 @@ pub(super) fn draw(
         drawn.push((depth_order, shapes));
     }
     drawn.sort_by(|a, b| b.0.total_cmp(&a.0));
+    out.push_str(&shadows);
     for (_, shapes) in drawn {
         out.push_str(&shapes);
     }
+    out.push_str(&labels);
 }

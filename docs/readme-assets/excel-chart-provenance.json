@@ -1,0 +1,293 @@
+{
+  "date": "2026-11-05",
+  "reportSha256": "a73763e036f12e20d6c1dd90ced306f43b893aa1caf2533545affb77ba0ff4d8",
+  "rendererWasmSha256": "3dc200ed9f86175b3de07128abb2a9f278da19a931dbc861cd590cb950196951",
+  "fontArchiveSha256": "292d9d48bcaa26ba9df69171dded1a4177679756e77f989c309cb95feb16b921",
+  "referenceManifestSha256": "1a77aeed26ea3c574ad318145ac507976de7500ea4939aa4070b2843a2525534",
+  "summary": {
+    "workbooks": 43,
+    "charts": 382,
+    "sourceFilesUnchanged": true,
+    "fontPackageUnchanged": true,
+    "runtimeMatchesRecordedArtifact": true,
+    "sourceInterpretationDifferences": 0,
+    "expected": 382,
+    "empty": 0,
+    "missing": 0,
+    "workbookErrors": 0,
+    "mountedEffects": {
+      "charts": 160,
+      "effects": 710,
+      "filters": 710,
+      "lightingPrimitives": 488
+    },
+    "nativeRenderMethods": {
+      "live-ui-title-font-frozen": 381,
+      "unavailable": 1
+    },
+    "titleFontEvidence": {
+      "statuses": {
+        "no-title": 72,
+        "same-value-applied": 309,
+        "unavailable": 1
+      },
+      "withEvidence": 381,
+      "unchangedBounds": 381,
+      "changedBounds": 0
+    },
+    "all": {
+      "charts": 381,
+      "exact": 0,
+      "meanAbsoluteError": 6.334883299350253,
+      "changedPixels": 8869772,
+      "pixels": 67354595
+    },
+    "originalWorkbookReferences": {
+      "charts": 381,
+      "exact": 0,
+      "meanAbsoluteError": 6.334883299350253,
+      "changedPixels": 8869772,
+      "pixels": 67354595
+    },
+    "provenance": {
+      "unchanged-original": {
+        "references": 165,
+        "charts": 165,
+        "exact": 0,
+        "meanAbsoluteError": 8.128650734058867,
+        "changedPixels": 6315653,
+        "pixels": 35137123
+      },
+      "sanitized-original": {
+        "references": 216,
+        "charts": 216,
+        "exact": 0,
+        "meanAbsoluteError": 4.378558886722501,
+        "changedPixels": 2554119,
+        "pixels": 32217472
+      },
+      "reconstructed": {
+        "references": 0,
+        "charts": 0,
+        "exact": 0,
+        "meanAbsoluteError": null,
+        "changedPixels": 0,
+        "pixels": 0
+      },
+      "unavailable": {
+        "references": 1,
+        "charts": 0,
+        "exact": 0,
+        "meanAbsoluteError": null,
+        "changedPixels": 0,
+        "pixels": 0
+      }
+    }
+  },
+  "galleryOrdinals": {
+    "bars-lines-areas": [
+      [
+        15,
+        "Clustered columns"
+      ],
+      [
+        16,
+        "Horizontal bars"
+      ],
+      [
+        17,
+        "Lines"
+      ],
+      [
+        21,
+        "Overlapping areas"
+      ],
+      [
+        109,
+        "Stacked positive and negative values"
+      ],
+      [
+        112,
+        "Percent bars and zeroes"
+      ],
+      [
+        115,
+        "Stacked areas"
+      ],
+      [
+        116,
+        "Secondary-axis combination"
+      ]
+    ],
+    "pies-and-rings": [
+      [
+        18,
+        "Pie"
+      ],
+      [
+        19,
+        "Doughnut"
+      ],
+      [
+        72,
+        "Exploded pie and labels"
+      ],
+      [
+        73,
+        "3D pie"
+      ],
+      [
+        74,
+        "Large doughnut hole"
+      ],
+      [
+        75,
+        "Bar-of-pie"
+      ],
+      [
+        81,
+        "Pie-of-pie"
+      ],
+      [
+        140,
+        "Multiple rings"
+      ]
+    ],
+    "scatter-radar-stock": [
+      [
+        85,
+        "Scatter lines and markers"
+      ],
+      [
+        86,
+        "Smooth scatter"
+      ],
+      [
+        87,
+        "Bubbles"
+      ],
+      [
+        98,
+        "Radar"
+      ],
+      [
+        100,
+        "Filled radar"
+      ],
+      [
+        101,
+        "Scatter with error bars"
+      ],
+      [
+        106,
+        "Open-high-low-close"
+      ],
+      [
+        108,
+        "Volume-open-high-low-close"
+      ]
+    ],
+    "modern-charts": [
+      [
+        43,
+        "Sunburst"
+      ],
+      [
+        44,
+        "Treemap"
+      ],
+      [
+        45,
+        "Waterfall"
+      ],
+      [
+        46,
+        "Funnel"
+      ],
+      [
+        47,
+        "Histogram"
+      ],
+      [
+        48,
+        "Pareto"
+      ],
+      [
+        49,
+        "Box and whisker"
+      ],
+      [
+        50,
+        "Filled map"
+      ]
+    ],
+    "three-dimensional": [
+      [
+        31,
+        "Stacked 3D area"
+      ],
+      [
+        33,
+        "Exploded 3D pie"
+      ],
+      [
+        37,
+        "Stacked cones"
+      ],
+      [
+        38,
+        "Stacked cylinders"
+      ],
+      [
+        39,
+        "Horizontal pyramids"
+      ],
+      [
+        41,
+        "Cylindrical columns"
+      ],
+      [
+        42,
+        "Pyramid columns"
+      ],
+      [
+        78,
+        "Surface"
+      ]
+    ],
+    "formatting-and-effects": [
+      [
+        123,
+        "Area bevels"
+      ],
+      [
+        124,
+        "Column bevels"
+      ],
+      [
+        126,
+        "Line shadows"
+      ],
+      [
+        133,
+        "Radar line effects"
+      ],
+      [
+        148,
+        "Doughnut bevels and shadows"
+      ],
+      [
+        152,
+        "Bubble bevels and labels"
+      ],
+      [
+        153,
+        "Filled radar bevels"
+      ],
+      [
+        157,
+        "Trendline equation and R-squared"
+      ]
+    ]
+  }
+}

@@ -187,10 +187,23 @@ fn treemap(
             let largest = tree[first].value * area_per_unit;
             let mut sum = largest;
             let mut count = 1;
-            let mut score = worst_aspect(largest, largest, sum, side);
+            let aspect = |area: f64, sum: f64| {
+                if ctx.colors.spreadsheet_defaults {
+                    let thickness = sum / side;
+                    let ratio = if vertical {
+                        thickness * thickness / area
+                    } else {
+                        area / (thickness * thickness)
+                    };
+                    (ratio - 1.).abs()
+                } else {
+                    worst_aspect(area, largest, sum, side)
+                }
+            };
+            let mut score = aspect(largest, sum);
             for &id in &children[1..] {
                 let area = tree[id].value * area_per_unit;
-                let next = worst_aspect(area, largest, sum + area, side);
+                let next = aspect(area, sum + area);
                 if next > score {
                     break;
                 }

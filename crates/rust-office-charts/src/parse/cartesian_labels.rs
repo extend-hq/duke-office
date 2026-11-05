@@ -8,19 +8,22 @@ use roxmltree::Node;
 use std::collections::BTreeMap;
 use std::fmt::Write;
 
-pub(super) struct DataLabels<'a> {
+pub(in crate::parse) struct DataLabels<'a> {
     root_props: Option<Node<'a, 'a>>,
     defaults: [BTreeMap<&'a str, Node<'a, 'a>>; 2],
     overrides: [BTreeMap<u32, Node<'a, 'a>>; 2],
     source_format: Option<&'a str>,
+    bubble_format: Option<&'a str>,
     default_face: &'a str,
+    canvas: (f64, f64),
 }
 
 impl<'a> DataLabels<'a> {
-    pub(super) fn new(
+    pub(in crate::parse) fn new(
         group: Node<'a, 'a>,
         series: Node<'a, 'a>,
         default_face: &'a str,
+        canvas: (f64, f64),
     ) -> Option<Self> {
         let defaults = [child(series, "dLbls"), child(group, "dLbls")];
         if defaults.iter().all(Option::is_none) {
@@ -35,6 +38,9 @@ impl<'a> DataLabels<'a> {
         });
         let source_format = child(series, "val")
             .or_else(|| child(series, "yVal"))
+            .and_then(|n| n.descendants().find(|c| chart_node(*c, "formatCode")))
+            .and_then(|n| n.text());
+        let bubble_format = child(series, "bubbleSize")
             .and_then(|n| n.descendants().find(|c| chart_node(*c, "formatCode")))
             .and_then(|n| n.text());
         let defaults = defaults.map(|node| {
@@ -52,11 +58,13 @@ impl<'a> DataLabels<'a> {
             defaults,
             overrides,
             source_format,
+            bubble_format,
             default_face,
+            canvas,
         })
     }
 
-    pub(super) fn draw(
+    pub(in crate::parse) fn draw(
         &self,
         svg: &mut String,
         series: &ChartSeries,
@@ -81,6 +89,17 @@ impl<'a> DataLabels<'a> {
             prop(name).map_or(default, |n| {
                 !matches!(n.attribute("val"), Some("false" | "0" | "off"))
             })
+        };
+        let number_format = |source: Option<&'a str>| {
+            let node = prop("numFmt");
+            let explicit = node.and_then(|n| n.attribute("formatCode"));
+            if node
+                .is_some_and(|n| matches!(n.attribute("sourceLinked"), Some("1" | "true" | "on")))
+            {
+                source.or(explicit)
+            } else {
+                explicit.or(source)
+            }
         };
         if show("delete", false) {
             return;
@@ -134,12 +153,19 @@ impl<'a> DataLabels<'a> {
                 prop("showCatName").is_none() && prop("showSerName").is_none(),
             ) {
                 let value = point.value.as_deref().or(point.y.as_deref()).unwrap_or("0");
-                let code = prop("numFmt")
-                    .and_then(|n| n.attribute("formatCode"))
-                    .or(self.source_format);
+                let code = number_format(self.source_format);
                 fields.push(
                     number(Some(value)).map_or_else(|| value.to_owned(), |v| format_value(v, code)),
                 );
+            }
+            if show("showBubbleSize", false) {
+                if let Some(value) = point.bubble_size.as_deref() {
+                    let code = number_format(self.bubble_format);
+                    fields.push(
+                        number(Some(value))
+                            .map_or_else(|| value.to_owned(), |v| format_value(v, code)),
+                    );
+                }
             }
             fields.join(prop("separator").and_then(|n| n.text()).unwrap_or(", "))
         };
@@ -155,16 +181,92 @@ impl<'a> DataLabels<'a> {
         });
         let size = font_size(props, font_size(root_props, 40. / 3.));
         let family = font_family(props.or(root_props), self.default_face);
-        let rows: Vec<_> = label.split('\n').collect();
-        let key_width = if key { size * 0.53 + 3. } else { 0. };
+        let bubble = series.chart_type == "bubble";
+        let measure = |text: &str| {
+            if bubble {
+                crate::parse::font_metrics::width(text, size, &family, false, false)
+                    .unwrap_or_else(|| text_width(text, size))
+            } else {
+                text_width(text, size)
+            }
+        };
+        let layout = prop("layout").and_then(|n| child(n, "manualLayout"));
+        let extended_layout = prop("extLst")
+            .and_then(|n| {
+                n.descendants().find(|n| {
+                    n.has_tag_name((
+                        "http://schemas.microsoft.com/office/drawing/2012/chart",
+                        "layout",
+                    ))
+                })
+            })
+            .and_then(|n| child(n, "manualLayout"));
+        let extent = |axis, dimension| {
+            number(
+                extended_layout
+                    .and_then(|n| val(n, axis))
+                    .or_else(|| layout.and_then(|n| val(n, axis))),
+            )
+            .filter(|n| *n > 0.)
+            .map(|n| n * dimension)
+        };
+        let explicit_width = extent("w", self.canvas.0);
+        let explicit_height = extent("h", self.canvas.1);
+        let key_width = if key {
+            if bubble {
+                56. / 3.
+            } else {
+                size * 0.53 + 3.
+            }
+        } else {
+            0.
+        };
+        let mut rows = Vec::new();
+        for paragraph in label.split('\n') {
+            if bubble && rich.is_none() && explicit_width.is_none() {
+                let mut row = String::new();
+                for word in paragraph.split_whitespace() {
+                    let next = if row.is_empty() {
+                        word.to_owned()
+                    } else {
+                        format!("{row} {word}")
+                    };
+                    let key = if rows.is_empty() { key_width } else { 0. };
+                    if !row.is_empty() && measure(&next) + key > 400. / 3. {
+                        rows.push(row);
+                        row = word.to_owned();
+                    } else {
+                        row = next;
+                    }
+                }
+                rows.push(row);
+            } else {
+                rows.push(paragraph.to_owned());
+            }
+        }
         let w = rows
             .iter()
             .enumerate()
-            .map(|(i, s)| text_width(s, size) + if i == 0 { key_width } else { 0. })
+            .map(|(i, s)| measure(s) + if i == 0 { key_width } else { 0. })
             .fold(0., f64::max);
-        let h = size * (1. + (rows.len() - 1) as f64 * 1.16);
-        let ox = w / 2. + 8. + marker_radius;
-        let oy = h / 2. + 7.2 + marker_radius;
+        let line_height = size * if bubble { 1.2205 } else { 1.16 };
+        let h = if bubble {
+            line_height * rows.len() as f64 + 4.
+        } else {
+            size + (rows.len() - 1) as f64 * line_height
+        };
+        let box_width = explicit_width.unwrap_or(w + if bubble { 8. } else { 0. });
+        let box_height = explicit_height.unwrap_or(h);
+        let ox = box_width / 2.
+            + if explicit_width.is_some() {
+                0.
+            } else if bubble {
+                8. / 3.
+            } else {
+                8.
+            }
+            + marker_radius;
+        let oy = box_height / 2. + if explicit_height.is_some() { 0. } else { 7.2 } + marker_radius;
         let (dx, dy) = if horizontal {
             (if end.0 < start.0 { -ox } else { ox }, 0.)
         } else {
@@ -189,6 +291,18 @@ impl<'a> DataLabels<'a> {
             "ctr" if default_pos == "r" => end,
             _ => ((end.0 + start.0) / 2., (end.1 + start.1) / 2.),
         };
+        let coordinate = |axis, mode, center, extent, dimension| {
+            let Some(value) = layout.and_then(|n| number(val(n, axis))) else {
+                return center;
+            };
+            if layout.and_then(|n| val(n, mode)) == Some("edge") {
+                value * dimension + extent / 2.
+            } else {
+                center + value * dimension
+            }
+        };
+        let x = coordinate("x", "xMode", x, box_width, self.canvas.0);
+        let y = coordinate("y", "yMode", y, box_height, self.canvas.1);
         let rot = text_body
             .and_then(|n| n.descendants().find(|c| c.tag_name().name() == "bodyPr"))
             .and_then(|n| number(n.attribute("rot")))
@@ -220,25 +334,40 @@ impl<'a> DataLabels<'a> {
         if let Some(shape) = prop("spPr") {
             let fill = colors.shape_fill(shape).unwrap_or_else(|| "none".into());
             let stroke = colors.shape_stroke(shape).unwrap_or_else(|| "none".into());
-            write!(svg,r#"<rect x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" fill="{fill}" stroke="{stroke}"/>"#,-w/2.-2.,-h/2.-2.,w+4.,h+4.).unwrap();
+            write!(svg,r#"<rect x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" fill="{fill}" stroke="{stroke}"/>"#,-box_width/2.-2.,-box_height/2.-2.,box_width+4.,box_height+4.).unwrap();
         }
-        let first_y = size * 0.375 - (rows.len() - 1) as f64 * size * 0.58;
+        let first_y = size * 0.375 - (rows.len() - 1) as f64 * line_height / 2.;
         if key {
             let fill = colors.fill(ordinal, Some(point.index));
-            let side = key_width - 3.;
-            write!(
-                svg,
-                r#"<rect x="{:.2}" y="{:.2}" width="{side:.2}" height="{side:.2}" fill="{fill}"/>"#,
-                -(text_width(rows[0], size) + key_width) / 2.,
-                first_y - side
-            )
-            .unwrap();
+            let side = size * 0.53;
+            let x = -(measure(&rows[0]) + key_width) / 2.
+                + if bubble { (key_width - side) / 2. } else { 0. };
+            let y = first_y - side;
+            if series.chart_type == "bubble" {
+                let body = format!(
+                    r#"<circle cx="{:.2}" cy="{:.2}" r="{:.2}" fill="{fill}"/>"#,
+                    x + side / 2.,
+                    y + side / 2.,
+                    side / 2.
+                );
+                colors.paint_point(
+                    svg,
+                    ordinal,
+                    Some(point.index),
+                    "dataPoint",
+                    &fill,
+                    [x, y, side, side],
+                    &body,
+                );
+            } else {
+                write!(svg, r#"<rect x="{x:.2}" y="{y:.2}" width="{side:.2}" height="{side:.2}" fill="{fill}"/>"#).unwrap();
+            }
         }
         for (i, row) in rows.iter().enumerate() {
             text(
                 svg,
-                if i == 0 { key_width / 2. } else { 0. },
-                first_y + size * 1.16 * i as f64,
+                if i == 0 || bubble { key_width / 2. } else { 0. },
+                first_y + line_height * i as f64,
                 "middle",
                 size,
                 &family,

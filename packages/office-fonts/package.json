@@ -1,0 +1,49 @@
+{
+  "name": "@extend-ai/office-fonts",
+  "version": "0.1.0",
+  "description": "Shared Office font fallbacks for browser viewers and server rendering",
+  "type": "module",
+  "license": "MIT AND OFL-1.1",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/extend-hq/rust-office.git",
+    "directory": "packages/office-fonts"
+  },
+  "main": "./index.cjs",
+  "module": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "import": "./index.js",
+      "require": "./index.cjs"
+    },
+    "./carlito.css": "./carlito.css",
+    "./fonts/*": "./fonts/*",
+    "./fonts.conf": "./fonts.conf",
+    "./package.json": "./package.json",
+    "./*.css": "./*.css",
+    "./FONT-LICENSES.txt": "./FONT-LICENSES.txt",
+    "./fontconfig-aliases.conf": "./fontconfig-aliases.conf"
+  },
+  "files": [
+    "index.*",
+    "runtime.js",
+    "families.js",
+    "families.json",
+    "*-data.js",
+    "*.css",
+    "fonts",
+    "fonts.conf",
+    "README.md",
+    "LICENSE",
+    "FONT-LICENSES.txt",
+    "fontconfig-aliases.conf"
+  ],
+  "sideEffects": [
+    "./*.css"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

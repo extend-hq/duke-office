@@ -5,7 +5,7 @@ use super::Coords;
 use crate::chart::{chart_node, child, ChartSeries};
 use crate::parse::chart_colors::ChartColors;
 pub(super) use crate::parse::chart_svg::marker;
-use data_labels::DataLabels;
+pub(in crate::parse) use data_labels::DataLabels;
 use roxmltree::Node;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write;
@@ -149,7 +149,7 @@ fn bars(
         let shift = (j as f64 - (count - 1.) / 2.) * category_step;
         let ordinal = first + j;
         write!(svg, r#"<g data-docx-series="{ordinal}">"#).unwrap();
-        let data_labels = DataLabels::new(group, node, default_face);
+        let data_labels = DataLabels::new(group, node, default_face, coords.canvas);
         let invert = flag(
             node,
             "invertIfNegative",
@@ -205,16 +205,15 @@ fn bars(
                 .outline(ordinal, Some(p.index))
                 .unwrap_or(if inverted { "#000000" } else { "none" });
             let sw = point_style.map_or(base_width, |n| stroke_width(n, base_width));
-            write!(svg, r#"<rect x="{x:.2}" y="{y:.2}" width="{w:.2}" height="{h:.2}" fill="{fill}" stroke="{stroke}" stroke-width="{sw:.2}""#).unwrap();
-            if colors.interactive {
-                write!(
-                    svg,
-                    r#" data-chart-kind="bar" data-chart-series="{ordinal}" data-chart-point="{}""#,
-                    p.index
-                )
-                .unwrap();
-            }
-            svg.push_str("/>");
+            let body = format!(
+                r#"<rect x="{x:.2}" y="{y:.2}" width="{w:.2}" height="{h:.2}" fill="{fill}" stroke="{stroke}" stroke-width="{sw:.2}"/>"#
+            );
+            let properties = point_style
+                .and_then(ChartColors::effect_properties)
+                .or_else(|| ChartColors::effect_properties(node));
+            colors.begin_hit(svg, "bar", ordinal, Some(p.index));
+            colors.paint_styled_shape(svg, properties, "dataPoint", &fill, [x, y, w, h], &body);
+            colors.end_hit(svg);
         }
         svg.push_str("</g>");
     }
@@ -236,22 +235,18 @@ fn lines(
     colors: &ChartColors,
     smooth: bool,
 ) {
+    if part.len() < 2 {
+        return;
+    }
     let sw = stroke_width(node, 3.);
-    let dash = line_properties(node)
-        .and_then(|n| n.children().find(|c| c.tag_name().name() == "prstDash"))
-        .and_then(|n| n.attribute("val"));
-    let dash = match dash {
-        Some("dot" | "sysDot") => format!(r#" stroke-dasharray="{sw} {}""#, 2. * sw),
-        Some("dash" | "sysDash") => format!(r#" stroke-dasharray="{} {}""#, 4. * sw, 3. * sw),
-        Some("lgDash") => format!(r#" stroke-dasharray="{} {}""#, 8. * sw, 3. * sw),
-        Some("dashDot" | "sysDashDot" | "lgDashDot") => format!(
-            r#" stroke-dasharray="{} {} {sw} {}""#,
-            4. * sw,
-            2. * sw,
-            2. * sw
-        ),
-        _ => String::new(),
+    let line = line_properties(node);
+    let dash = colors.line_dash(line, sw);
+    let cap = match line.and_then(|n| n.attribute("cap")) {
+        Some("rnd") => "round",
+        Some("sq") => "square",
+        _ => "butt",
     };
+    let mut body = String::new();
     for i in 1..part.len() {
         let p = part[i - 1].top;
         let q = part[i].top;
@@ -261,7 +256,7 @@ fn lines(
         }
         let (x, y) = p;
         let (xx, yy) = q;
-        write!(svg,r#"<path stroke="{paint}" stroke-width="{sw:.2}"{dash} stroke-linecap="round" fill="none" d="M{x:.2} {y:.2}"#).unwrap();
+        write!(body,r#"<path stroke="{paint}" stroke-width="{sw:.2}" stroke-dasharray="{dash}" stroke-linecap="{cap}" fill="none" d="M{x:.2} {y:.2}"#).unwrap();
         if smooth && part.len() > 2 {
             let a = part[i.saturating_sub(2)].top;
             let b = part[(i + 1).min(part.len() - 1)].top;
@@ -272,7 +267,7 @@ fn lines(
                 1. / 6.
             };
             write!(
-                svg,
+                body,
                 "C{:.2} {:.2} {:.2} {:.2} {xx:.2} {yy:.2}",
                 x + (xx - a.0) * f,
                 y + (yy - a.1) * f,
@@ -281,17 +276,40 @@ fn lines(
             )
             .unwrap();
         } else {
-            write!(svg, "L{xx:.2} {yy:.2}").unwrap();
+            write!(body, "L{xx:.2} {yy:.2}").unwrap();
         }
-        svg.push('"');
-        if colors.interactive {
-            write!(
-                svg,
-                r#" data-chart-kind="line" data-chart-series="{ordinal}""#
-            )
-            .unwrap();
-        }
-        svg.push_str("/>");
+        body.push_str("\"/>");
+    }
+    if let (Some(first), Some(last)) = (part.first(), part.last()) {
+        colors.line_ends(
+            &mut body,
+            line,
+            first.top,
+            last.top,
+            sw,
+            &colors.line_at(ordinal, None),
+        );
+        let left = part.iter().map(|p| p.top.0).fold(f64::INFINITY, f64::min);
+        let top = part.iter().map(|p| p.top.1).fold(f64::INFINITY, f64::min);
+        let right = part
+            .iter()
+            .map(|p| p.top.0)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let bottom = part
+            .iter()
+            .map(|p| p.top.1)
+            .fold(f64::NEG_INFINITY, f64::max);
+        colors.begin_hit(svg, "line", ordinal, None);
+        colors.paint_point(
+            svg,
+            ordinal,
+            None,
+            "dataPointLine",
+            &colors.line_at(ordinal, None),
+            [left, top, right - left, bottom - top],
+            &body,
+        );
+        colors.end_hit(svg);
     }
 }
 
@@ -306,17 +324,35 @@ fn area(svg: &mut String, part: &[Sample], ordinal: usize, colors: &ChartColors,
     let (x, y) = coords.next().unwrap();
     let fill = colors.fill(ordinal, None);
     let stroke = colors.outline(ordinal, None).unwrap_or("none");
+    let mut body = String::new();
     write!(
-        svg,
+        body,
         r#"<path fill="{fill}" stroke="{stroke}" stroke-width="{width:.2}" d="M{x:.2} {y:.2}"#
     )
     .unwrap();
     for (x, y) in coords {
-        write!(svg, "L{x:.2} {y:.2}").unwrap();
+        write!(body, "L{x:.2} {y:.2}").unwrap();
     }
-    svg.push_str("Z\"");
-    colors.hit_attrs(svg, "area", ordinal, None);
-    svg.push_str("/>");
+    body.push_str("Z\"/>");
+    let points = part
+        .iter()
+        .flat_map(|p| [p.top, p.base])
+        .collect::<Vec<_>>();
+    let left = points.iter().map(|p| p.0).fold(f64::INFINITY, f64::min);
+    let top = points.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
+    let right = points.iter().map(|p| p.0).fold(f64::NEG_INFINITY, f64::max);
+    let bottom = points.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max);
+    colors.begin_hit(svg, "area", ordinal, None);
+    colors.paint_point(
+        svg,
+        ordinal,
+        None,
+        "dataPoint",
+        &fill,
+        [left, top, right - left, bottom - top],
+        &body,
+    );
+    colors.end_hit(svg);
 }
 
 fn up_down_paint(group: Node, colors: &ChartColors, up: bool) -> (String, String) {
@@ -582,6 +618,7 @@ pub(super) fn draw(
             } else if !scatter
                 || !matches!(scatter_style, "marker" | "none")
                 || line_properties(node).is_some()
+                || (colors.spreadsheet_defaults && scatter_style == "marker")
             {
                 let default_smooth = !(colors.legacy_defaults() || colors.spreadsheet_defaults)
                     || (scatter && matches!(scatter_style, "smooth" | "smoothMarker"));
@@ -589,7 +626,10 @@ pub(super) fn draw(
                 lines(svg, part, ordinal, node, colors, smooth);
             }
         }
-        if let Some(dl) = DataLabels::new(group, node, default_face) {
+        if scatter && colors.spreadsheet_defaults {
+            super::error_bars::draw(svg, node, serie, ordinal, colors, coords);
+        }
+        if let Some(dl) = DataLabels::new(group, node, default_face, coords.canvas) {
             let radius = number(child(node, "marker").and_then(|n| val(n, "size")))
                 .unwrap_or(if scatter { 7. } else { 5. })
                 .clamp(2., 72.)
@@ -680,7 +720,24 @@ pub(super) fn draw(
             let sw = point_marker
                 .or(series_marker)
                 .map_or(1., |n| stroke_width(n, 1.));
-            marker(svg, sample.top, symbol, size, &fill, &stroke, sw);
+            let mut body = String::new();
+            marker(&mut body, sample.top, symbol, size, &fill, &stroke, sw);
+            let properties = point_marker
+                .and_then(ChartColors::effect_properties)
+                .or_else(|| series_marker.and_then(ChartColors::effect_properties));
+            colors.paint_styled_shape(
+                svg,
+                properties,
+                "dataPointMarker",
+                &fill,
+                [
+                    sample.top.0 - size,
+                    sample.top.1 - size,
+                    size * 2.,
+                    size * 2.,
+                ],
+                &body,
+            );
             if colors.interactive {
                 svg.push_str("</g>");
             }

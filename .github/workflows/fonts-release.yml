@@ -1,0 +1,42 @@
+name: Release Office fonts
+on:
+  push:
+    tags: ['office-fonts-v*']
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
+        with:
+          node-version: 24
+      - name: Check version and font package
+        run: |
+          git merge-base --is-ancestor HEAD origin/main
+          version=$(node -p "require('./packages/office-fonts/package.json').version")
+          test "$GITHUB_REF_NAME" = "office-fonts-v$version"
+          node --check packages/office-fonts/runtime.js
+          node --check packages/office-fonts/index.js
+      - name: Publish the font tarball
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          archive=$(npm pack ./packages/office-fonts --silent)
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes "Shared Office font fallbacks for browser viewers and server rendering."
+          fi
+          mkdir -p "$RUNNER_TEMP/existing"
+          if gh release download "$GITHUB_REF_NAME" --pattern "$archive" --dir "$RUNNER_TEMP/existing"; then
+            cmp "$archive" "$RUNNER_TEMP/existing/$archive"
+          else
+            gh release upload "$GITHUB_REF_NAME" "$archive"
+          fi

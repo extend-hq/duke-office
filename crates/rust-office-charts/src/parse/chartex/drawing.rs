@@ -24,6 +24,8 @@ pub(super) struct Font {
     face: String,
     pub(super) size: f64,
     fill: String,
+    bold: bool,
+    italic: bool,
 }
 
 impl Font {
@@ -73,16 +75,19 @@ impl Font {
             })
             .unwrap_or_else(|| fallback.into());
         Self {
-            face: escape_xml_text(face),
+            face: face.to_owned(),
             size,
             fill,
+            bold: properties.clone().any(|p| on(p.attribute("b"))),
+            italic: properties.clone().any(|p| on(p.attribute("i"))),
         }
     }
     pub(super) fn text(&self, out: &mut String, x: f64, y: f64, anchor: &str, label: &str) {
-        write!(out, r#"<text x="{x:.2}" y="{y:.2}" text-anchor="{anchor}" fill="{}" font-family="{}" font-size="{:.2}">{}</text>"#,self.fill,self.face,self.size,escape_xml_text(label)).unwrap();
+        write!(out, r#"<text x="{x:.2}" y="{y:.2}" text-anchor="{anchor}" fill="{}" font-family="{}" font-size="{:.2}" font-weight="{}" font-style="{}">{}</text>"#,self.fill,crate::parse::chart_svg::font_family(None, &self.face),self.size,if self.bold {"bold"} else {"normal"},if self.italic {"italic"} else {"normal"},escape_xml_text(label)).unwrap();
     }
     pub(super) fn width(&self, s: &str) -> f64 {
-        label_width(s, self.size, &self.face)
+        crate::parse::font_metrics::width(s, self.size, &self.face, self.bold, self.italic)
+            .unwrap_or_else(|| label_width(s, self.size, &self.face))
     }
     pub(super) fn face(&self) -> &str {
         &self.face
@@ -185,9 +190,11 @@ pub(super) fn legend(
     let pos = node.attribute("pos").unwrap_or("t");
     let reserve = !on(node.attribute("overlay"));
     let side = matches!(pos, "l" | "r");
-    let hierarchy = ctx.data.series.first().is_some_and(|series| {
-        matches!(series.chart_type.as_str(), "treemap" | "sunburst")
-    });
+    let hierarchy = ctx
+        .data
+        .series
+        .first()
+        .is_some_and(|series| matches!(series.chart_type.as_str(), "treemap" | "sunburst"));
     let rows = if ctx.colors.spreadsheet_defaults && hierarchy && !side {
         (width / (ctx.width * 0.8).max(spacing)).ceil().max(1.) as usize
     } else {

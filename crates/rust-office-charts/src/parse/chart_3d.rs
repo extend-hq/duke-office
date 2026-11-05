@@ -1,6 +1,7 @@
 use super::chart_colors::ChartColors;
 use super::chart_svg::{
-    font_family, font_size, line, number, on, text, text_props, text_width, title_position, val,
+    font_family, font_size, line, number, on, text, text_props, text_width, title_position,
+    title_size_default, val,
 };
 use crate::chart::{chart_node, child, ChartData};
 use roxmltree::Node;
@@ -266,9 +267,27 @@ fn grids(
     scene: &Scene,
     chart: Node,
     plot: Node,
+    data: &ChartData,
     colors: &ChartColors,
     horizontal: bool,
 ) {
+    let grid_attributes = |out: &mut String, grid: Node| {
+        let line =
+            child(grid, "spPr").and_then(|p| p.children().find(|n| n.tag_name().name() == "ln"));
+        let width =
+            number(line.and_then(|n| n.attribute("w"))).map_or(1., |v| (v / 9525.).clamp(0., 256.));
+        let dash = colors.line_dash(line, width);
+        let cap = match line.and_then(|n| n.attribute("cap")) {
+            Some("rnd") => "round",
+            Some("sq") => "square",
+            _ => "butt",
+        };
+        write!(
+            out,
+            r#"<g stroke-width="{width:.3}" stroke-dasharray="{dash}" stroke-linecap="{cap}">"#
+        )
+        .unwrap();
+    };
     let style = classic_style(chart.parent().unwrap_or(chart));
     let is_surface = plot
         .children()
@@ -373,7 +392,10 @@ fn grids(
             polygon(out, &points, &fill, &stroke);
         }
     }
-    if grid.is_some() {
+    if let Some(grid) = grid {
+        if scene.spreadsheet {
+            grid_attributes(out, grid);
+        }
         let n = ((scene.high - scene.low) / scene.step)
             .round()
             .clamp(0., 160.) as usize;
@@ -386,6 +408,40 @@ fn grids(
                 &grid_color,
             );
             stroke_line(out, point(0., y, back), point(1., y, back), &grid_color);
+        }
+        if scene.spreadsheet {
+            out.push_str("</g>");
+        }
+    }
+    if scene.spreadsheet {
+        if let Some(grid) = child(plot, "catAx")
+            .or_else(|| child(plot, "dateAx"))
+            .and_then(|a| child(a, "majorGridlines"))
+        {
+            let count = data
+                .series
+                .iter()
+                .flat_map(|s| s.points.last())
+                .map(|p| u64::from(p.index) + 1)
+                .max()
+                .unwrap_or(1)
+                .min(10_000);
+            let between = val(axis, "crossBetween") == Some("between");
+            let intervals = if between {
+                count
+            } else {
+                count.saturating_sub(1).max(1)
+            };
+            let color = child(grid, "spPr")
+                .and_then(|sp| colors.shape_stroke(sp))
+                .unwrap_or_else(|| grid_color.clone());
+            grid_attributes(out, grid);
+            for i in 0..=intervals {
+                let x = i as f64 / intervals as f64;
+                stroke_line(out, point(x, 0., back), point(x, 1., back), &color);
+                stroke_line(out, point(x, 0., 1. - back), point(x, 0., back), &color);
+            }
+            out.push_str("</g>");
         }
     }
     stroke_line(
@@ -475,13 +531,20 @@ fn legend(
             .iter()
             .enumerate()
             .map(|(i, s)| Entry {
-                name: s.name.clone().unwrap_or_default(),
+                name: s.name.clone().unwrap_or_else(|| {
+                    if scene.spreadsheet {
+                        format!("Series{}", i + 1)
+                    } else {
+                        String::new()
+                    }
+                }),
                 fill: colors.fill(i, None),
                 source: Some((i, None)),
             })
             .collect()
     };
     if matches!(kind, "bar3DChart" | "area3DChart" | "line3DChart")
+        && (!scene.spreadsheet || !matches!(val(Some(legend), "legendPos"), Some("t" | "b")))
         && matches!(
             val(Some(group), "grouping"),
             Some("stacked" | "percentStacked")
@@ -494,6 +557,7 @@ fn legend(
             && matches!(val(Some(legend), "legendPos"), Some("t" | "b")))
             || (kind == "bar3DChart"
                 && val(Some(group), "barDir") == Some("bar")
+                && !matches!(val(Some(legend), "legendPos"), Some("t" | "b"))
                 && matches!(
                     val(Some(group), "grouping"),
                     Some("stacked" | "percentStacked")
@@ -544,6 +608,8 @@ fn legend(
         let Entry { name, fill, source } = entry;
         if let Some((series, point)) = source {
             colors.begin_hit(out, "legendEntry", *series, *point);
+        } else if colors.interactive {
+            out.push_str(r#"<g data-chart-kind="legend">"#);
         }
         let y = y0 + if horizontal { 0. } else { i as f64 * stride };
         let (stroke, fill) = if wire {
@@ -568,6 +634,8 @@ fn legend(
         );
         if source.is_some() {
             colors.end_hit(out);
+        } else if colors.interactive {
+            out.push_str("</g>");
         }
         if horizontal {
             x += text_width(name, size) + key + 12.;
@@ -617,12 +685,14 @@ pub(super) fn render(
         if let Some(h) = manual_h {
             (h / (size * 3.)).floor().clamp(1., 10.)
         } else if (bars && (!colors.spreadsheet_defaults || on(val(val_axis, "delete"))))
-            || (colors.spreadsheet_defaults && kind == "area3DChart")
+            || (colors.spreadsheet_defaults
+                && kind == "area3DChart"
+                && val(Some(group), "grouping") != Some("percentStacked"))
             || (!colors.spreadsheet_defaults && kind == "line3DChart")
         {
             10.
         } else if colors.spreadsheet_defaults && bars {
-            (height / (size * 3.)).floor().clamp(1., 10.)
+            10.
         } else if colors.spreadsheet_defaults && contour && on(val(Some(group), "wireframe")) {
             (height / (size * 6.)).clamp(2., 8.)
         } else {
@@ -637,12 +707,18 @@ pub(super) fn render(
         .map(|p| f64::from(p.index) + 1.)
         .fold(1., f64::max);
     let series = data.series.len().max(1) as f64;
-    let depth = match (kind, val(Some(group), "grouping")) {
-        ("bar3DChart", Some("clustered") | None) => {
+    let grouping =
+        val(Some(group), "grouping").unwrap_or(if bars && !colors.spreadsheet_defaults {
+            "clustered"
+        } else {
+            "standard"
+        });
+    let depth = match (kind, grouping) {
+        ("bar3DChart", "clustered") => {
             (1. + num(Some(group), "gapDepth").unwrap_or(150.) / 100.)
                 / (n * (series + num(Some(group), "gapWidth").unwrap_or(150.) / 100.))
         }
-        (_, Some("stacked" | "percentStacked")) => 1. / n,
+        (_, "stacked" | "percentStacked") => 1. / n,
         _ => series / n,
     };
     let horizontal = bars && val(Some(group), "barDir") == Some("bar");
@@ -656,11 +732,10 @@ pub(super) fn render(
     let between = val(val_axis, "crossBetween") == Some("between");
     let surface = kind.starts_with("surface");
     let surface_ratio = if colors.spreadsheet_defaults && surface {
-        let span = if between && n > 1. { n - 1. } else { n };
         let levels = ((n + series - if between { 0. } else { 1. }) / 2.).floor();
         Some((
-            levels.max(1.) / span * num(view, "hPercent").map_or(height / width, |v| v / 100.),
-            series / span,
+            levels.max(1.) / n * num(view, "hPercent").map_or(height / width, |v| v / 100.),
+            series / n,
         ))
     } else {
         None
@@ -713,7 +788,9 @@ pub(super) fn render(
             / 100.)
             .clamp(0.002, 20.),
         rot_x: num(view, "rotX")
-            .unwrap_or(if contour {
+            .unwrap_or(if colors.spreadsheet_defaults {
+                0.
+            } else if contour {
                 90.
             } else if matches!(kind, "line3DChart" | "area3DChart") {
                 14.
@@ -722,9 +799,13 @@ pub(super) fn render(
             })
             .clamp(-90., 90.),
         rot_y: num(view, "rotY")
-            .unwrap_or(if contour || is_pie { 0. } else { 20. })
+            .unwrap_or(if colors.spreadsheet_defaults || contour || is_pie {
+                0.
+            } else {
+                20.
+            })
             .rem_euclid(360.),
-        shear: on(val(view, "rAngAx")) && !is_pie,
+        shear: val(view, "rAngAx").map_or(colors.spreadsheet_defaults, |v| on(Some(v))) && !is_pie,
         perspective: 2.
             * (num(view, "perspective").unwrap_or(30.).clamp(0., 240.) * 0.375)
                 .to_radians()
@@ -771,13 +852,18 @@ pub(super) fn render(
             scene.spreadsheet,
         );
         let axis_margins = (l, t, r, b);
+        let depth_margin = if scene.spreadsheet {
+            axes::depth_margin(plot, data, size)
+        } else {
+            0.
+        };
         b += table::reserved_height(plot, data, size);
         if scene.spreadsheet {
             if let Some(title) = child(chart, "title").filter(|n| !on(val(Some(*n), "overlay"))) {
                 let props = text_props(Some(title), true).or(text_props(Some(title), false));
-                t += font_size(props, size * 1.8) * 1.36;
+                t += font_size(props, title_size_default(colors, root, size, size * 1.8)) * 1.36;
             }
-            r += axes::depth_margin(plot, data, size);
+            r += depth_margin;
         }
         if colors.legacy_defaults() || scene.spreadsheet {
             if let Some(legend) = child(chart, "legend").filter(|n| !on(val(Some(*n), "overlay"))) {
@@ -805,9 +891,20 @@ pub(super) fn render(
         plot_bounds = Some((
             scene.left + l - axis_margins.0,
             scene.top + t - axis_margins.1,
-            (scene.width - l - r + axis_margins.0 + axis_margins.2).max(1.),
+            (scene.width - l - r + axis_margins.0 + axis_margins.2 + depth_margin).max(1.),
             (scene.height - t - b + axis_margins.1 + axis_margins.3).max(1.),
         ));
+        if scene.spreadsheet && (surface || bars) && num(view, "hPercent").is_none() {
+            let outer_width =
+                (scene.width - l - r + axis_margins.0 + axis_margins.2 + depth_margin).max(1.);
+            let outer_height = (scene.height - t - b + axis_margins.1 + axis_margins.3).max(1.);
+            let levels = if surface || grouping == "standard" {
+                ((n + series - if between { 0. } else { 1. }) / 2.).floor()
+            } else {
+                n
+            };
+            scene.model_height = levels.max(1.) / n * outer_height / outer_width;
+        }
         scene.left += l;
         scene.top += t;
         scene.width = (scene.width - l - r).max(1.);
@@ -820,6 +917,35 @@ pub(super) fn render(
         }
     }
     scene.fit();
+    if scene.spreadsheet && bars && !on(val(val_axis, "delete")) {
+        if let Some(axis) = val_axis {
+            let axis_size = font_size(text_props(Some(axis), false), size);
+            let start = scene.project(0., 0., 0.);
+            let end = if horizontal {
+                scene.project(1., 0., 0.)
+            } else {
+                scene.project(0., 1., 0.)
+            };
+            let length = (end.x - start.x).hypot(end.y - start.y);
+            let spacing = if horizontal {
+                text_width(&axes::label_value(scene.high, axis), axis_size)
+                    .max(text_width(&axes::label_value(scene.low, axis), axis_size))
+                    + axis_size
+            } else {
+                axis_size * 1.4
+            };
+            let (low, high, step) = range(
+                data,
+                group,
+                val_axis,
+                (length / spacing).floor().clamp(1., 10.),
+                true,
+            );
+            scene.low = low;
+            scene.high = high;
+            scene.step = step;
+        }
+    }
     // Raster and vector entries share the chart frame's pixel-center origin.
     if manual.is_none() && !is_pie && !colors.legacy_defaults() {
         scene.origin.x -= 0.5;
@@ -847,8 +973,23 @@ pub(super) fn render(
         .and_then(|p| colors.shape_stroke(p))
         .unwrap_or_else(|| "#868686".into());
     let mut out = format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}"><rect width="{width}" height="{height}" rx="{corner}" fill="{fill}" stroke="{border}"/>"#
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}">"#
     );
+    let background = format!(
+        r#"<rect width="{width}" height="{height}" rx="{corner}" fill="{fill}" stroke="{border}"/>"#
+    );
+    if scene.spreadsheet {
+        colors.paint_styled_shape(
+            &mut out,
+            ChartColors::effect_properties(root),
+            "chartArea",
+            &fill,
+            [0., 0., width, height],
+            &background,
+        );
+    } else {
+        out.push_str(&background);
+    }
     if scene.spreadsheet {
         if let Some(p) = child(plot, "spPr") {
             if let Some((x, y, w, h)) = plot_bounds {
@@ -859,12 +1000,20 @@ pub(super) fn render(
         }
     }
     if !is_pie && (!contour || scene.spreadsheet) {
-        grids(&mut out, &scene, chart, plot, colors, horizontal);
+        grids(&mut out, &scene, chart, plot, data, colors, horizontal);
     }
     match kind {
         "pie3DChart" => pie::draw(&scene, data, group, colors, &mut out),
         "surface3DChart" | "surfaceChart" => surface::draw(&scene, data, group, colors, &mut out),
-        _ => planes::draw(&scene, data, group, colors, &mut out),
+        _ => planes::draw(
+            &scene,
+            data,
+            group,
+            colors,
+            &font,
+            (width, height),
+            &mut out,
+        ),
     }
     if !is_pie && (!contour || scene.spreadsheet) {
         axes::draw(
@@ -896,12 +1045,20 @@ pub(super) fn render(
         let run = child(chart, "title")
             .and_then(|n| n.descendants().find(|r| r.tag_name().name() == "rPr"));
         let sz = font_size(
-            run.or(props),
-            if colors.legacy_defaults() || scene.spreadsheet {
-                size * 1.8
-            } else {
-                size
-            },
+            run,
+            font_size(
+                props,
+                title_size_default(
+                    colors,
+                    root,
+                    size,
+                    if colors.legacy_defaults() || scene.spreadsheet {
+                        size * 1.8
+                    } else {
+                        size
+                    },
+                ),
+            ),
         );
         let color = run
             .and_then(|n| colors.shape_fill(n))
@@ -913,8 +1070,7 @@ pub(super) fn render(
                     "#000000".into()
                 }
             });
-        let unstyled_title =
-            scene.spreadsheet && super::chart_colors::classic_style_id(root).is_none();
+        let unstyled_title = scene.spreadsheet && super::chart_svg::title_uses_automatic_font(root);
         let weight = if scene.spreadsheet
             && !run
                 .or(props)
@@ -933,8 +1089,9 @@ pub(super) fn render(
             sz,
             10. + sz * 0.95,
         );
+        let mut title_body = String::new();
         text(
-            &mut out,
+            &mut title_body,
             x,
             y,
             anchor,
@@ -949,6 +1106,22 @@ pub(super) fn render(
             ),
             label,
         );
+        if scene.spreadsheet {
+            let text_width = text_width(label, sz);
+            let left = match anchor {
+                "end" => x - text_width,
+                "middle" => x - text_width / 2.,
+                _ => x,
+            };
+            colors.paint_shape(
+                &mut out,
+                run.or(props),
+                [left, y - sz, text_width, sz * 1.2],
+                &title_body,
+            );
+        } else {
+            out.push_str(&title_body);
+        }
         out.push_str("</g>");
     }
     legend(

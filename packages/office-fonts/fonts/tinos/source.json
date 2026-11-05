@@ -1,0 +1,13 @@
+{
+  "repo": "google/fonts",
+  "commit": "eb20e9cf19d97cf579fa3867d729d4222d6c59e1",
+  "path": "ofl/tinos",
+  "licenseSource": "https://github.com/googlefonts/tinos/blob/4106aab86ddefe26d58a69745e04ae9479d22993/OFL.txt",
+  "files": {
+    "Tinos-Bold.ttf": "393269dbab8899f938db19783eca5eac92eb431f7ae0ab45b8349ca895f1a06b",
+    "Tinos-BoldItalic.ttf": "a5de79f0fe863ea0954757acb3d47b3ccd0a930ce3dd5b97230cd3866790a06e",
+    "Tinos-Italic.ttf": "5942266ed398b155d7dc23e36833e7ec6be988f2439bdbeb8ef1bede808eaa91",
+    "Tinos-Regular.ttf": "60a0e8ef0c04dd5dd69ffe91025fa2ae5836cbd35600a82ba031977557e2cb61"
+  },
+  "processing": "Original upstream TTF files"
+}

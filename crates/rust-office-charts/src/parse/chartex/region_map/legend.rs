@@ -206,7 +206,14 @@ fn gradient(
         .fold(0., f64::max);
     let labels: Vec<_> = stops
         .iter()
-        .map(|s| format_value(s.value, format))
+        .map(|s| {
+            let value = if format.is_none_or(|code| code.is_empty() || code == "General") {
+                format!("{:.14e}", s.value).parse().unwrap_or(s.value)
+            } else {
+                s.value
+            };
+            format_value(value, format)
+        })
         .collect();
     let label_width = labels
         .iter()

@@ -1,0 +1,12 @@
+{
+  "repo": "muglug/intos",
+  "commit": "fef9315c14da9e4b23b4c3cac8e718998d4e4736",
+  "path": "fonts",
+  "files": {
+    "Intos-Bold.ttf": "8afd148fff67d6426d0d6906d4c6232886aedc81a7832544806e6c93c44340ab",
+    "Intos-BoldItalic.ttf": "dec13afb35718df39f5a422d7ecb2f69bd719c9ae3196508c17021a428578a11",
+    "Intos-Italic.ttf": "8ca602e312af876190610b0416fdfc67f58ee38bcf9e01ce2f0fcc1094d8fbe4",
+    "Intos-Regular.ttf": "4de204b6414d30f9f49b9375dc9b71ccea1683e55ac37de6c8d541abbc760eea"
+  },
+  "processing": "Original upstream TTF files"
+}

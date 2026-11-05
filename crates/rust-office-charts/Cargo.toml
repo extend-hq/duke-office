@@ -1,8 +1,8 @@
 [package]
 name = "rust-office-charts"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2021"
-license = "MIT"
+license = "MIT AND OFL-1.1"
 description = "Render Office Open XML charts to SVG from native Rust or WebAssembly"
 repository = "https://github.com/extend-hq/rust-office"
 keywords = ["ooxml", "chart", "docx", "xlsx", "pptx"]

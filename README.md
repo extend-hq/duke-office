@@ -6,18 +6,42 @@ by Extend
 
 Rust libraries for parsing Word documents and PowerPoint presentations, and rendering Office charts. The chart renderer is shared by [React DOCX](https://github.com/extend-hq/react-docx), [React PPTX](https://github.com/extend-hq/react-pptx) and [React XLSX](https://github.com/extend-hq/react-xlsx). React XLSX uses DukeSheets to read workbooks and resolve worksheet values.
 
+[Office fonts](packages/office-fonts) provides shared, lazily loaded Calibri, Arial, Times New Roman, Courier New, Aptos and Aptos Narrow fallbacks in viewers and backend rendering. Font loading is explicit and stays separate from the chart WASM bundle. Build the font assets and metric tables with `python scripts/build-office-fonts.py` using FontTools and Brotli, and package them with `npm pack ./packages/office-fonts`.
+
 | Crate | Purpose | Version | Downloads | API docs | Release |
 | --- | --- | --- | --- | --- | --- |
-| [rust-office-charts](crates/rust-office-charts) | Render Office chart definitions to SVG | [![rust-office-charts version](https://img.shields.io/crates/v/rust-office-charts.svg)](https://crates.io/crates/rust-office-charts) | [![rust-office-charts downloads](https://img.shields.io/crates/d/rust-office-charts.svg)](https://crates.io/crates/rust-office-charts) | [![rust-office-charts documentation](https://docs.rs/rust-office-charts/badge.svg)](https://docs.rs/rust-office-charts) | [0.1.2](https://github.com/extend-hq/rust-office/releases/tag/rust-office-charts-v0.1.2) |
-| [rust-office-charts-wasm](crates/rust-office-charts-wasm) | Render column and line charts in the browser | [![rust-office-charts-wasm version](https://img.shields.io/crates/v/rust-office-charts-wasm.svg)](https://crates.io/crates/rust-office-charts-wasm) | [![rust-office-charts-wasm downloads](https://img.shields.io/crates/d/rust-office-charts-wasm.svg)](https://crates.io/crates/rust-office-charts-wasm) | [![rust-office-charts-wasm documentation](https://docs.rs/rust-office-charts-wasm/badge.svg)](https://docs.rs/rust-office-charts-wasm) | [0.1.2](https://github.com/extend-hq/rust-office/releases/tag/rust-office-charts-wasm-v0.1.2) |
-| [rust-docx](crates/rust-docx) | Parse Word documents into a structured document model | [![rust-docx version](https://img.shields.io/crates/v/rust-docx.svg)](https://crates.io/crates/rust-docx) | [![rust-docx downloads](https://img.shields.io/crates/d/rust-docx.svg)](https://crates.io/crates/rust-docx) | [![rust-docx documentation](https://docs.rs/rust-docx/badge.svg)](https://docs.rs/rust-docx) | [0.2.3](https://github.com/extend-hq/rust-office/releases/tag/rust-docx-v0.2.3) |
-| [rust-docx-wasm](crates/rust-docx-wasm) | WebAssembly bindings for the Word parser | [![rust-docx-wasm version](https://img.shields.io/crates/v/rust-docx-wasm.svg)](https://crates.io/crates/rust-docx-wasm) | [![rust-docx-wasm downloads](https://img.shields.io/crates/d/rust-docx-wasm.svg)](https://crates.io/crates/rust-docx-wasm) | [![rust-docx-wasm documentation](https://docs.rs/rust-docx-wasm/badge.svg)](https://docs.rs/rust-docx-wasm) | [0.2.3](https://github.com/extend-hq/rust-office/releases/tag/rust-docx-wasm-v0.2.3) |
-| [rust-pptx](crates/rust-pptx) | Parse PowerPoint presentations into a structured slide model | [![rust-pptx version](https://img.shields.io/crates/v/rust-pptx.svg)](https://crates.io/crates/rust-pptx) | [![rust-pptx downloads](https://img.shields.io/crates/d/rust-pptx.svg)](https://crates.io/crates/rust-pptx) | [![rust-pptx documentation](https://docs.rs/rust-pptx/badge.svg)](https://docs.rs/rust-pptx) | [0.1.0](https://github.com/extend-hq/rust-office/releases/tag/rust-pptx-v0.1.0) |
-| [rust-pptx-wasm](crates/rust-pptx-wasm) | WebAssembly bindings for the PowerPoint parser | [![rust-pptx-wasm version](https://img.shields.io/crates/v/rust-pptx-wasm.svg)](https://crates.io/crates/rust-pptx-wasm) | [![rust-pptx-wasm downloads](https://img.shields.io/crates/d/rust-pptx-wasm.svg)](https://crates.io/crates/rust-pptx-wasm) | [![rust-pptx-wasm documentation](https://docs.rs/rust-pptx-wasm/badge.svg)](https://docs.rs/rust-pptx-wasm) | [0.1.0](https://github.com/extend-hq/rust-office/releases/tag/rust-pptx-wasm-v0.1.0) |
+| [rust-office-charts](crates/rust-office-charts) | Render Office chart definitions to SVG | [![rust-office-charts version](https://img.shields.io/crates/v/rust-office-charts.svg)](https://crates.io/crates/rust-office-charts) | [![rust-office-charts downloads](https://img.shields.io/crates/d/rust-office-charts.svg)](https://crates.io/crates/rust-office-charts) | [![rust-office-charts documentation](https://docs.rs/rust-office-charts/badge.svg)](https://docs.rs/rust-office-charts) | [0.1.3](https://github.com/extend-hq/rust-office/releases/tag/rust-office-charts-v0.1.3) |
+| [rust-office-charts-wasm](crates/rust-office-charts-wasm) | WebAssembly bindings for Office chart rendering | [![rust-office-charts-wasm version](https://img.shields.io/crates/v/rust-office-charts-wasm.svg)](https://crates.io/crates/rust-office-charts-wasm) | [![rust-office-charts-wasm downloads](https://img.shields.io/crates/d/rust-office-charts-wasm.svg)](https://crates.io/crates/rust-office-charts-wasm) | [![rust-office-charts-wasm documentation](https://docs.rs/rust-office-charts-wasm/badge.svg)](https://docs.rs/rust-office-charts-wasm) | [0.1.3](https://github.com/extend-hq/rust-office/releases/tag/rust-office-charts-wasm-v0.1.3) |
+| [rust-docx](crates/rust-docx) | Parse Word documents into a structured document model | [![rust-docx version](https://img.shields.io/crates/v/rust-docx.svg)](https://crates.io/crates/rust-docx) | [![rust-docx downloads](https://img.shields.io/crates/d/rust-docx.svg)](https://crates.io/crates/rust-docx) | [![rust-docx documentation](https://docs.rs/rust-docx/badge.svg)](https://docs.rs/rust-docx) | [0.2.4](https://github.com/extend-hq/rust-office/releases/tag/rust-docx-v0.2.4) |
+| [rust-docx-wasm](crates/rust-docx-wasm) | WebAssembly bindings for the Word parser | [![rust-docx-wasm version](https://img.shields.io/crates/v/rust-docx-wasm.svg)](https://crates.io/crates/rust-docx-wasm) | [![rust-docx-wasm downloads](https://img.shields.io/crates/d/rust-docx-wasm.svg)](https://crates.io/crates/rust-docx-wasm) | [![rust-docx-wasm documentation](https://docs.rs/rust-docx-wasm/badge.svg)](https://docs.rs/rust-docx-wasm) | [0.2.5](https://github.com/extend-hq/rust-office/releases/tag/rust-docx-wasm-v0.2.5) |
+| [rust-pptx](crates/rust-pptx) | Parse PowerPoint presentations into a structured slide model | [![rust-pptx version](https://img.shields.io/crates/v/rust-pptx.svg)](https://crates.io/crates/rust-pptx) | [![rust-pptx downloads](https://img.shields.io/crates/d/rust-pptx.svg)](https://crates.io/crates/rust-pptx) | [![rust-pptx documentation](https://docs.rs/rust-pptx/badge.svg)](https://docs.rs/rust-pptx) | [0.1.1](https://github.com/extend-hq/rust-office/releases/tag/rust-pptx-v0.1.1) |
+| [rust-pptx-wasm](crates/rust-pptx-wasm) | WebAssembly bindings for the PowerPoint parser | [![rust-pptx-wasm version](https://img.shields.io/crates/v/rust-pptx-wasm.svg)](https://crates.io/crates/rust-pptx-wasm) | [![rust-pptx-wasm downloads](https://img.shields.io/crates/d/rust-pptx-wasm.svg)](https://crates.io/crates/rust-pptx-wasm) | [![rust-pptx-wasm documentation](https://docs.rs/rust-pptx-wasm/badge.svg)](https://docs.rs/rust-pptx-wasm) | [0.1.1](https://github.com/extend-hq/rust-office/releases/tag/rust-pptx-wasm-v0.1.1) |
 
 ## Packages, benchmarks, and chart accuracy
 
 Expand a package for its usage, measured results, and detailed reports.
+
+<details open>
+<summary><strong>Excel chart comparisons — 382 charts, 48 gallery examples</strong></summary>
+
+React XLSX now renders charts through Rust and WebAssembly, including 3D shapes, modern charts, source-linked number formats, shadows and bevels. Shared Office font fallbacks include Carlito, Arimo, Tinos, Cousine, Intos and Intos Narrow.
+
+[![Microsoft Excel and React XLSX side by side across 24 chart examples](docs/readme-assets/excel-chart-overview.png)](docs/excel-chart-comparisons.md)
+
+The November 5, 2026 corpus run rendered **382/382 charts in 43 workbooks**, with **381 native Excel image pairs**. The gallery contains 48 examples selected for feature coverage, including visible differences. These are visual comparisons, **not a claim of pixel-exact Excel parity**. Native 3D lighting, some plot and label placement, and map geometry still differ.
+
+| Gallery | Examples |
+| --- | ---: |
+| [Bars, lines, areas and secondary axes](docs/readme-assets/excel-chart-bars-lines-areas.png) | 8 |
+| [Pies, exploded slices and multiple rings](docs/readme-assets/excel-chart-pies-and-rings.png) | 8 |
+| [Scatter, bubbles, radar, error bars and stock](docs/readme-assets/excel-chart-scatter-radar-stock.png) | 8 |
+| [Modern charts and filled maps](docs/readme-assets/excel-chart-modern-charts.png) | 8 |
+| [3D areas, pies, cones, cylinders, pyramids and surfaces](docs/readme-assets/excel-chart-three-dimensional.png) | 8 |
+| [Shadows, bevels, labels and trendline equations](docs/readme-assets/excel-chart-formatting-and-effects.png) | 8 |
+
+[Comparison method and limitations](docs/excel-chart-comparisons.md) · [All 382 measurements](docs/readme-assets/excel-chart-comparison.csv) · [Capture provenance](docs/readme-assets/excel-chart-provenance.json)
+
+</details>
 
 <details>
 <summary><strong>rust-office-charts — native chart rendering and Word comparisons</strong></summary>

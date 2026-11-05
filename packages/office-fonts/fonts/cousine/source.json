@@ -1,0 +1,12 @@
+{
+  "repo": "google/fonts",
+  "commit": "eb20e9cf19d97cf579fa3867d729d4222d6c59e1",
+  "path": "ofl/cousine",
+  "files": {
+    "Cousine-Bold.ttf": "17c8a7245156d2253531c9e529474937b09d9f641c5ae7695c5e33f22822eef4",
+    "Cousine-BoldItalic.ttf": "848e858726fee0ae27b754e4cd6a2755209bf1428a8c91f747696d58c33906c3",
+    "Cousine-Italic.ttf": "ea2a76ae3d0ece9cd59f0d30fdc08dd70e8f5f457beee5b0852a7b50c2286c7c",
+    "Cousine-Regular.ttf": "1da22250675fc4c42fcf3a9736c44bc0570516105331443b663fd5cfbd1412fe"
+  },
+  "processing": "Original upstream TTF files"
+}

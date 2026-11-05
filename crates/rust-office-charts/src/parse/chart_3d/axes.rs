@@ -1,18 +1,22 @@
 use super::*;
 use crate::chart::ChartPoint;
 
-fn visible<'a>(axis: Option<Node<'a, 'a>>) -> Option<Node<'a, 'a>> {
+fn visible<'a>(axis: Option<Node<'a, 'a>>, spreadsheet: bool) -> Option<Node<'a, 'a>> {
     axis.filter(|&a| {
         !on(val(Some(a), "delete"))
-            && matches!(val(Some(a), "tickLblPos"), Some("nextTo" | "low" | "high"))
+            && (matches!(val(Some(a), "tickLblPos"), Some("nextTo" | "low" | "high"))
+                || (spreadsheet && val(Some(a), "tickLblPos").is_none()))
     })
 }
 
-fn category_axis<'a>(plot: Node<'a, 'a>) -> Option<Node<'a, 'a>> {
-    visible(child(plot, "catAx").or_else(|| child(plot, "dateAx")))
+fn category_axis<'a>(plot: Node<'a, 'a>, spreadsheet: bool) -> Option<Node<'a, 'a>> {
+    visible(
+        child(plot, "catAx").or_else(|| child(plot, "dateAx")),
+        spreadsheet,
+    )
 }
 
-fn label_value(v: f64, axis: Node) -> String {
+pub(super) fn label_value(v: f64, axis: Node) -> String {
     let format = child(axis, "numFmt")
         .and_then(|n| n.attribute("formatCode"))
         .unwrap_or("General");
@@ -93,7 +97,7 @@ pub(super) fn margins(
 ) -> (f64, f64, f64, f64) {
     let mut left = 0.;
     let mut bottom = 0.;
-    if let Some(axis) = visible(child(plot, "valAx")) {
+    if let Some(axis) = visible(child(plot, "valAx"), spreadsheet) {
         let fs = font_size(text_props(Some(axis), false), size);
         let n = data
             .series
@@ -116,7 +120,7 @@ pub(super) fn margins(
             }
         }
     }
-    if let Some(axis) = category_axis(plot) {
+    if let Some(axis) = category_axis(plot, spreadsheet) {
         let fs = font_size(text_props(Some(axis), false), size);
         let legend = plot.parent().and_then(|c| child(c, "legend")).filter(|l| {
             !on(val(Some(*l), "overlay"))
@@ -156,7 +160,7 @@ pub(super) fn margins(
 }
 
 pub(super) fn depth_margin(plot: Node, data: &ChartData, size: f64) -> f64 {
-    let Some(axis) = visible(child(plot, "serAx")) else {
+    let Some(axis) = visible(child(plot, "serAx"), true) else {
         return 0.;
     };
     let fs = font_size(text_props(Some(axis), false), size);
@@ -267,7 +271,7 @@ pub(super) fn draw(
             scene.project(x, y, front)
         }
     };
-    if let Some(axis) = visible(child(plot, "valAx")) {
+    if let Some(axis) = visible(child(plot, "valAx"), scene.spreadsheet) {
         let (font, fs) = begin_labels(out, axis, colors, font, size);
         let side = if val(Some(axis), "tickLblPos") == Some("high") {
             1.
@@ -350,7 +354,7 @@ pub(super) fn draw(
         }
         out.push_str("</g>");
     }
-    if let Some((axis, s)) = category_axis(plot).zip(data.series.first()) {
+    if let Some((axis, s)) = category_axis(plot, scene.spreadsheet).zip(data.series.first()) {
         let (font, fs) = begin_labels(out, axis, colors, font, size);
         let a = point(0., 0.);
         let b = point(1., 0.);
@@ -446,7 +450,7 @@ pub(super) fn draw(
         out.push_str("</g>");
     }
     if scene.spreadsheet {
-        if let Some(axis) = visible(child(plot, "serAx")) {
+        if let Some(axis) = visible(child(plot, "serAx"), true) {
             let (family, fs) = begin_labels(out, axis, colors, font, size);
             let surface = plot
                 .children()
@@ -454,6 +458,7 @@ pub(super) fn draw(
             let series = data.series.len().max(1) as f64;
             let reversed = val(child(axis, "scaling"), "orientation") == Some("maxMin");
             let skip = num(Some(axis), "tickLblSkip").unwrap_or(1.).max(1.) as usize;
+            let mut occupied = Vec::new();
             for (i, s) in data.series.iter().enumerate().step_by(skip) {
                 let depth = if surface && series > 1. {
                     i as f64 / (series - 1.)
@@ -462,6 +467,13 @@ pub(super) fn draw(
                 };
                 let p = scene.project(1., 0., if reversed { 1. - depth } else { depth });
                 let name = s.name.clone().unwrap_or_else(|| format!("Series{}", i + 1));
+                let bounds = (p.x, p.y, p.x + text_width(&name, fs), p.y + fs * 1.2);
+                if occupied.iter().any(|&(left, top, right, bottom)| {
+                    bounds.0 < right && bounds.2 > left && bounds.1 < bottom && bounds.3 > top
+                }) {
+                    continue;
+                }
+                occupied.push(bounds);
                 text(
                     out,
                     p.x + fs * 0.45,

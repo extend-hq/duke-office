@@ -15,3 +15,7 @@ This workflow uses the Cargo project's short-lived publisher credentials and ser
 Each published crate also gets a GitHub release named `<crate>-v<version>`, with its `.crate` archive, registry link, API documentation and source link. The release workflow creates these after Cargo finishes publishing. To recover missing GitHub releases from a packaged checkout, run `python3 scripts/github_releases.py`.
 
 The spreadsheet viewer installs the small browser tarball from GitHub Releases. After a browser package change, update its `package.json` version, rebuild with `npm run build:browser`, and check with `npm run check:browser`. Push a `charts-browser-v<version>` tag pointing to a commit on `main`. The browser release workflow verifies the tag, packs the JS, types and WASM, and attaches the tarball to that release. Consumers pin the release asset URL and its package-manager integrity hash.
+
+## Shared Office fonts
+
+The shared font package is distributed as a versioned GitHub Release tarball. Bump `packages/office-fonts/package.json` when its packaged contents change, validate the package, and push an `office-fonts-v<version>` tag on `main`. The font release workflow attaches the packed package. React viewers pin this release URL and its lockfile integrity hash, then bundle the selected lazy font chunks and redistribution notices.

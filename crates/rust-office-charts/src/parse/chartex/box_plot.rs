@@ -100,6 +100,15 @@ fn axis_label(v: f64, code: Option<&str>) -> String {
     }
 }
 
+fn tick_floor(value: f64) -> f64 {
+    let nearest = value.round();
+    if (value - nearest).abs() <= 8. * f64::EPSILON * value.abs().max(1.) {
+        nearest
+    } else {
+        value.floor()
+    }
+}
+
 pub(super) fn render(ctx: &Canvas, out: &mut String) -> Option<()> {
     let mut categories = Vec::new();
     let mut lookup = HashMap::new();
@@ -189,9 +198,11 @@ pub(super) fn render(ctx: &Canvas, out: &mut String) -> Option<()> {
     let unit = number(scaling, "majorUnit")
         .filter(|v| *v > 0.)
         .map_or(power * multiple, |v| v / scale);
-    let lower = explicit_min.map_or_else(|| (wanted_min / unit).floor() * unit, |v| v / scale);
-    let upper =
-        explicit_max.map_or_else(|| (wanted_max / unit).floor() * unit + unit, |v| v / scale);
+    let lower = explicit_min.map_or_else(|| tick_floor(wanted_min / unit) * unit, |v| v / scale);
+    let upper = explicit_max.map_or_else(
+        || (tick_floor(wanted_max / unit) + 1.) * unit,
+        |v| v / scale,
+    );
     if !unit.is_finite() || unit <= 0. || !lower.is_finite() || !upper.is_finite() || upper <= lower
     {
         return Some(());

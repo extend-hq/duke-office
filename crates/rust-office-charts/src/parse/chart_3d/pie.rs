@@ -144,7 +144,9 @@ pub(super) fn draw(
     let mut width = scene.width;
     let mut height = scene.height;
     if colors.spreadsheet_defaults {
-        use crate::parse::chart_svg::{font_size, on, text_props, text_width, val};
+        use crate::parse::chart_svg::{
+            font_size, on, text_props, text_width, title_size_default, val,
+        };
         let chart = group.ancestors().find(|n| chart_node(*n, "chart"));
         let automatic = chart
             .and_then(|n| child(n, "plotArea"))
@@ -154,7 +156,14 @@ pub(super) fn draw(
         if automatic {
             let title = chart.and_then(|n| child(n, "title"));
             if title.is_some() && !on(val(title, "overlay")) {
-                let size = font_size(text_props(title, true).or(text_props(title, false)), 24.);
+                let inherited = font_size(
+                    text_props(Some(group.document().root_element()), false),
+                    40. / 3.,
+                );
+                let size = font_size(
+                    text_props(title, true).or(text_props(title, false)),
+                    title_size_default(colors, group.document().root_element(), inherited, 24.),
+                );
                 let space = size * 1.17 + 12.;
                 top += space;
                 height -= space;

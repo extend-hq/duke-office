@@ -8,6 +8,7 @@ mod chart_svg;
 #[cfg(feature = "extended-charts")]
 mod chartex;
 mod colors;
+mod font_metrics;
 #[cfg(feature = "extended-charts")]
 mod pie_chart;
 #[cfg(feature = "extended-charts")]

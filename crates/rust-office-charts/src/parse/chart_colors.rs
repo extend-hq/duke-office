@@ -1,5 +1,7 @@
 #[path = "chart_base_color.rs"]
 mod base_color;
+#[path = "chart_effects.rs"]
+mod effects;
 #[path = "chart_paint.rs"]
 mod paint;
 #[cfg(feature = "extended-charts")]
@@ -104,6 +106,7 @@ fn color(node: Node, theme: &ThemeColorMap) -> Option<String> {
 
 #[derive(Default)]
 struct Properties {
+    effects: Option<String>,
     fill: Option<String>,
     outline: Option<String>,
     #[cfg(feature = "extended-charts")]
@@ -117,6 +120,7 @@ impl Properties {
         let properties = child(node, "spPr").or_else(|| cx_child(node, "spPr"));
         let marker = child(node, "marker").and_then(|m| child(m, "spPr"));
         Self {
+            effects: effects::properties(node).map(effects::fragment),
             fill: properties.and_then(|p| servers.fill(p, theme)),
             outline: properties
                 .and_then(|p| drawing_child(p, "ln"))
@@ -241,6 +245,7 @@ pub(super) struct ChartColors {
     pub(super) spreadsheet_defaults: bool,
     pub(super) use_cached_point_count: bool,
     servers: paint::PaintServers,
+    effects: effects::Effects,
     palette: Palette,
     #[cfg(feature = "extended-charts")]
     style_palette: Option<style_palette::StylePalette>,
@@ -251,6 +256,7 @@ pub(super) struct ChartColors {
     highest_series: usize,
     highest_point: usize,
     line_transforms: Vec<Transform>,
+    default_outline: Option<String>,
 }
 
 impl ChartColors {
@@ -350,7 +356,8 @@ impl ChartColors {
                 mapped.insert(token.to_ascii_lowercase(), value.clone());
             }
         }
-        let servers = paint::PaintServers::new(root, &mapped, options.spreadsheet_defaults);
+        let servers =
+            paint::PaintServers::new(root, &mapped, options.spreadsheet_defaults, options.images);
         let palette = Palette::legacy(root, &mapped);
         #[cfg(feature = "extended-charts")]
         let style_palette = (root.tag_name().namespace() == Some(CHARTEX_NS))
@@ -440,6 +447,10 @@ impl ChartColors {
             .or_else(|| options.theme_xml.and_then(default_line_transforms))
             .unwrap_or_default();
         let highest_series = series.iter().map(|s| s.index).max().unwrap_or(0);
+        let default_outline = classic_style_id(root)
+            .filter(|style| (9..=16).contains(&(style % 100)))
+            .and_then(|_| mapped.get("bg1"))
+            .map(|color| transformed(color, &line_transforms).unwrap_or_else(|| color.clone()));
         Self {
             interactive: options.interactive,
             spreadsheet_defaults: options.spreadsheet_defaults,
@@ -447,6 +458,12 @@ impl ChartColors {
             legacy_defaults,
             series,
             servers,
+            effects: effects::Effects::new(
+                options.style_xml,
+                options.theme_xml,
+                options.theme_override_xml,
+                classic_style_id(root),
+            ),
             palette,
             #[cfg(feature = "extended-charts")]
             style_palette,
@@ -456,6 +473,7 @@ impl ChartColors {
             highest_series,
             highest_point,
             line_transforms,
+            default_outline,
         }
     }
 
@@ -549,11 +567,95 @@ impl ChartColors {
         self.servers.fill(properties, &self.theme)
     }
 
+    pub fn effect_properties<'a>(node: Node<'a, 'a>) -> Option<Node<'a, 'a>> {
+        effects::properties(node)
+    }
+
+    pub fn paint_shape(
+        &self,
+        svg: &mut String,
+        properties: Option<Node>,
+        bounds: [f64; 4],
+        body: &str,
+    ) {
+        self.effects
+            .paint(svg, properties, &self.theme, bounds, body);
+    }
+
+    pub fn line_ends(
+        &self,
+        svg: &mut String,
+        line: Option<Node>,
+        start: (f64, f64),
+        end: (f64, f64),
+        width: f64,
+        paint: &str,
+    ) {
+        effects::line_ends(svg, line, start, end, width, paint);
+    }
+
+    pub fn paint_styled_shape(
+        &self,
+        svg: &mut String,
+        properties: Option<Node>,
+        entry: &str,
+        automatic: &str,
+        bounds: [f64; 4],
+        body: &str,
+    ) {
+        self.effects
+            .paint_styled(svg, properties, &self.theme, entry, automatic, bounds, body);
+    }
+
+    #[cfg(feature = "extended-charts")]
+    pub fn style_material(&self, entry: &str) -> Option<&str> {
+        self.effects.material(entry)
+    }
+
+    pub fn style_effects_xml(&self, entry: &str) -> Option<&str> {
+        self.effects.style_effects_xml(entry)
+    }
+
+    #[cfg(feature = "extended-charts")]
+    pub fn style_fill_xml(&self, entry: &str) -> Option<&str> {
+        self.effects.style_fill_xml(entry)
+    }
+
+    pub fn paint_point(
+        &self,
+        svg: &mut String,
+        series: usize,
+        point: Option<u32>,
+        entry: &str,
+        automatic: &str,
+        bounds: [f64; 4],
+        body: &str,
+    ) {
+        let document = self
+            .explicit(series, point, |p| p.effects.as_deref())
+            .and_then(|xml| roxmltree::Document::parse(xml).ok());
+        let properties = document
+            .as_ref()
+            .and_then(|d| d.root_element().first_element_child());
+        self.paint_styled_shape(svg, properties, entry, automatic, bounds, body);
+    }
+
+    pub fn line_dash(&self, line: Option<Node>, width: f64) -> String {
+        effects::line_dash(line, width)
+    }
+
     #[cfg(feature = "extended-charts")]
     pub fn solid_color(&self, container: Node) -> Option<String> {
         container
             .children()
             .find_map(|node| color(node, &self.theme))
+    }
+
+    #[cfg(feature = "extended-charts")]
+    pub fn style_solid_color(&self, container: Node, automatic: &str) -> Option<String> {
+        let mut theme = self.theme.clone();
+        theme.insert("phclr".into(), automatic.into());
+        container.children().find_map(|node| color(node, &theme))
     }
 
     pub fn shape_stroke(&self, properties: Node) -> Option<String> {
@@ -603,6 +705,7 @@ impl ChartColors {
 
     pub fn outline(&self, i: usize, point: Option<u32>) -> Option<&str> {
         self.explicit(i, point, |p| p.outline.as_deref())
+            .or(self.default_outline.as_deref())
     }
 
     #[cfg(feature = "extended-charts")]
@@ -621,7 +724,7 @@ impl ChartColors {
     }
 
     pub fn line_at(&self, i: usize, point: Option<u32>) -> String {
-        self.outline(i, point)
+        self.explicit(i, point, |p| p.outline.as_deref())
             .map(str::to_owned)
             .unwrap_or_else(|| self.default_stroke(i, point))
     }

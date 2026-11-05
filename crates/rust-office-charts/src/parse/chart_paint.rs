@@ -10,14 +10,24 @@ pub(super) struct PaintServers {
 }
 
 impl PaintServers {
-    pub(super) fn new(root: Node, theme: &ThemeColorMap, spreadsheet: bool) -> Self {
+    pub(super) fn new(
+        root: Node,
+        theme: &ThemeColorMap,
+        spreadsheet: bool,
+        images: Option<&HashMap<String, String>>,
+    ) -> Self {
         let mut paints = Self::default();
         for node in root.descendants().filter(|n| drawing(*n)) {
             let id = paints.ids.len();
-            if !matches!(node.tag_name().name(), "gradFill" | "pattFill") {
+            if !matches!(node.tag_name().name(), "gradFill" | "pattFill" | "blipFill") {
                 continue;
             }
-            if let Some(markup) = definition_for_mode(node, theme, &id.to_string(), spreadsheet) {
+            let markup = if node.tag_name().name() == "blipFill" {
+                image_fill(node, &id.to_string(), images)
+            } else {
+                definition_for_mode(node, theme, &id.to_string(), spreadsheet)
+            };
+            if let Some(markup) = markup {
                 paints.ids.insert(node.id(), id);
                 paints.markup.push_str(&markup);
             }
@@ -32,7 +42,9 @@ impl PaintServers {
             .find_map(|n| match n.tag_name().name() {
                 "noFill" => Some("none".to_owned()),
                 "solidFill" => n.children().find_map(|c| color(c, theme)),
-                "gradFill" | "pattFill" => self.ids.get(&n.id()).map(|id| format!("url(#cp{id})")),
+                "gradFill" | "pattFill" | "blipFill" => {
+                    self.ids.get(&n.id()).map(|id| format!("url(#cp{id})"))
+                }
                 _ => None,
             })
     }
@@ -44,6 +56,82 @@ impl PaintServers {
             format!("<defs>{}</defs>", self.markup)
         }
     }
+}
+
+fn raster_data_url(value: &str) -> bool {
+    let Some((header, data)) = value.split_once(',') else {
+        return false;
+    };
+    if !matches!(
+        header,
+        "data:image/png;base64"
+            | "data:image/jpeg;base64"
+            | "data:image/gif;base64"
+            | "data:image/webp;base64"
+    ) || data.is_empty()
+        || data.len() % 4 != 0
+    {
+        return false;
+    }
+    let content = data.trim_end_matches('=');
+    data.len() - content.len() <= 2
+        && content
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'+' | b'/'))
+}
+
+fn image_fill(node: Node, id: &str, images: Option<&HashMap<String, String>>) -> Option<String> {
+    let blip = drawing_child(node, "blip")?;
+    let relationship = blip
+        .attributes()
+        .find(|attribute| {
+            attribute.name() == "embed"
+                && matches!(
+                    attribute.namespace(),
+                    Some(
+                        "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                            | "http://purl.oclc.org/ooxml/officeDocument/relationships"
+                    )
+                )
+        })?
+        .value();
+    let image = images?
+        .get(relationship)
+        .filter(|image| raster_data_url(image))?;
+    let stretch = drawing_child(node, "stretch")?;
+    let offsets = |rectangle: Option<Node>| {
+        ["l", "t", "r", "b"].map(|name| {
+            rectangle
+                .and_then(|n| n.attribute(name))
+                .and_then(fraction)
+                .unwrap_or(0.)
+        })
+    };
+    let [left, top, right, bottom] = offsets(drawing_child(node, "srcRect"));
+    let [fill_left, fill_top, fill_right, fill_bottom] =
+        offsets(drawing_child(stretch, "fillRect"));
+    let source_width = 1. - left - right;
+    let source_height = 1. - top - bottom;
+    let fill_width = 1. - fill_left - fill_right;
+    let fill_height = 1. - fill_top - fill_bottom;
+    if source_width <= 0. || source_height <= 0. || fill_width <= 0. || fill_height <= 0. {
+        return None;
+    }
+    let width = fill_width / source_width;
+    let height = fill_height / source_height;
+    let x = fill_left - left * width;
+    let y = fill_top - top * height;
+    if ![x, y, width, height].into_iter().all(f64::is_finite) {
+        return None;
+    }
+    let alpha = drawing_child(blip, "alphaModFix")
+        .and_then(|n| n.attribute("amt"))
+        .and_then(fraction)
+        .unwrap_or(1.)
+        .clamp(0., 1.);
+    Some(format!(
+        r##"<clipPath id="ci{id}"><rect x="{fill_left}" y="{fill_top}" width="{fill_width}" height="{fill_height}"/></clipPath><pattern id="cp{id}" width="1" height="1" patternContentUnits="objectBoundingBox"><g clip-path="url(#ci{id})"><image x="{x}" y="{y}" width="{width}" height="{height}" href="{image}" preserveAspectRatio="none" opacity="{alpha}"/></g></pattern>"##
+    ))
 }
 
 fn fraction(raw: &str) -> Option<f64> {

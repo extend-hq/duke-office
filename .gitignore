@@ -1,10 +1,12 @@
 /target/
 node_modules/
+.vite/
 .DS_Store
 *.tgz
 __pycache__/
 
 output/
+/artifacts/
+/.playwright-cli/
 **/target/
-__pycache__/
 .python-deps/

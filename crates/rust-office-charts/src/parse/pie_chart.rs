@@ -13,6 +13,7 @@ struct Slice {
     index: u32,
     aggregate: bool,
     value: f64,
+    defined: bool,
     weight: f64,
     name: String,
     explosion: f64,
@@ -30,12 +31,13 @@ fn slices(series: &ChartSeries, node: Node) -> Vec<Slice> {
         .points
         .iter()
         .map(|p| {
-            let value = number(p.value.as_deref()).unwrap_or(0.);
+            let value = number(p.value.as_deref());
             Slice {
                 index: p.index,
                 aggregate: false,
-                value,
-                weight: value.abs(),
+                value: value.unwrap_or(0.),
+                defined: value.is_some(),
+                weight: value.unwrap_or(0.).abs(),
                 name: p
                     .categories
                     .first()
@@ -137,6 +139,9 @@ struct LabelStyle<'a> {
     legacy: bool,
     spreadsheet: bool,
     format: Option<&'a str>,
+    colors: &'a ChartColors,
+    width: f64,
+    height: f64,
 }
 
 impl LabelStyle<'_> {
@@ -149,6 +154,8 @@ impl LabelStyle<'_> {
         y: f64,
         max_width: f64,
         color: &str,
+        leader_anchor: Option<(f64, f64)>,
+        leader_region: Option<(Circle, f64, f64, f64)>,
     ) {
         let over = self.options.children().find(|n| {
             chart_node(*n, "dLbl")
@@ -157,6 +164,35 @@ impl LabelStyle<'_> {
         if on(val(over, "delete")) {
             return;
         }
+        let props = text_props(over, true)
+            .or_else(|| text_props(over, false))
+            .or_else(|| text_props(Some(self.options), false));
+        let size = font_size(props, self.size);
+        let face = font_family(props, self.face.split(',').next().unwrap_or("Calibri"));
+        let paint = props.and_then(|p| self.colors.shape_fill(p));
+        let fill = paint
+            .as_deref()
+            .unwrap_or(if self.spreadsheet { "#595959" } else { "black" });
+        let layout = over
+            .and_then(|n| child(n, "layout"))
+            .and_then(|n| child(n, "manualLayout"));
+        let extended_layout = over
+            .and_then(|node| {
+                node.descendants().find(|n| {
+                    n.has_tag_name((
+                        "http://schemas.microsoft.com/office/drawing/2012/chart",
+                        "layout",
+                    ))
+                })
+            })
+            .and_then(|n| child(n, "manualLayout"));
+        let explicit_width = number(val(extended_layout, "w").or_else(|| val(layout, "w")))
+            .filter(|n| *n > 0.)
+            .map(|n| n * self.width);
+        let explicit_height = number(val(extended_layout, "h").or_else(|| val(layout, "h")))
+            .filter(|n| *n > 0.)
+            .map(|n| n * self.height);
+        let max_width = explicit_width.unwrap_or(max_width);
         let shown = |name| {
             over.and_then(|o| child(o, name))
                 .or_else(|| child(self.options, name))
@@ -185,7 +221,7 @@ impl LabelStyle<'_> {
             .and_then(|s| s.text())
             .unwrap_or(", ");
         let key = if shown("showLegendKey") {
-            self.size * 0.53
+            size * 0.53
         } else {
             0.
         };
@@ -194,8 +230,7 @@ impl LabelStyle<'_> {
             let mut line = String::new();
             for word in section.split_inclusive([' ', '-']) {
                 if !line.is_empty()
-                    && text_width(line.trim_end(), self.size)
-                        + text_width(word.trim_end(), self.size)
+                    && text_width(line.trim_end(), size) + text_width(word.trim_end(), size)
                         > max_width
                 {
                     rows.push(line.trim_end().to_owned());
@@ -207,24 +242,115 @@ impl LabelStyle<'_> {
                 rows.push(line.trim_end().to_owned());
             }
         }
-        let start = y + self.size * 0.32 - rows.len().saturating_sub(1) as f64 * self.size * 0.58;
+        if rows.is_empty() && key == 0. {
+            return;
+        }
+        let natural_width = rows
+            .iter()
+            .map(|row| text_width(row, size))
+            .fold(0., f64::max);
+        let box_width = explicit_width.unwrap_or(natural_width + key);
+        let box_height = explicit_height.unwrap_or(size * 1.16 * rows.len() as f64);
+        let coordinate = |axis: &str, mode: &str, center: f64, extent: f64, dimension: f64| {
+            let Some(value) = number(val(layout, axis)) else {
+                return center;
+            };
+            let origin = if val(layout, mode) == Some("edge") {
+                value * dimension
+            } else {
+                let automatic = center - extent * 0.5;
+                let automatic = if explicit_width.is_some() && axis == "x" {
+                    automatic.max(0.)
+                } else {
+                    automatic
+                };
+                automatic + value * dimension
+            };
+            origin + extent * 0.5
+        };
+        let x = coordinate("x", "xMode", x, box_width, self.width);
+        let y = coordinate("y", "yMode", y, box_height, self.height);
+        let padding_x = size * 0.28;
+        let padding_y = size * 0.14;
+        let left = x - box_width * 0.5 - padding_x;
+        let top = y - box_height * 0.5 - padding_y;
+        let outside_slice = leader_region.is_none_or(|(circle, inner, start, sweep)| {
+            let dx = x - circle.x;
+            let dy = y - circle.y;
+            let radius = dx.hypot(dy);
+            let angle = (dy.atan2(dx) - start).rem_euclid(TAU);
+            radius < inner || radius > circle.r || angle > sweep
+        });
+        if shown("showLeaderLines") && outside_slice {
+            if let Some((start_x, start_y)) = leader_anchor {
+                let end_x = if start_x < left {
+                    left - 2.
+                } else if start_x > left + box_width + padding_x * 2. {
+                    left + box_width + padding_x * 2. + 2.
+                } else {
+                    start_x
+                };
+                let end_y = y.clamp(top, top + box_height + padding_y * 2.);
+                if (start_x - end_x).hypot(start_y - end_y) > size * 0.5 {
+                    let line_props =
+                        child(self.options, "leaderLines").and_then(|n| child(n, "spPr"));
+                    let stroke = line_props
+                        .and_then(|p| self.colors.shape_stroke(p))
+                        .unwrap_or_else(|| "#a6a6a6".to_owned());
+                    let elbow_x = end_x + if end_x < start_x { 5. } else { -5. };
+                    write!(svg, r#"<path d="M{start_x:.2} {start_y:.2}L{elbow_x:.2} {end_y:.2}H{end_x:.2}" fill="none" stroke="{stroke}" stroke-width="1"/>"#).unwrap();
+                }
+            }
+        }
+        let shape = over
+            .and_then(|n| child(n, "spPr"))
+            .or_else(|| child(self.options, "spPr"));
+        if let Some(background) = shape
+            .and_then(|p| self.colors.shape_fill(p))
+            .filter(|paint| paint != "none")
+        {
+            write!(svg, r#"<rect x="{left:.2}" y="{top:.2}" width="{:.2}" height="{:.2}" fill="{background}"/>"#, box_width + padding_x * 2., box_height + padding_y * 2.).unwrap();
+        }
+        write!(
+            svg,
+            r#"<g fill="{fill}"{}{}>"#,
+            if props
+                .and_then(|p| p.attribute("b"))
+                .is_some_and(|v| on(Some(v)))
+            {
+                " font-weight=\"bold\""
+            } else {
+                ""
+            },
+            if props
+                .and_then(|p| p.attribute("i"))
+                .is_some_and(|v| on(Some(v)))
+            {
+                " font-style=\"italic\""
+            } else {
+                ""
+            }
+        )
+        .unwrap();
+        let start = y + size * 0.32 - rows.len().saturating_sub(1) as f64 * size * 0.58;
         for (i, row) in rows.iter().enumerate() {
             let mut cx = x;
             if i == 0 && key > 0. {
-                let left = x - (text_width(row, self.size) + key + 3.) / 2.;
+                let left = x - (text_width(row, size) + key + 3.) / 2.;
                 write!(svg,r#"<rect x="{left:.2}" y="{:.2}" width="{key:.2}" height="{key:.2}" fill="{color}"/>"#,start-key).unwrap();
                 cx += (key + 3.) / 2.;
             }
             text(
                 svg,
                 cx,
-                start + i as f64 * self.size * 1.16,
+                start + i as f64 * size * 1.16,
                 "middle",
-                self.size,
-                self.face,
+                size,
+                face.as_str(),
                 row,
             );
         }
+        svg.push_str("</g>");
     }
 }
 
@@ -245,7 +371,7 @@ impl Ring<'_> {
             return;
         }
         let mut angle = self.start;
-        for p in slices.iter().filter(|p| p.weight > 0.) {
+        for p in slices {
             let sweep = p.weight / sum * TAU;
             let bisector = angle + sweep / 2.;
             let circle = self.circle.displaced(self.circle.r * p.explosion, bisector);
@@ -270,21 +396,38 @@ impl Ring<'_> {
                 .spreadsheet_defaults
                 .then(|| self.colors.outline_width(self.series, p.index))
                 .flatten();
+            let mut body = String::new();
             if let Some(width) = width {
                 write!(
-                    svg,
+                    body,
                     r#"<g stroke-width="{width:.3}" stroke-linejoin="round">"#
                 )
                 .unwrap();
             }
-            sector(svg, circle, self.inner, angle, sweep, &fill, stroke);
+            sector(&mut body, circle, self.inner, angle, sweep, &fill, stroke);
             if width.is_some() {
-                svg.push_str("</g>");
+                body.push_str("</g>");
             }
+            self.colors.paint_point(
+                svg,
+                self.series,
+                point,
+                "dataPoint",
+                &fill,
+                [
+                    circle.x - circle.r,
+                    circle.y - circle.r,
+                    circle.r * 2.,
+                    circle.r * 2.,
+                ],
+                &body,
+            );
             self.colors.end_hit(svg);
-            if let Some(labels) = self.labels {
+            if let Some(labels) = self.labels.filter(|_| p.defined) {
                 let placement = val(Some(labels.options), "dLblPos").unwrap_or("bestFit");
-                let r = if placement == "outEnd" || (placement == "bestFit" && sweep < 0.25 * PI) {
+                let r = if placement == "outEnd"
+                    || (self.inner == 0. && placement == "bestFit" && sweep < 0.25 * PI)
+                {
                     circle.r * 1.13
                 } else {
                     (circle.r + self.inner)
@@ -318,6 +461,12 @@ impl Ring<'_> {
                     y,
                     width.max(labels.size * 3.),
                     &fill,
+                    Some(if r > circle.r {
+                        circle.at(bisector)
+                    } else {
+                        (x, y)
+                    }),
+                    Some((circle, self.inner, angle, sweep)),
                 );
                 self.colors.end_hit(label_svg);
             }
@@ -411,6 +560,7 @@ fn draw_split(
             .unwrap_or(0)
             .saturating_add(1),
         value: total_value,
+        defined: true,
         weight: combined,
         name: "Other".into(),
         explosion,
@@ -543,6 +693,8 @@ fn draw_split(
                     y + h / 2.,
                     w,
                     &fill,
+                    None,
+                    None,
                 );
                 colors.end_hit(label_svg);
             }
@@ -828,14 +980,19 @@ pub(super) fn render(
     let title_props = text_props(title, true).or_else(|| text_props(title, false));
     let title_font = font_size(
         title_props,
-        if legacy || colors.spreadsheet_defaults {
-            24.
-        } else {
-            size
-        },
+        super::chart_svg::title_size_default(
+            colors,
+            root,
+            size,
+            if legacy || colors.spreadsheet_defaults {
+                24.
+            } else {
+                size
+            },
+        ),
     );
     let unstyled_title =
-        colors.spreadsheet_defaults && super::chart_colors::classic_style_id(root).is_none();
+        colors.spreadsheet_defaults && super::chart_svg::title_uses_automatic_font(root);
     let title_face = font_family(
         title_props,
         if unstyled_title {
@@ -971,6 +1128,9 @@ pub(super) fn render(
             },
             legacy: legacy || colors.spreadsheet_defaults,
             spreadsheet: colors.spreadsheet_defaults,
+            colors,
+            width,
+            height,
             format: child(nodes[i], "val")
                 .and_then(|node| node.descendants().find(|n| chart_node(*n, "formatCode")))
                 .and_then(|n| n.text()),
@@ -1015,6 +1175,7 @@ pub(super) fn render(
             ring_series,
             colors,
             [frame.x - side / 2., frame.y - side / 2., side, side],
+            (width, height),
             minor_latin.unwrap_or("Calibri"),
         )?;
     }
@@ -1127,6 +1288,7 @@ mod tests {
             index,
             aggregate: false,
             value: 4.,
+            defined: true,
             weight: 1.,
             name: String::new(),
             explosion: 0.,

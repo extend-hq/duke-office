@@ -413,7 +413,7 @@ pub(super) fn render(ctx: &Canvas, out: &mut String) -> Option<()> {
                     .and_then(|n| n.attribute("majorUnit")),
             )
             .filter(|v| *v > 0.)
-            .unwrap_or((secondary_scale.max - secondary_scale.min) / 10.);
+            .unwrap_or(secondary_scale.step);
             let count = ((secondary_scale.max - secondary_scale.min) / major + 1e-8)
                 .floor()
                 .min(200.) as usize;

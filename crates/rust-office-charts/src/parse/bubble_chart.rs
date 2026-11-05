@@ -1,4 +1,5 @@
 //! Layout of classic bubble charts.
+use super::cartesian_chart::DataLabels;
 use super::chart_colors::ChartColors;
 use super::chart_svg::{
     font_family, font_size, line, number, on, text, text_props, text_width, title_position, val,
@@ -24,6 +25,27 @@ impl Axis {
         nominal_radius: f64,
         label_spacing: f64,
     ) -> Self {
+        Self::with_defaults(raw, node, length, nominal_radius, label_spacing, false)
+    }
+
+    fn spreadsheet(
+        raw: (f64, f64),
+        node: Option<Node>,
+        length: f64,
+        nominal_radius: f64,
+        label_spacing: f64,
+    ) -> Self {
+        Self::with_defaults(raw, node, length, nominal_radius, label_spacing, true)
+    }
+
+    fn with_defaults(
+        raw: (f64, f64),
+        node: Option<Node>,
+        length: f64,
+        nominal_radius: f64,
+        label_spacing: f64,
+        spreadsheet: bool,
+    ) -> Self {
         let scaling = node.and_then(|n| child(n, "scaling"));
         let explicit_min = number(val(scaling, "min"));
         let explicit_max = number(val(scaling, "max"));
@@ -46,28 +68,35 @@ impl Axis {
             lo -= delta;
             hi += delta;
         }
+        let zero_min = lo > 0. && lo <= hi * 0.5;
+        let zero_max = hi < 0. && hi >= lo * 0.5;
+        let span = (if zero_max { 0. } else { hi }) - (if zero_min { 0. } else { lo });
         let pad = nominal_radius.min(length * 0.35)
             / (length - 2. * nominal_radius.min(length * 0.35)).max(1.)
-            * (hi - lo);
-        let mut lower = lo - pad;
-        let mut upper = hi + pad;
-        if lo > 0. && lo <= hi * 0.5 {
-            lower = lower.min(0.);
-        }
-        if hi < 0. && hi >= lo * 0.5 {
-            upper = upper.max(0.);
-        }
+            * span;
+        let mut lower = if zero_min {
+            (lo - pad).min(0.)
+        } else {
+            lo - pad
+        };
+        let mut upper = if zero_max {
+            (hi + pad).max(0.)
+        } else {
+            hi + pad
+        };
         lower = explicit_min.map_or(lower, |v| v / multiplier);
         upper = explicit_max.map_or(upper, |v| v / multiplier);
         if upper <= lower {
             upper = lower + lower.abs().max(1.);
         }
-        let intervals = (length / label_spacing.max(1.)).floor().clamp(1., 40.);
+        let intervals = (length / label_spacing.max(1.))
+            .floor()
+            .clamp(1., if spreadsheet { 10. } else { 40. });
         let desired = ((upper - lower) / intervals).max(1e-300);
         let decade = 10f64.powf(desired.log10().floor());
         let nice = [1., 2., 5., 10.]
             .into_iter()
-            .find(|factor| desired <= decade * factor * 1.005)
+            .find(|factor| desired <= decade * factor * if spreadsheet { 1. } else { 1.005 })
             .unwrap_or(10.);
         let unit = number(val(node, "majorUnit"))
             .map(|n| n / multiplier)
@@ -168,6 +197,40 @@ fn legend_lines(name: &str, size: f64, limit: f64) -> Vec<&str> {
     lines
 }
 
+fn gridline(svg: &mut String, node: Node, start: (f64, f64), end: (f64, f64), stroke: &str) {
+    let properties = child(node, "spPr").and_then(|n| {
+        n.children()
+            .find(|n| n.is_element() && n.tag_name().name() == "ln")
+    });
+    let width = number(properties.and_then(|n| n.attribute("w")))
+        .map_or(1., |w| (w / 9525.).clamp(0., 256.));
+    let dash = properties
+        .and_then(|n| n.children().find(|n| n.tag_name().name() == "prstDash"))
+        .and_then(|n| n.attribute("val"));
+    let lengths = match dash {
+        Some("dot" | "sysDot") => vec![width, width * 2.],
+        Some("dash" | "sysDash") => vec![width * 4., width * 3.],
+        Some("lgDash") => vec![width * 8., width * 3.],
+        Some("dashDot" | "sysDashDot") => vec![width * 4., width * 2., width, width * 2.],
+        Some("lgDashDot") => vec![width * 8., width * 2., width, width * 2.],
+        Some("lgDashDotDot") => vec![width * 8., width * 2., width, width * 2., width, width * 2.],
+        _ => Vec::new(),
+    };
+    let dash = if lengths.is_empty() {
+        String::new()
+    } else {
+        format!(
+            " stroke-dasharray=\"{}\"",
+            lengths
+                .iter()
+                .map(f64::to_string)
+                .collect::<Vec<_>>()
+                .join(" ")
+        )
+    };
+    write!(svg, r#"<path d="M{:.2} {:.2}L{:.2} {:.2}" fill="none" stroke="{stroke}" stroke-width="{width:.2}"{dash}/>"#, start.0, start.1, end.0, end.1).unwrap();
+}
+
 // The bevel is lit from above and to the left, using the actual point paint as its material.
 fn sphere_paint(svg: &mut String, fill: &str) -> Option<String> {
     let base = fill
@@ -264,7 +327,10 @@ pub(super) fn render(
         font_family(legend_props, default_face),
     );
     let title_props = text_props(title, true).or(text_props(title, false));
-    let tf = font_size(title_props, 24.);
+    let tf = font_size(
+        title_props,
+        super::chart_svg::title_size_default(colors, root, size, 24.),
+    );
     let title_height = if title_label.is_some() && !on(val(title, "overlay")) {
         12. + tf * 1.15
     } else {
@@ -292,8 +358,7 @@ pub(super) fn render(
     }
     if let Some(title) = title_label {
         let styled_title = legacy
-            || (colors.spreadsheet_defaults
-                && super::chart_colors::classic_style_id(root).is_some());
+            || (colors.spreadsheet_defaults && !super::chart_svg::title_uses_automatic_font(root));
         let bold = title_props
             .and_then(|p| p.attribute("b"))
             .map_or(styled_title, |s| on(Some(s)));
@@ -333,7 +398,7 @@ pub(super) fn render(
         (f64::INFINITY, f64::NEG_INFINITY),
     );
     for (s, series) in data.series.iter().enumerate() {
-        if data.series.len() == 1 && on(val(Some(group), "varyColors")) {
+        if data.series.len() == 1 && colors.vary_by_point(s) {
             let capacity = ((height - title_height - 40. / 3.) / (lf * 1.16 + 8.))
                 .floor()
                 .clamp(1., 256.) as u32;
@@ -362,15 +427,14 @@ pub(super) fn render(
             ));
         }
         for pt in &series.points {
-            let (Some(x), Some(y), Some(z)) = (
-                number(pt.x.as_deref()),
-                number(pt.y.as_deref()),
-                number(pt.bubble_size.as_deref()),
-            ) else {
+            let (Some(x), Some(y)) = (number(pt.x.as_deref()), number(pt.y.as_deref())) else {
                 continue;
             };
             xr = (xr.0.min(x), xr.1.max(x));
             yr = (yr.0.min(y), yr.1.max(y));
+            let Some(z) = number(pt.bubble_size.as_deref()) else {
+                continue;
+            };
             if z == 0. || (z < 0. && !show_neg) {
                 continue;
             }
@@ -434,12 +498,33 @@ pub(super) fn render(
     let preliminary = (height - 2. * inset - title_height - legend_height)
         .min(width - 2. * inset - legend_width)
         .max(1.);
-    let radius = |scale: f64| preliminary * 0.15 * scale / (1. + 0.3 * scale);
-    let max_radius =
-        radius((number(val(Some(group), "bubbleScale")).unwrap_or(100.) / 100.).clamp(0., 3.));
-    let nominal_y_radius =
-        (height - 2. * inset - title_height - legend_height).max(1.) * (0.15 / 1.3);
-    let y_axis = Axis::new(yr, y_ax, bottom - top, nominal_y_radius, yf * 1.4);
+    let bubble_scale =
+        (number(val(Some(group), "bubbleScale")).unwrap_or(100.) / 100.).clamp(0., 3.);
+    let radius = |length: f64, scale: f64| length.max(1.) * 0.15 * scale / (1. + 0.3 * scale);
+    let max_radius = radius(preliminary, bubble_scale);
+    let axis_scale = if colors.spreadsheet_defaults {
+        bubble_scale
+    } else {
+        1.
+    };
+    let nominal_y_radius = radius(
+        height - 2. * inset - title_height - legend_height,
+        axis_scale,
+    );
+    let nominal_x_radius = radius(
+        if colors.spreadsheet_defaults {
+            width - 2. * inset - legend_width
+        } else {
+            preliminary
+        },
+        axis_scale,
+    );
+    let make_axis = if colors.spreadsheet_defaults {
+        Axis::spreadsheet
+    } else {
+        Axis::new
+    };
+    let y_axis = make_axis(yr, y_ax, bottom - top, nominal_y_radius, yf * 1.4);
     let y_labels = val(y_ax, "tickLblPos") != Some("none") && !on(val(y_ax, "delete"));
     let widest_y = y_axis
         .ticks()
@@ -456,7 +541,7 @@ pub(super) fn render(
     }) + legend_left;
     let mut right =
         width - (if outside_y && reversed { gutter } else { 14.67 }) - (legend_width - legend_left);
-    let mut x_axis = Axis::new(xr, x_ax, (right - left).max(1.), radius(1.), xf * 3.5);
+    let mut x_axis = make_axis(xr, x_ax, (right - left).max(1.), nominal_x_radius, xf * 3.5);
     if x_labels {
         if !outside_y || !reversed {
             let end = if reversed { x_axis.low } else { x_axis.high };
@@ -469,7 +554,7 @@ pub(super) fn render(
     }
     left = left.min(width - 2.);
     right = right.max(left + 1.);
-    x_axis = Axis::new(xr, x_ax, right - left, radius(1.), xf * 3.5);
+    x_axis = make_axis(xr, x_ax, right - left, nominal_x_radius, xf * 3.5);
     if legacy
         && xr.0 >= 0.
         && x_axis.low < 0.
@@ -486,17 +571,14 @@ pub(super) fn render(
         write!(svg,r#"<rect x="{left:.2}" y="{top:.2}" width="{:.2}" height="{:.2}" fill="{plot_fill}" stroke="{plot_stroke}"/>"#,right-left,bottom-top).unwrap();
     }
     let mut labels = String::new();
-    let axis_ink = if legacy { "#868686" } else { "black" };
+    let axis_ink = "#868686";
     for (horizontal, node, axis, font, face, show_labels) in [
         (true, x_ax, &x_axis, xf, &xface, x_labels),
         (false, y_ax, &y_axis, yf, &yface, y_labels),
     ] {
-        if on(val(node, "delete")) {
-            continue;
-        }
-        let grid = node
-            .and_then(|n| child(n, "majorGridlines"))
-            .map(|n| shape_paint(n, "none", axis_ink).1);
+        let deleted = on(val(node, "delete"));
+        let grid = node.and_then(|n| child(n, "majorGridlines"));
+        let grid_stroke = grid.map(|n| shape_paint(n, "none", axis_ink).1);
         let stroke = node
             .map(|n| shape_paint(n, "none", axis_ink).1)
             .unwrap_or_else(|| axis_ink.to_owned());
@@ -509,15 +591,15 @@ pub(super) fn render(
             let mark = axis.label(v);
             if horizontal {
                 let pos = x(v);
-                if let Some(grid) = &grid {
-                    line(&mut svg, pos, top, pos, bottom, grid);
+                if let (Some(grid), Some(stroke)) = (grid, &grid_stroke) {
+                    gridline(&mut svg, grid, (pos, top), (pos, bottom), stroke);
                 }
                 let direction = if val(node, "majorTickMark") == Some("in") {
                     -1.
                 } else {
                     1.
                 };
-                if tick > 0. {
+                if !deleted && tick > 0. {
                     line(&mut svg, pos, hline, pos, hline + direction * tick, &stroke);
                 }
                 if show_labels {
@@ -530,15 +612,15 @@ pub(super) fn render(
                 }
             } else {
                 let pos = y(v);
-                if let Some(grid) = &grid {
-                    line(&mut svg, left, pos, right, pos, grid);
+                if let (Some(grid), Some(stroke)) = (grid, &grid_stroke) {
+                    gridline(&mut svg, grid, (left, pos), (right, pos), stroke);
                 }
                 let direction = if val(node, "majorTickMark") == Some("in") {
                     1.
                 } else {
                     -1.
                 };
-                if tick > 0. {
+                if !deleted && tick > 0. {
                     line(
                         &mut svg,
                         vline,
@@ -566,6 +648,9 @@ pub(super) fn render(
                     );
                 }
             }
+        }
+        if deleted {
+            continue;
         }
         if horizontal {
             line(&mut svg, left, hline, right, hline, &stroke);
@@ -604,6 +689,11 @@ pub(super) fn render(
             fill
         }
     };
+    let series_nodes: Vec<_> = group.children().filter(|n| chart_node(*n, "ser")).collect();
+    let data_labels: Vec<_> = series_nodes
+        .iter()
+        .map(|&node| DataLabels::new(group, node, default_face, (width, height)))
+        .collect();
     let shadow = legacy
         && val(Some(root), "style")
             .and_then(|v| v.parse::<u8>().ok())
@@ -631,9 +721,10 @@ pub(super) fn render(
         } else {
             ""
         };
+        let mut body = String::new();
         write!(
-            svg,
-            r#"<circle cx="{cx:.2}" cy="{cy:.2}" r="{radius:.2}" fill="{}" stroke="{}"{shadow_attr} data-docx-series="{i}""#,
+            body,
+            r#"<circle cx="{cx:.2}" cy="{cy:.2}" r="{radius:.2}" fill="{}" stroke="{}"{shadow_attr}"#,
             if z < 0. {
                 "white".into()
             } else {
@@ -646,11 +737,39 @@ pub(super) fn render(
             }
         )
         .unwrap();
-        colors.hit_attrs(&mut svg, "bubble", i, Some(idx));
+        body.push_str("/>");
+        write!(svg, r#"<g data-docx-series="{i}""#).unwrap();
         if colors.interactive {
+            colors.hit_attrs(&mut svg, "bubble", i, Some(idx));
             write!(svg, r#" data-chart-x="{cx:.2}" data-chart-y="{cy:.2}""#).unwrap();
         }
-        svg.push_str("/>");
+        svg.push('>');
+        colors.paint_point(
+            &mut svg,
+            i,
+            Some(idx),
+            "dataPoint",
+            &colors.fill(i, Some(idx)),
+            [cx - radius, cy - radius, radius * 2., radius * 2.],
+            &body,
+        );
+        svg.push_str("</g>");
+        if let (Some(Some(label)), Some(series)) = (data_labels.get(i), data.series.get(i)) {
+            if let Some(point) = series.points.iter().find(|point| point.index == idx) {
+                label.draw(
+                    &mut labels,
+                    series,
+                    point,
+                    (cx, cy),
+                    (cx, cy),
+                    "r",
+                    false,
+                    radius,
+                    i,
+                    colors,
+                );
+            }
+        }
     }
     svg.push_str("</g>");
     svg.push_str(&labels);
@@ -698,14 +817,21 @@ pub(super) fn render(
                     },
                 )
             };
-            write!(
-                svg,
-                r#"<circle cx="{cx:.2}" cy="{cy:.2}" r="{:.2}" fill="{}" stroke="{}"/>"#,
-                lf * if legacy { 0.3 } else { 0.264 },
-                paint(*series, *point, colors.fill(*series, *point)),
-                colors.outline(*series, *point).unwrap_or("none")
-            )
-            .unwrap();
+            let fill = paint(*series, *point, colors.fill(*series, *point));
+            let radius = lf * if legacy { 0.3 } else { 0.264 };
+            let stroke = colors.outline(*series, *point).unwrap_or("none");
+            let body = format!(
+                r#"<circle cx="{cx:.2}" cy="{cy:.2}" r="{radius:.2}" fill="{fill}" stroke="{stroke}"/>"#
+            );
+            colors.paint_point(
+                &mut svg,
+                *series,
+                *point,
+                "dataPoint",
+                &fill,
+                [cx - radius, cy - radius, radius * 2., radius * 2.],
+                &body,
+            );
             wrap_before += lines.len() - 1;
             for (row, line) in lines.iter().enumerate() {
                 text(

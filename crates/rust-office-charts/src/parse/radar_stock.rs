@@ -261,11 +261,10 @@ fn end_ink(svg: &mut String, ink: &Option<String>) {
     }
 }
 
-fn bevel_width(series: Node, style: u16) -> Option<f64> {
+fn bevel_width(series: Node) -> Option<f64> {
     child(series, "spPr")
         .and_then(|p| p.descendants().find(|n| n.tag_name().name() == "bevelT"))
         .map(|bevel| number(bevel.attribute("w")).unwrap_or(76200.) / 9525.)
-        .or_else(|| (style == 28).then_some(6.))
         .filter(|w| *w > 0.)
 }
 
@@ -273,6 +272,7 @@ fn shaded_edges(svg: &mut String, vertices: &[(f64, f64)], center: (f64, f64), b
     if vertices.len() < 3 {
         return;
     }
+    svg.push_str(r#"<g data-chart-effect="true" pointer-events="none">"#);
     let inset = |(x, y): (f64, f64)| {
         let dx = center.0 - x;
         let dy = center.1 - y;
@@ -304,6 +304,7 @@ fn shaded_edges(svg: &mut String, vertices: &[(f64, f64)], center: (f64, f64), b
         )
         .unwrap();
     }
+    svg.push_str("</g>");
 }
 
 fn fit_prefix(label: &str, size: f64, room: f64) -> usize {
@@ -495,6 +496,7 @@ impl Plot<'_> {
                 svg.push_str("</g>");
             }
         }
+        let foreground_start = svg.len();
         if axis_visible(self.category, colors) {
             if let Some(stroke) = grid_stroke(self.category, colors) {
                 for i in (0..self.count).step_by(grid_stride as usize) {
@@ -565,6 +567,8 @@ impl Plot<'_> {
             end_ink(svg, &self.category_text.ink);
         }
         let filled = val(Some(self.group), "radarStyle") == Some("filled");
+        let foreground_axes =
+            (colors.spreadsheet_defaults && filled).then(|| svg.split_off(foreground_start));
         let default_markers = val(Some(self.group), "radarStyle") == Some("marker") && style <= 16;
         for (i, (s, ser)) in data.series.iter().zip(&self.series).enumerate() {
             write!(svg, r#"<g data-docx-series="{i}""#).unwrap();
@@ -572,7 +576,7 @@ impl Plot<'_> {
             svg.push('>');
             let mut path = String::new();
             let mut markers = String::new();
-            let bevel = filled.then(|| bevel_width(*ser, style)).flatten();
+            let bevel = filled.then(|| bevel_width(*ser)).flatten();
             let mut vertices = Vec::new();
             let mut previous = None;
             let mut first = None;
@@ -582,9 +586,7 @@ impl Plot<'_> {
                 let Some(n) = n else { continue };
                 let index = u64::from(p.index);
                 let (x, y) = locate(index, scale.position(n));
-                if bevel.is_some() {
-                    vertices.push((x, y));
-                }
+                vertices.push((x, y));
                 let discontinuous = previous.is_some_and(|last| last + 1 != index);
                 if discontinuous && blanks == "zero" {
                     let last = previous.unwrap();
@@ -634,7 +636,28 @@ impl Plot<'_> {
                     "none".to_owned()
                 };
                 let width = line_width(Some(*ser), 3.);
-                write!(svg,r#"<path d="{path}" fill="{fill}" stroke="{stroke}" stroke-width="{width:.2}" stroke-linejoin="round"/>"#).unwrap();
+                let body = format!(
+                    r#"<path d="{path}" fill="{fill}" stroke="{stroke}" stroke-width="{width:.2}" stroke-linejoin="round"/>"#
+                );
+                let left = vertices.iter().map(|p| p.0).fold(f64::INFINITY, f64::min);
+                let top = vertices.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
+                let right = vertices
+                    .iter()
+                    .map(|p| p.0)
+                    .fold(f64::NEG_INFINITY, f64::max);
+                let bottom = vertices
+                    .iter()
+                    .map(|p| p.1)
+                    .fold(f64::NEG_INFINITY, f64::max);
+                colors.paint_point(
+                    svg,
+                    i,
+                    None,
+                    if filled { "dataPoint" } else { "dataPointLine" },
+                    &fill,
+                    [left, top, right - left, bottom - top],
+                    &body,
+                );
                 if let Some(width) = bevel.filter(|_| !gap && fill != "none") {
                     shaded_edges(svg, &vertices, (cx, cy), width);
                 }
@@ -644,6 +667,9 @@ impl Plot<'_> {
         }
         if let Some(grid) = foreground_grid {
             svg.push_str(&grid);
+        }
+        if let Some(axes) = foreground_axes {
+            svg.push_str(&axes);
         }
     }
 
@@ -959,11 +985,16 @@ pub(super) fn render(
     let legacy = colors.legacy_defaults();
     let title_font = font_size(
         title_props,
-        if legacy || colors.spreadsheet_defaults {
-            24.
-        } else {
-            font
-        },
+        super::chart_svg::title_size_default(
+            colors,
+            root,
+            font,
+            if legacy || colors.spreadsheet_defaults {
+                24.
+            } else {
+                font
+            },
+        ),
     );
     let title_text = data.title.as_deref().or_else(|| {
         title.and_then(|_| (!on(val(Some(chart), "autoTitleDeleted"))).then_some("Chart Title"))
@@ -1187,8 +1218,12 @@ pub(super) fn render(
         let shortened = elide(label, title_font, (width - inset * 2.) * 0.78);
         let ink = text_ink(title_props, colors);
         begin_ink(&mut svg, &ink);
-        let weight = title_props.and_then(|p| p.attribute("b"));
-        if !explicitly_false(weight) {
+        let automatic_font =
+            colors.spreadsheet_defaults && super::chart_svg::title_uses_automatic_font(root);
+        let bold = title_props
+            .and_then(|p| p.attribute("b"))
+            .map_or(!automatic_font, |v| !explicitly_false(Some(v)));
+        if bold {
             svg.push_str(r#"<g font-weight="bold">"#);
         }
         text(
@@ -1202,10 +1237,17 @@ pub(super) fn render(
             10.6 + title_font * 0.92,
             "middle",
             title_font,
-            &font_family(title_props, minor_latin.unwrap_or("Cambria")),
+            &font_family(
+                title_props,
+                if automatic_font {
+                    "Arial"
+                } else {
+                    minor_latin.unwrap_or("Cambria")
+                },
+            ),
             &shortened,
         );
-        if !explicitly_false(weight) {
+        if bold {
             svg.push_str("</g>");
         }
         end_ink(&mut svg, &ink);
@@ -1284,14 +1326,21 @@ pub(super) fn render(
             }
             colors.begin_hit(&mut svg, "legendEntry", i, None);
             if filled {
-                write!(
-                    svg,
-                    r#"<rect x="{x:.2}" y="{:.2}" width="{key:.2}" height="{key:.2}" fill="{}"/>"#,
-                    y - key / 2.,
-                    colors.fill(i, None)
-                )
-                .unwrap();
-                if let Some(bevel) = bevel_width(spec.series[i], style) {
+                let fill = colors.fill(i, None);
+                let body = format!(
+                    r#"<rect x="{x:.2}" y="{:.2}" width="{key:.2}" height="{key:.2}" fill="{fill}"/>"#,
+                    y - key / 2.
+                );
+                colors.paint_point(
+                    &mut svg,
+                    i,
+                    None,
+                    "dataPoint",
+                    &fill,
+                    [x, y - key / 2., key, key],
+                    &body,
+                );
+                if let Some(bevel) = bevel_width(spec.series[i]) {
                     let top = y - key / 2.;
                     shaded_edges(
                         &mut svg,

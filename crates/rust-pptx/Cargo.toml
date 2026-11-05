@@ -1,6 +1,6 @@
 [package]
 name = "rust-pptx"
-version = "0.1.0"
+version = "0.1.1"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -13,7 +13,7 @@ categories = ["parser-implementations"]
 name = "rust_pptx"
 
 [dependencies]
-rust-office-charts = { version = "0.1.0", path = "../rust-office-charts", default-features = false }
+rust-office-charts = { version = "=0.1.3", path = "../rust-office-charts", default-features = false }
 cfb.workspace = true
 flate2.workspace = true
 quick-xml.workspace = true

@@ -152,7 +152,7 @@ fn draw_ring(out: &mut String, ring: &[(f64, f64)], transform: &Transform) {
 }
 
 fn credit_text(out: &mut String, face: &str, x: f64, y: f64, label: &str) {
-    let family = escape_xml_text(face);
+    let family = crate::parse::chart_svg::font_family(None, face);
     write!(
         out,
         r##"<text x="{x:.2}" y="{y:.2}" text-anchor="end" fill="#595959" font-size="8" "##
@@ -209,15 +209,11 @@ pub(super) fn render(ctx: &Canvas, face: &str, out: &mut String) -> Option<()> {
         bottom: ctx.height - if bottom_title { 34. } else { 7.2 },
     };
     let mut legend = String::new();
-    legend::render(
-        ctx,
-        &scale.key,
-        series.name.as_deref().unwrap_or_default(),
-        format,
-        face,
-        &mut plot,
-        &mut legend,
-    );
+    let name = series
+        .name
+        .clone()
+        .unwrap_or_else(|| format!("Series{}", ctx.source_indices[0] + 1));
+    legend::render(ctx, &scale.key, &name, format, face, &mut plot, &mut legend);
     let Some(mut cache) = cache else {
         #[cfg(feature = "map-fallback")]
         if ctx.colors.spreadsheet_defaults {

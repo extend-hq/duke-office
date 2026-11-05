@@ -3,6 +3,8 @@ use crate::chart::child;
 use roxmltree::Node;
 use std::fmt::Write;
 
+mod number_format;
+
 pub(super) fn val<'a>(node: Option<Node<'a, 'a>>, name: &str) -> Option<&'a str> {
     child(node?, name)?.attribute("val")
 }
@@ -33,16 +35,59 @@ pub(super) fn font_size(props: Option<Node>, default: f64) -> f64 {
         .unwrap_or(default)
 }
 
+fn title_paragraph<'a>(root: Node<'a, 'a>) -> Option<Node<'a, 'a>> {
+    child(root, "chart")
+        .and_then(|n| child(n, "title"))
+        .and_then(|n| child(n, "tx"))
+        .and_then(|n| child(n, "rich"))
+        .and_then(|n| n.children().find(|p| p.tag_name().name() == "p"))
+}
+
+pub(super) fn title_uses_automatic_font(root: Node) -> bool {
+    super::chart_colors::classic_style_id(root).is_none()
+        && !title_paragraph(root)
+            .is_some_and(|n| n.children().any(|p| p.tag_name().name() == "pPr"))
+}
+
+pub(super) fn title_size_default(
+    colors: &super::chart_colors::ChartColors,
+    root: Node,
+    inherited: f64,
+    fallback: f64,
+) -> f64 {
+    if !colors.spreadsheet_defaults {
+        return fallback;
+    }
+    #[cfg(feature = "extended-charts")]
+    if let Some(size) = colors.style_font_size("title") {
+        return size;
+    }
+    let implicit_paragraph =
+        title_paragraph(root).is_some_and(|n| !n.children().any(|p| p.tag_name().name() == "pPr"));
+    if implicit_paragraph
+        || super::chart_colors::classic_style_id(root).is_some_and(|style| style >= 101)
+    {
+        fallback
+    } else {
+        inherited
+    }
+}
+
 pub(super) fn font_family(props: Option<Node>, default: &str) -> String {
     let name = props
         .and_then(|p| p.children().find(|n| n.tag_name().name() == "latin"))
         .and_then(|n| n.attribute("typeface"))
         .filter(|s| !s.starts_with('+') && !s.is_empty())
         .unwrap_or(default);
-    let fallback = if matches!(name, "Cambria" | "Times New Roman" | "Georgia") {
-        "serif"
-    } else {
-        "sans-serif"
+    let fallback = match name.to_ascii_lowercase().as_str() {
+        "calibri" | "carlito" => "Carlito, sans-serif",
+        "arial" | "arimo" => "Arimo, sans-serif",
+        "times new roman" | "tinos" => "Tinos, serif",
+        "courier new" | "cousine" => "Cousine, monospace",
+        "aptos" | "intos" => "Intos, sans-serif",
+        "aptos narrow" | "intos narrow" => "Intos Narrow, sans-serif",
+        "cambria" | "georgia" => "serif",
+        _ => "sans-serif",
     };
     format!("{}, {fallback}", escape_xml_text(name))
 }
@@ -66,8 +111,22 @@ pub(super) fn title_position(
     )
 }
 
-pub(super) fn title_lines(label: &str, size: f64, width: f64) -> Vec<String> {
-    if text_width(label, size) <= width {
+pub(super) fn title_lines(label: &str, size: f64, width: f64, family: &str) -> Vec<String> {
+    title_lines_styled(label, size, width, family, false)
+}
+
+pub(super) fn title_lines_styled(
+    label: &str,
+    size: f64,
+    width: f64,
+    family: &str,
+    bold: bool,
+) -> Vec<String> {
+    let measure = |text: &str| {
+        super::font_metrics::width(text, size, family, bold, false)
+            .unwrap_or_else(|| text_width(text, size))
+    };
+    if measure(label) <= width {
         return vec![label.to_owned()];
     }
     let mut lines = Vec::new();
@@ -78,7 +137,7 @@ pub(super) fn title_lines(label: &str, size: f64, width: f64) -> Vec<String> {
         } else {
             format!("{line} {word}")
         };
-        if !line.is_empty() && text_width(&next, size) > width {
+        if !line.is_empty() && measure(&next) > width {
             lines.push(line);
             line = word.to_owned();
         } else {
@@ -89,6 +148,10 @@ pub(super) fn title_lines(label: &str, size: f64, width: f64) -> Vec<String> {
         lines.push(line);
     }
     lines
+}
+
+pub(super) fn text_width_for(s: &str, size: f64, family: &str) -> f64 {
+    super::font_metrics::width(s, size, family, false, false).unwrap_or_else(|| text_width(s, size))
 }
 
 pub(super) fn text_width(s: &str, size: f64) -> f64 {
@@ -167,51 +230,7 @@ pub(super) fn marker(
 }
 
 pub(super) fn format_value(value: f64, code: Option<&str>) -> String {
-    let code = code.unwrap_or("General");
-    if code == "General" || code.is_empty() {
-        return value.to_string();
-    }
-    let (integer, fraction) = code.split_once('.').unwrap_or((code, ""));
-    if integer == "#,##0" && fraction.len() <= 12 && fraction.bytes().all(|c| c == b'0') {
-        let precision = fraction.len();
-        // Chart labels round decimal midpoints away from zero.
-        let midpoint = value
-            .to_string()
-            .split_once('.')
-            .is_some_and(|(_, digits)| digits.len() == precision + 1 && digits.ends_with('5'));
-        let rounded = if midpoint {
-            let scale = 10_f64.powi(precision as i32);
-            ((value.abs() * scale).floor() + 1.).copysign(value) / scale
-        } else {
-            value
-        };
-        let mut label = format!("{rounded:.precision$}");
-        let digits_start = usize::from(label.starts_with('-'));
-        let mut end = label.find('.').unwrap_or(label.len());
-        while end > digits_start + 3 {
-            end -= 3;
-            label.insert(end, ',');
-        }
-        return label;
-    }
-    let decimals = code.split_once('.').map_or(0, |(_, frac)| {
-        frac.chars().take_while(|c| *c == '0').count().min(12)
-    });
-    if code.to_ascii_uppercase().contains("E+") {
-        let scientific = format!("{value:.decimals$E}");
-        if let Some((mantissa, exp)) = scientific.split_once('E') {
-            if let Ok(exp) = exp.parse::<i32>() {
-                return format!("{mantissa}E{exp:+03}");
-            }
-        }
-    }
-    if code.contains('%') {
-        return format!("{:.decimals$}%", value * 100.);
-    }
-    if code.contains('0') && code.chars().all(|c| matches!(c, '0' | '.')) {
-        return format!("{value:.decimals$}");
-    }
-    value.to_string()
+    number_format::format(value, code).unwrap_or_else(|| value.to_string())
 }
 
 pub(super) fn date_label(serial: f64, epoch_1904: bool, code: &str) -> Option<String> {

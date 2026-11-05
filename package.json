@@ -1,9 +1,9 @@
 {
   "name": "@extend-ai/rust-office-charts",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Render Office Open XML charts to SVG with WebAssembly",
   "type": "module",
-  "license": "MIT",
+  "license": "MIT AND OFL-1.1",
   "repository": {
     "type": "git",
     "url": "https://github.com/extend-hq/rust-office.git"
@@ -46,7 +46,8 @@
     "browser/generated/*.wasm",
     "browser/generated/*.js",
     "LICENSE",
-    "MAP-DATA-LICENSE"
+    "MAP-DATA-LICENSE",
+    "FONT-DATA-LICENSE"
   ],
   "scripts": {
     "build:browser": "node browser/build.mjs",

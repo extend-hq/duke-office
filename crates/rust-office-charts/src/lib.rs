@@ -20,6 +20,8 @@ pub struct RenderOptions<'a> {
     pub theme_override_xml: Option<&'a str>,
     pub style_xml: Option<&'a str>,
     pub color_style_xml: Option<&'a str>,
+    /// Embedded raster data URLs keyed by relationship ID within the chart part.
+    pub images: Option<&'a HashMap<String, String>>,
     pub legacy_defaults: bool,
     /// Apply spreadsheet host defaults for omitted chart properties.
     pub spreadsheet_defaults: bool,

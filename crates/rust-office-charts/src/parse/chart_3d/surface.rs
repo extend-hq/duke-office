@@ -284,7 +284,7 @@ fn paint(scene: &Scene, corners: [Vertex; 3], bands: &[Band], wire: bool, out: &
                 }
             }
         } else {
-            let projected: Vec<_> = points.into_iter().map(|v| v.project(scene)).collect();
+            let projected: Vec<_> = points.iter().map(|v| v.project(scene)).collect();
             polygon(
                 out,
                 &projected,
@@ -295,8 +295,21 @@ fn paint(scene: &Scene, corners: [Vertex; 3], bands: &[Band], wire: bool, out: &
                 } else {
                     lit_color(&band.fill, diffuse, specular)
                 },
-                band.stroke.as_deref().unwrap_or("none"),
+                if scene.spreadsheet {
+                    "none"
+                } else {
+                    band.stroke.as_deref().unwrap_or("none")
+                },
             );
+            if let Some(stroke) = band.stroke.as_deref().filter(|_| scene.spreadsheet) {
+                for (&a, &b) in points.iter().zip(points.iter().cycle().skip(1)) {
+                    let grid_edge = a.x == b.x || a.z == b.z;
+                    let isoline = a.value == band.ceiling && b.value == band.ceiling;
+                    if grid_edge || isoline {
+                        stroke_line(out, a.project(scene), b.project(scene), stroke);
+                    }
+                }
+            }
         }
     }
 }
@@ -333,9 +346,14 @@ fn paint_samples(
 ) {
     let vertices = samples.map(|s| s.vertex);
     paint(scene, vertices, bands, wire, out);
+    hit_samples(scene, samples, colors, out);
+}
+
+fn hit_samples(scene: &Scene, samples: [Sample; 3], colors: &ChartColors, out: &mut String) {
     if !colors.interactive {
         return;
     }
+    let vertices = samples.map(|s| s.vertex);
     let visible: Vec<_> = clip(&clip(&vertices, scene.low, true), scene.high, false)
         .into_iter()
         .map(|v| v.project(scene))
@@ -381,13 +399,32 @@ pub(super) fn draw(
     let count = ((scene.high - scene.low) / scene.step)
         .ceil()
         .clamp(1., 256.) as usize;
+    let series_properties = child(group, "ser").and_then(|s| child(s, "spPr"));
+    let automatic_outline = scene.spreadsheet
+        && group
+            .ancestors()
+            .find(|n| chart_node(*n, "chartSpace"))
+            .is_some_and(|root| matches!(classic_style(root) % 100, 35..=40));
     let bands: Vec<_> = (0..count)
         .map(|band| Band {
             floor: scene.low + band as f64 * scene.step,
             ceiling: scene.low + (band + 1) as f64 * scene.step,
             fill: band_color(group, colors, band, count),
             flat: scene.spreadsheet && band_flat(group, band),
-            stroke: band_format(group, band).and_then(|sp| colors.shape_stroke(sp)),
+            stroke: band_format(group, band)
+                .and_then(|sp| colors.shape_stroke(sp))
+                .or_else(|| {
+                    scene.spreadsheet.then(|| {
+                        let sp = series_properties?;
+                        let line = sp.children().find(|n| n.tag_name().name() == "ln")?;
+                        colors.shape_stroke(sp).or_else(|| {
+                            line.attribute("w")
+                                .is_some()
+                                .then(|| colors.line_at(0, None))
+                        })
+                    })?
+                })
+                .or_else(|| automatic_outline.then(|| colors.line_at(0, None))),
         })
         .collect();
     let wire = child(group, "wireframe")
@@ -395,6 +432,11 @@ pub(super) fn draw(
     let back_first = scene.rot_y.to_radians().cos() >= 0.;
     let right_first = scene.rot_y.to_radians().sin() < 0.;
     let depth = (data.series.len() - 1) as f64;
+    let between = scene.spreadsheet
+        && val(
+            group.parent().and_then(|plot| child(plot, "valAx")),
+            "crossBetween",
+        ) == Some("between");
     for n in 0..data.series.len() - 1 {
         let row = if back_first {
             data.series.len() - 2 - n
@@ -425,7 +467,11 @@ pub(super) fn draw(
                 if let Some(value) = value {
                     corners.push(Sample {
                         vertex: Vertex {
-                            x: f64::from(index) / f64::from(extent),
+                            x: if between {
+                                (f64::from(index) + 0.5) / (f64::from(extent) + 1.)
+                            } else {
+                                f64::from(index) / f64::from(extent)
+                            },
                             z: (row + side) as f64 / depth,
                             value,
                         },

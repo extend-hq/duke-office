@@ -25,6 +25,7 @@ export interface RenderOptions {
   themeOverrideXml?: string;
   styleXml?: string;
   colorStyleXml?: string;
+  images?: Readonly<Record<string, string>>;
   legacyDefaults?: boolean;
   spreadsheetDefaults?: boolean;
   interactive?: boolean;

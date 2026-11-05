@@ -1,0 +1,63 @@
+@font-face {
+  font-family: "Times New Roman";
+  src: local("Times New Roman"), url("./fonts/tinos/Tinos-Regular.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Tinos";
+  src: url("./fonts/tinos/Tinos-Regular.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Times New Roman";
+  src: local("Times New Roman Bold"), url("./fonts/tinos/Tinos-Bold.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Tinos";
+  src: url("./fonts/tinos/Tinos-Bold.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Times New Roman";
+  src: local("Times New Roman Italic"), url("./fonts/tinos/Tinos-Italic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Tinos";
+  src: url("./fonts/tinos/Tinos-Italic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Times New Roman";
+  src: local("Times New Roman Bold Italic"), url("./fonts/tinos/Tinos-BoldItalic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Tinos";
+  src: url("./fonts/tinos/Tinos-BoldItalic.woff2") format("woff2");
+  font-style: italic;
+  font-weight: 700;
+  font-display: swap;
+}
