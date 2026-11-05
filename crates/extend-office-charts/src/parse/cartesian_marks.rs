@@ -314,7 +314,164 @@ fn area(svg: &mut String, part: &[Sample], ordinal: usize, colors: &ChartColors,
     for (x, y) in coords {
         write!(svg, "L{x:.2} {y:.2}").unwrap();
     }
-    svg.push_str("Z\"/>");
+    svg.push_str("Z\"");
+    colors.hit_attrs(svg, "area", ordinal, None);
+    svg.push_str("/>");
+}
+
+fn up_down_paint(group: Node, colors: &ChartColors, up: bool) -> (String, String) {
+    let root = group.ancestors().find(|n| chart_node(*n, "chartSpace"));
+    let style = root
+        .and_then(super::super::chart_colors::classic_style_id)
+        .unwrap_or(2)
+        % 100;
+    let variant = (style - 1) % 8;
+    let accent = format!("accent{}", variant.saturating_sub(1));
+    let fill = if up && ((33..=40).contains(&style) || style == 42) {
+        colors.theme_paint("bg1", None)
+    } else if variant < 2 {
+        let tint = if style == 42 {
+            None
+        } else {
+            Some(match (variant, up) {
+                (0, false) => 0.85,
+                (0, true) => 0.25,
+                (_, false) => 0.95,
+                (_, true) => 0.05,
+            })
+        };
+        colors.theme_paint("tx1", tint)
+    } else if up {
+        colors.theme_paint(&accent, Some(0.25))
+    } else {
+        colors.theme_shade(&accent, 0.25)
+    };
+    let stroke = match style {
+        1..=16 => colors.theme_paint("dk1", None),
+        33..=34 => colors.theme_paint("tx1", None),
+        35..=40 => colors.theme_shade(&accent, 0.25),
+        _ => "none".into(),
+    };
+    (fill, stroke)
+}
+
+fn line_adornments(
+    svg: &mut String,
+    group: Node,
+    series: &[ChartSeries],
+    colors: &ChartColors,
+    coords: &Coords,
+) {
+    let drop_lines = child(group, "dropLines");
+    let high_low_lines = child(group, "hiLowLines");
+    let up_down_bars = child(group, "upDownBars");
+    if drop_lines.is_none() && high_low_lines.is_none() && up_down_bars.is_none() {
+        return;
+    }
+    if colors.interactive {
+        svg.push_str(r#"<g pointer-events="none">"#);
+    }
+    struct Span {
+        low: f64,
+        high: f64,
+        first: Option<f64>,
+        last: Option<f64>,
+    }
+    let mut points = BTreeMap::new();
+    for (ordinal, serie) in series.iter().enumerate() {
+        for point in &serie.points {
+            let Some(value) = number(point.value.as_deref()) else {
+                continue;
+            };
+            let span = points.entry(point.index).or_insert(Span {
+                low: value,
+                high: value,
+                first: None,
+                last: None,
+            });
+            span.low = span.low.min(value);
+            span.high = span.high.max(value);
+            if ordinal == 0 {
+                span.first = Some(value)
+            }
+            if ordinal + 1 == series.len() {
+                span.last = Some(value)
+            }
+        }
+    }
+    let category_axis = group.parent().and_then(|plot| {
+        plot.children().find(|n| {
+            (chart_node(*n, "catAx") || chart_node(*n, "dateAx"))
+                && group
+                    .children()
+                    .any(|id| chart_node(id, "axId") && id.attribute("val") == val(*n, "axId"))
+        })
+    });
+    let crossing = category_axis
+        .and_then(|axis| number(val(axis, "crossesAt")))
+        .unwrap_or_else(
+            || match category_axis.and_then(|axis| val(axis, "crosses")) {
+                Some("max") => coords.values.original(coords.values.high),
+                Some("min") => coords.values.original(coords.values.low),
+                _ => 0.,
+            },
+        );
+    let baseline = coords.clamp_value(crossing);
+    for (node, to_axis) in [(drop_lines, true), (high_low_lines, false)] {
+        let Some(node) = node else { continue };
+        let stroke = child(node, "spPr")
+            .and_then(|p| colors.shape_stroke(p))
+            .unwrap_or_else(|| colors.theme_paint("tx1", Some(0.75)));
+        let width = stroke_width(node, 2. / 3.);
+        for (&index, span) in &points {
+            let (low, high) = (span.low, span.high);
+            let a = coords.point(
+                f64::from(index),
+                if to_axis { high.max(baseline) } else { high },
+            );
+            let b = coords.point(
+                f64::from(index),
+                if to_axis { low.min(baseline) } else { low },
+            );
+            write!(svg, r#"<path d="M{:.2} {:.2}L{:.2} {:.2}" stroke="{stroke}" stroke-width="{width:.2}" fill="none"/>"#, a.0, a.1, b.0, b.1).unwrap();
+        }
+    }
+    let Some(bars) = up_down_bars.filter(|_| series.len() >= 2) else {
+        if colors.interactive {
+            svg.push_str("</g>");
+        }
+        return;
+    };
+    let gap = number(val(bars, "gapWidth"))
+        .unwrap_or(150.)
+        .clamp(0., 500.)
+        / 100.;
+    let width = coords.slot_width() / (1. + gap);
+    for (&index, span) in &points {
+        let (Some(first), Some(last)) = (span.first, span.last) else {
+            continue;
+        };
+        if first == last {
+            continue;
+        }
+        let up = last > first;
+        let node = child(bars, if up { "upBars" } else { "downBars" });
+        let props = node.and_then(|n| child(n, "spPr"));
+        let (default_fill, default_stroke) = up_down_paint(group, colors, up);
+        let fill = props
+            .and_then(|p| colors.shape_fill(p))
+            .unwrap_or(default_fill);
+        let stroke = props
+            .and_then(|p| colors.shape_stroke(p))
+            .unwrap_or(default_stroke);
+        let stroke_width = node.map_or(2. / 3., |n| stroke_width(n, 2. / 3.));
+        let a = coords.point(f64::from(index), first);
+        let b = coords.point(f64::from(index), last);
+        write!(svg, r#"<rect x="{:.2}" y="{:.2}" width="{width:.2}" height="{:.2}" fill="{fill}" stroke="{stroke}" stroke-width="{stroke_width:.2}"/>"#, a.0 - width/2., a.1.min(b.1), (b.1-a.1).abs()).unwrap();
+    }
+    if colors.interactive {
+        svg.push_str("</g>");
+    }
 }
 
 pub(super) fn draw(
@@ -350,6 +507,7 @@ pub(super) fn draw(
     let mut stacks = Stacks::new(series, percent);
     let scatter_style = val(group, "scatterStyle").unwrap_or("marker");
     let zero = blanks == "zero";
+    let mut area_anchors = String::new();
     for (j, (serie, &node)) in series.iter().zip(&nodes).enumerate() {
         let ordinal = first_series + j;
         write!(svg, r#"<g data-docx-series="{ordinal}">"#).unwrap();
@@ -455,6 +613,14 @@ pub(super) fn draw(
             }
         }
         if is_area {
+            if colors.interactive {
+                for sample in segments.iter().flatten().filter(|p| p.has_value) {
+                    let (x, y) = sample.top;
+                    area_anchors.push_str("<circle");
+                    colors.hit_attrs(&mut area_anchors, "point", ordinal, Some(sample.index));
+                    write!(area_anchors, r#" data-chart-x="{x:.2}" data-chart-y="{y:.2}" cx="{x:.2}" cy="{y:.2}" r="4" fill="transparent"/>"#).unwrap();
+                }
+            }
             svg.push_str("</g>");
             continue;
         }
@@ -483,7 +649,14 @@ pub(super) fn draw(
                 let (x, y) = sample.top;
                 let kind = if symbol == "none" { "point" } else { "marker" };
                 write!(svg, r#"<g data-chart-kind="{kind}" data-chart-series="{ordinal}" data-chart-point="{}" data-chart-x="{x:.2}" data-chart-y="{y:.2}""#, sample.index).unwrap();
-                svg.push_str(if symbol == "none" { "/>" } else { ">" });
+                svg.push('>');
+                if symbol == "none" {
+                    write!(
+                        svg,
+                        r#"<circle cx="{x:.2}" cy="{y:.2}" r="4" fill="transparent"/></g>"#
+                    )
+                    .unwrap();
+                }
             }
             if symbol == "none" {
                 continue;
@@ -513,6 +686,10 @@ pub(super) fn draw(
             }
         }
         svg.push_str("</g>");
+    }
+    svg.push_str(&area_anchors);
+    if colors.spreadsheet_defaults && chart_node(group, "lineChart") && !stacked {
+        line_adornments(svg, group, series, colors, coords);
     }
 }
 

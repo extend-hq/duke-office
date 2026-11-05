@@ -7,6 +7,13 @@ struct Vertex {
     value: f64,
 }
 
+#[derive(Clone, Copy)]
+struct Sample {
+    vertex: Vertex,
+    series: usize,
+    index: u32,
+}
+
 impl Vertex {
     fn crossing(self, end: Self, level: f64) -> Self {
         let t = (level - self.value) / (end.value - self.value);
@@ -57,10 +64,61 @@ fn band_format<'a>(group: Node<'a, 'a>, band: usize) -> Option<Node<'a, 'a>> {
     })
 }
 
+fn band_flat(group: Node, band: usize) -> bool {
+    let material = |sp: Node| {
+        sp.children()
+            .find(|n| n.tag_name().name() == "sp3d")
+            .and_then(|n| n.attribute("prstMaterial"))
+            .map(|m| m == "flat")
+    };
+    band_format(group, band)
+        .and_then(material)
+        .or_else(|| {
+            child(group, "ser")
+                .and_then(|series| child(series, "spPr"))
+                .and_then(material)
+        })
+        .unwrap_or(false)
+}
+
 pub(super) fn band_color(group: Node, colors: &ChartColors, band: usize, count: usize) -> String {
     band_format(group, band)
-        .and_then(|sp| colors.shape_fill(sp))
-        .unwrap_or_else(|| colors.palette(band, count.saturating_sub(1)))
+        .and_then(|sp| {
+            if colors.spreadsheet_defaults {
+                if let Some(stop) = sp
+                    .children()
+                    .find(|n| n.tag_name().name() == "gradFill")
+                    .into_iter()
+                    .flat_map(|n| n.descendants())
+                    .filter(|n| n.tag_name().name() == "gs")
+                    .min_by_key(|n| {
+                        n.attribute("pos")
+                            .and_then(|p| p.parse::<i64>().ok())
+                            .unwrap_or(0)
+                            .abs_diff(50_000)
+                    })
+                {
+                    return colors.solid_color(stop);
+                }
+            }
+            colors.shape_fill(sp)
+        })
+        .or_else(|| {
+            colors
+                .spreadsheet_defaults
+                .then(|| colors.explicit_fill(0, None).map(str::to_owned))
+                .flatten()
+        })
+        .unwrap_or_else(|| {
+            colors.palette(
+                band,
+                if colors.spreadsheet_defaults {
+                    count
+                } else {
+                    count.saturating_sub(1)
+                },
+            )
+        })
 }
 
 fn unit(v: [f64; 3]) -> [f64; 3] {
@@ -85,6 +143,36 @@ fn lighting(scene: &Scene, corners: &[Vertex; 3]) -> (f64, f64) {
     ]);
     if normal[1] < 0. {
         normal = normal.map(|a| -a);
+    }
+    if scene.spreadsheet {
+        let (sx, cx) = if scene.shear {
+            (0., 1.)
+        } else {
+            scene.rot_x.to_radians().sin_cos()
+        };
+        let (sy, cy) = if scene.shear {
+            (0., 1.)
+        } else {
+            scene.rot_y.to_radians().sin_cos()
+        };
+        let [nx, ny, nz] = [-normal[0], normal[1], normal[2]];
+        let mut n = [
+            -cy * nx + sy * nz,
+            sy * sx * nx + cx * ny + cy * sx * nz,
+            sy * cx * nx - sx * ny + cy * cx * nz,
+        ];
+        let facing = if scene.shear {
+            n[2] - n[0] * scene.rot_y.to_radians().sin() - n[1] * scene.rot_x.to_radians().sin()
+        } else {
+            n[2]
+        };
+        if facing > 0. {
+            n = n.map(|v| -v);
+        }
+        return (
+            0.4 + 0.75 * ((n[0] + n[1] - n[2]) / 3_f64.sqrt()).clamp(0., 1.),
+            0.,
+        );
     }
     let (sx, cx) = scene.rot_x.to_radians().sin_cos();
     let (sy, cy) = scene.rot_y.to_radians().sin_cos();
@@ -134,10 +222,34 @@ fn lit_color(color: &str, diffuse: f64, specular: f64) -> String {
     format!("#{:02x}{:02x}{:02x}{}", rgb[0], rgb[1], rgb[2], &hex[6..])
 }
 
+pub(super) fn matte_color(color: &str, intensity: f64) -> String {
+    let Some(hex) = color
+        .strip_prefix('#')
+        .filter(|s| matches!(s.len(), 6 | 8) && s.is_ascii())
+    else {
+        return color.into();
+    };
+    let mut out = String::from("#");
+    for i in [0, 2, 4] {
+        let Ok(c) = u8::from_str_radix(&hex[i..i + 2], 16) else {
+            return color.into();
+        };
+        write!(
+            out,
+            "{:02x}",
+            (f64::from(c) * intensity).floor().clamp(0., 255.) as u8
+        )
+        .unwrap();
+    }
+    out.push_str(&hex[6..]);
+    out
+}
+
 struct Band {
     floor: f64,
     ceiling: f64,
     fill: String,
+    flat: bool,
     stroke: Option<String>,
 }
 
@@ -176,9 +288,73 @@ fn paint(scene: &Scene, corners: [Vertex; 3], bands: &[Band], wire: bool, out: &
             polygon(
                 out,
                 &projected,
-                &lit_color(&band.fill, diffuse, specular),
+                &if band.flat {
+                    band.fill.clone()
+                } else if scene.spreadsheet {
+                    matte_color(&band.fill, diffuse)
+                } else {
+                    lit_color(&band.fill, diffuse, specular)
+                },
                 band.stroke.as_deref().unwrap_or("none"),
             );
+        }
+    }
+}
+
+fn nearest_half(outline: &[Point], anchor: Point, other: Point) -> Vec<Point> {
+    let dx = other.x - anchor.x;
+    let dy = other.y - anchor.y;
+    let signed =
+        |p: Point| (p.x - (anchor.x + other.x) / 2.) * dx + (p.y - (anchor.y + other.y) / 2.) * dy;
+    let mut clipped = Vec::new();
+    for (&a, &b) in outline.iter().zip(outline.iter().cycle().skip(1)) {
+        let (da, db) = (signed(a), signed(b));
+        if da <= 0. {
+            clipped.push(a);
+        }
+        if (da <= 0.) != (db <= 0.) {
+            let t = da / (da - db);
+            clipped.push(Point {
+                x: a.x + t * (b.x - a.x),
+                y: a.y + t * (b.y - a.y),
+            });
+        }
+    }
+    clipped
+}
+
+fn paint_samples(
+    scene: &Scene,
+    samples: [Sample; 3],
+    bands: &[Band],
+    wire: bool,
+    colors: &ChartColors,
+    out: &mut String,
+) {
+    let vertices = samples.map(|s| s.vertex);
+    paint(scene, vertices, bands, wire, out);
+    if !colors.interactive {
+        return;
+    }
+    let visible: Vec<_> = clip(&clip(&vertices, scene.low, true), scene.high, false)
+        .into_iter()
+        .map(|v| v.project(scene))
+        .collect();
+    let anchors = vertices.map(|v| v.project(scene));
+    for (i, sample) in samples.iter().enumerate() {
+        let first = nearest_half(&visible, anchors[i], anchors[(i + 1) % 3]);
+        let hit = nearest_half(&first, anchors[i], anchors[(i + 2) % 3]);
+        if hit.len() >= 3 {
+            begin_point_hit(
+                out,
+                colors,
+                "surfacePoint",
+                sample.series,
+                sample.index,
+                anchors[i],
+            );
+            polygon(out, &hit, "transparent", "none");
+            colors.end_hit(out);
         }
     }
 }
@@ -210,6 +386,7 @@ pub(super) fn draw(
             floor: scene.low + band as f64 * scene.step,
             ceiling: scene.low + (band + 1) as f64 * scene.step,
             fill: band_color(group, colors, band, count),
+            flat: scene.spreadsheet && band_flat(group, band),
             stroke: band_format(group, band).and_then(|sp| colors.shape_stroke(sp)),
         })
         .collect();
@@ -246,28 +423,33 @@ pub(super) fn draw(
                     .and_then(|v| v.parse::<f64>().ok())
                     .filter(|v| v.is_finite());
                 if let Some(value) = value {
-                    corners.push(Vertex {
-                        x: f64::from(index) / f64::from(extent),
-                        z: (row + side) as f64 / depth,
-                        value,
+                    corners.push(Sample {
+                        vertex: Vertex {
+                            x: f64::from(index) / f64::from(extent),
+                            z: (row + side) as f64 / depth,
+                            value,
+                        },
+                        series: row + side,
+                        index,
                     });
                 }
             }
             match corners.as_slice() {
                 &[a, b, c, d] => {
-                    let mut triangles = if a.value + c.value >= b.value + d.value {
-                        [[a, b, c], [a, c, d]]
-                    } else {
-                        [[a, b, d], [b, c, d]]
-                    };
+                    let mut triangles =
+                        if a.vertex.value + c.vertex.value >= b.vertex.value + d.vertex.value {
+                            [[a, b, c], [a, c, d]]
+                        } else {
+                            [[a, b, d], [b, c, d]]
+                        };
                     if back_first {
                         triangles.swap(0, 1);
                     }
                     for t in triangles {
-                        paint(scene, t, &bands, wire, out)
+                        paint_samples(scene, t, &bands, wire, colors, out)
                     }
                 }
-                &[a, b, c] => paint(scene, [a, b, c], &bands, wire, out),
+                &[a, b, c] => paint_samples(scene, [a, b, c], &bands, wire, colors, out),
                 _ => {}
             }
         }

@@ -7,9 +7,12 @@ use std::fmt::Write;
 mod box_plot;
 mod drawing;
 mod flow;
+mod fonts;
 mod geo_cache;
 mod hierarchy;
 mod histogram;
+#[cfg(feature = "map-fallback")]
+mod map_atlas;
 mod map_projection;
 mod region_map;
 
@@ -33,6 +36,7 @@ struct Canvas<'a, 'input> {
     series_nodes: Vec<Node<'a, 'input>>,
     palette: Vec<PaletteEntry>,
     colors: &'a ChartColors,
+    fonts: Option<fonts::Fonts>,
 }
 
 impl<'a, 'input> Canvas<'a, 'input> {
@@ -60,7 +64,8 @@ impl<'a, 'input> Canvas<'a, 'input> {
     fn plot_background(&self, out: &mut String, left: f64, top: f64, right: f64, bottom: f64) {
         let props = cx_child(self.root, "chart")
             .and_then(|chart| cx_child(chart, "plotArea"))
-            .and_then(|plot| cx_child(plot, "spPr"));
+            .and_then(|plot| cx_child(plot, "spPr"))
+            .filter(|_| !self.colors.spreadsheet_defaults);
         let fill = props
             .and_then(|p| self.colors.shape_fill(p))
             .or_else(|| self.colors.style_fill("plotArea", "none"));
@@ -91,7 +96,7 @@ pub(super) fn render(
     colors: &ChartColors,
     width: f64,
     height: f64,
-    minor_font: Option<&str>,
+    options: &crate::RenderOptions,
 ) -> Option<String> {
     if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
         return None;
@@ -129,8 +134,13 @@ pub(super) fn render(
     ) {
         return None;
     }
+    let fonts = fonts::Fonts::new(root, options);
+    let family = fonts.as_ref().map_or_else(
+        || "Calibri, Carlito, Arial, sans-serif".into(),
+        |fonts| super::chart_svg::font_family(None, fonts.resolve(None)),
+    );
     let mut svg = format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" font-family="Calibri, Carlito, Arial, sans-serif">"#
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}" font-family="{family}">"#
     );
     let props = cx_child(root, "spPr");
     let background = props
@@ -146,8 +156,24 @@ pub(super) fn render(
         r#"<rect width="{width}" height="{height}" fill="{background}" stroke="{border}"/>"#
     )
     .unwrap();
-    let map_font = (kind == "regionMap").then_some(minor_font.unwrap_or("Cambria"));
-    let title_bottom = render_title(&mut svg, chart, data, colors, width, height, map_font);
+    let map_font = (kind == "regionMap").then(|| {
+        fonts
+            .as_ref()
+            .map_or(options.font_family.unwrap_or("Cambria"), |fonts| {
+                fonts.resolve(None)
+            })
+            .to_owned()
+    });
+    let title_bottom = render_title(
+        &mut svg,
+        chart,
+        data,
+        colors,
+        width,
+        height,
+        map_font.as_deref(),
+        fonts.as_ref(),
+    );
     let data = VisibleData {
         title: data.title.as_deref(),
         series: source_indices
@@ -180,6 +206,8 @@ pub(super) fn render(
                         .filter(|p| p.categories.iter().any(|c| c.level == top_level))
                         .count(),
                 );
+            } else if colors.spreadsheet_defaults {
+                palette_size = palette_size.max(series.points.len());
             }
         }
     }
@@ -218,13 +246,14 @@ pub(super) fn render(
         series_nodes,
         palette,
         colors,
+        fonts,
     };
     match kind {
         "treemap" | "sunburst" => hierarchy::render(&ctx, &mut svg),
         "waterfall" | "funnel" => flow::render(&ctx, &mut svg),
         "clusteredColumn" => histogram::render(&ctx, &mut svg),
         "boxWhisker" => box_plot::render(&ctx, &mut svg),
-        "regionMap" => region_map::render(&ctx, map_font?, &mut svg),
+        "regionMap" => region_map::render(&ctx, map_font.as_deref()?, &mut svg),
         _ => return None,
     }?;
     svg.push_str("</svg>");
@@ -239,9 +268,15 @@ fn render_title(
     width: f64,
     height: f64,
     map_font: Option<&str>,
+    fonts: Option<&fonts::Fonts>,
 ) -> f64 {
     let inset = if map_font.is_some() { 7. } else { 8. };
-    let Some((title, value)) = cx_child(chart, "title").zip(data.title.as_deref()) else {
+    let title = cx_child(chart, "title");
+    let value = data.title.as_deref().or_else(|| {
+        (colors.spreadsheet_defaults && title.is_some_and(|n| cx_child(n, "tx").is_none()))
+            .then_some("Chart Title")
+    });
+    let Some((title, value)) = title.zip(value) else {
         return inset;
     };
     let properties = title
@@ -260,21 +295,26 @@ fn render_title(
         .find_map(|n| colors.shape_fill(n))
         .or_else(|| colors.style_text("title", "#595959"))
         .unwrap_or_else(|| "#595959".into());
-    let font = properties
-        .clone()
-        .find_map(|n| {
-            n.children()
-                .find(|e| e.tag_name().name() == "latin")?
-                .attribute("typeface")
-        })
-        .filter(|font| !font.starts_with('+'))
-        .unwrap_or(map_font.unwrap_or("Calibri"));
-    let fallback =
-        if map_font.is_some() && matches!(font, "Cambria" | "Georgia" | "Times New Roman") {
-            "Georgia, Times New Roman, serif"
-        } else {
-            "Carlito, Arial, sans-serif"
-        };
+    let typeface = properties.clone().find_map(|n| {
+        n.children()
+            .find(|e| e.tag_name().name() == "latin")?
+            .attribute("typeface")
+    });
+    let font = fonts.map_or_else(
+        || {
+            typeface
+                .filter(|font| !font.starts_with('+'))
+                .unwrap_or(map_font.unwrap_or("Calibri"))
+        },
+        |fonts| fonts.resolve(typeface),
+    );
+    let fallback = if (map_font.is_some() || fonts.is_some())
+        && matches!(font, "Cambria" | "Georgia" | "Times New Roman")
+    {
+        "Georgia, Times New Roman, serif"
+    } else {
+        "Carlito, Arial, sans-serif"
+    };
     let bold = properties
         .clone()
         .any(|n| matches!(n.attribute("b"), Some("1" | "true")));

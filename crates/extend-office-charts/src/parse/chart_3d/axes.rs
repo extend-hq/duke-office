@@ -37,15 +37,22 @@ fn category(p: &ChartPoint) -> String {
         .map_or_else(|| (u64::from(p.index) + 1).to_string(), |c| c.label.clone())
 }
 
-fn rotated(axis: Node, longest: f64, space: f64) -> f64 {
+fn rotated(axis: Node, longest: f64, space: f64, spreadsheet: bool) -> f64 {
     let explicit = child(axis, "txPr")
         .and_then(|p| p.children().find(|c| c.tag_name().name() == "bodyPr"))
         .and_then(|p| number(p.attribute("rot")))
+        .filter(|v| !spreadsheet || v.abs() <= 5_400_000.)
         .map(|v| (v / 60_000.).clamp(-90., 90.));
     explicit.unwrap_or(if longest + 4. > space { -45. } else { 0. })
 }
 
-fn label_metrics(axis: Node, data: &ChartData, size: f64, width: f64) -> (f64, f64) {
+fn label_metrics(
+    axis: Node,
+    data: &ChartData,
+    size: f64,
+    width: f64,
+    spreadsheet: bool,
+) -> (f64, f64) {
     let s = data.series.first();
     let count = s
         .and_then(|s| s.points.last())
@@ -56,7 +63,7 @@ fn label_metrics(axis: Node, data: &ChartData, size: f64, width: f64) -> (f64, f
         .map(|p| text_width(&category(p), size))
         .fold(0., f64::max);
     let slots = (count - 1.).max(1.);
-    (longest, rotated(axis, longest, width / slots))
+    (longest, rotated(axis, longest, width / slots, spreadsheet))
 }
 
 fn axis_title(axis: Node) -> Option<String> {
@@ -82,6 +89,7 @@ pub(super) fn margins(
     _font: &str,
     size: f64,
     horizontal: bool,
+    spreadsheet: bool,
 ) -> (f64, f64, f64, f64) {
     let mut left = 0.;
     let mut bottom = 0.;
@@ -124,7 +132,13 @@ pub(super) fn margins(
         } else {
             0.
         };
-        let (max, angle) = label_metrics(axis, data, fs, (width - left - legend_width) * 0.75);
+        let (max, angle) = label_metrics(
+            axis,
+            data,
+            fs,
+            (width - left - legend_width) * 0.75,
+            spreadsheet,
+        );
         if horizontal {
             left += max + fs;
         } else {
@@ -139,6 +153,24 @@ pub(super) fn margins(
         }
     }
     (left.min(width * 0.4), 0., 0., bottom.min(height * 0.4))
+}
+
+pub(super) fn depth_margin(plot: Node, data: &ChartData, size: f64) -> f64 {
+    let Some(axis) = visible(child(plot, "serAx")) else {
+        return 0.;
+    };
+    let fs = font_size(text_props(Some(axis), false), size);
+    data.series
+        .iter()
+        .enumerate()
+        .map(|(i, s)| {
+            s.name.as_deref().map_or_else(
+                || text_width(&format!("Series{}", i + 1), fs),
+                |name| text_width(name, fs),
+            )
+        })
+        .fold(0., f64::max)
+        + fs * 0.6
 }
 
 fn rotated_text(
@@ -192,9 +224,18 @@ fn begin_labels(
     size: f64,
 ) -> (String, f64) {
     let p = text_props(Some(axis), false);
-    let fill = p
-        .and_then(|n| colors.shape_fill(n))
-        .unwrap_or_else(|| "#000000".into());
+    let fill = p.and_then(|n| colors.shape_fill(n)).unwrap_or_else(|| {
+        let dark = colors.spreadsheet_defaults
+            && axis
+                .ancestors()
+                .find(|n| chart_node(*n, "chartSpace"))
+                .is_some_and(|n| classic_style(n) % 100 >= 41);
+        if dark {
+            colors.theme_paint("bg1", None)
+        } else {
+            "#000000".into()
+        }
+    });
     write!(out, r#"<g fill="{fill}">"#).unwrap();
     let family = if p.is_some() {
         font_family(p, default.split(',').next().unwrap_or(default))
@@ -241,7 +282,21 @@ pub(super) fn draw(
             let v = scene.low + i as f64 * scene.step;
             let p = point(side, scene.value(v));
             tick(out, axis, p, horizontal, colors);
-            let value = label_value(v, axis);
+            let percent_default = scene.spreadsheet
+                && plot
+                    .children()
+                    .any(|g| val(Some(g), "grouping") == Some("percentStacked"))
+                && child(axis, "numFmt").is_none_or(|format| {
+                    format
+                        .attribute("formatCode")
+                        .is_none_or(|v| v == "General")
+                        && format.attribute("sourceLinked").is_none_or(|v| on(Some(v)))
+                });
+            let value = if percent_default {
+                format!("{}%", format_tick(v * 100.))
+            } else {
+                label_value(v, axis)
+            };
             max_width = max_width.max(text_width(&value, fs));
             text(
                 out,
@@ -299,7 +354,13 @@ pub(super) fn draw(
         let (font, fs) = begin_labels(out, axis, colors, font, size);
         let a = point(0., 0.);
         let b = point(1., 0.);
-        let (longest, angle) = label_metrics(axis, data, fs, (b.x - a.x).hypot(b.y - a.y));
+        let (longest, angle) = label_metrics(
+            axis,
+            data,
+            fs,
+            (b.x - a.x).hypot(b.y - a.y),
+            scene.spreadsheet,
+        );
         let max = s.points.last().map_or(0, |p| p.index);
         let between = val(child(plot, "valAx"), "crossBetween").map_or_else(
             || plot.children().any(|n| chart_node(n, "bar3DChart")),
@@ -383,5 +444,35 @@ pub(super) fn draw(
             out.push_str("</g>");
         }
         out.push_str("</g>");
+    }
+    if scene.spreadsheet {
+        if let Some(axis) = visible(child(plot, "serAx")) {
+            let (family, fs) = begin_labels(out, axis, colors, font, size);
+            let surface = plot
+                .children()
+                .any(|n| n.tag_name().name().starts_with("surface"));
+            let series = data.series.len().max(1) as f64;
+            let reversed = val(child(axis, "scaling"), "orientation") == Some("maxMin");
+            let skip = num(Some(axis), "tickLblSkip").unwrap_or(1.).max(1.) as usize;
+            for (i, s) in data.series.iter().enumerate().step_by(skip) {
+                let depth = if surface && series > 1. {
+                    i as f64 / (series - 1.)
+                } else {
+                    (i as f64 + 0.5) / series
+                };
+                let p = scene.project(1., 0., if reversed { 1. - depth } else { depth });
+                let name = s.name.clone().unwrap_or_else(|| format!("Series{}", i + 1));
+                text(
+                    out,
+                    p.x + fs * 0.45,
+                    p.y + fs * 0.34,
+                    "start",
+                    fs,
+                    &family,
+                    &name,
+                );
+            }
+            out.push_str("</g>");
+        }
     }
 }

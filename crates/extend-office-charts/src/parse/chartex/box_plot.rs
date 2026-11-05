@@ -113,7 +113,7 @@ pub(super) fn render(ctx: &Canvas, out: &mut String) -> Option<()> {
         .enumerate()
         .filter(|(_, s)| s.chart_type == "boxWhisker")
     {
-        let mut groups = HashMap::<usize, Vec<f64>>::new();
+        let mut groups = HashMap::<usize, Vec<(f64, u32)>>::new();
         for point in &series.points {
             let Some(v) = point
                 .value
@@ -132,7 +132,7 @@ pub(super) fn render(ctx: &Canvas, out: &mut String) -> Option<()> {
                 categories.push(text);
                 categories.len() - 1
             });
-            groups.entry(group).or_default().push(v);
+            groups.entry(group).or_default().push((v, point.index));
             lo = lo.min(v);
             hi = hi.max(v);
         }
@@ -241,7 +241,7 @@ pub(super) fn render(ctx: &Canvas, out: &mut String) -> Option<()> {
         let entries: Vec<_> = boxes
             .iter()
             .zip(&names)
-            .map(|((i, _), name)| (name.as_str(), ctx.paint(*i, 0, *i)))
+            .map(|((i, _), name)| (name.as_str(), ctx.paint(*i, 0, *i), *i))
             .collect();
         legend(
             ctx,
@@ -307,10 +307,13 @@ pub(super) fn render(ctx: &Canvas, out: &mut String) -> Option<()> {
     for (series_slot, (series_index, groups)) in boxes.into_iter().enumerate() {
         write!(
             out,
-            r#"<g data-docx-series="{}">"#,
+            r#"<g data-docx-series="{}""#,
             ctx.source_indices[series_index]
         )
         .unwrap();
+        ctx.colors
+            .hit_attrs(out, "series", ctx.source_indices[series_index], None);
+        out.push('>');
         let layout = ctx.series(series_index).and_then(|n| child(n, "layoutPr"));
         let visibility = layout.and_then(|n| child(n, "visibility"));
         let inclusive = layout
@@ -320,8 +323,9 @@ pub(super) fn render(ctx: &Canvas, out: &mut String) -> Option<()> {
         let mut groups: Vec<_> = groups.into_iter().collect();
         groups.sort_unstable_by_key(|(g, _)| *g);
         let mut previous_mean = None;
-        for (g, mut values) in groups {
-            values.sort_unstable_by(f64::total_cmp);
+        for (g, mut samples) in groups {
+            samples.sort_unstable_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+            let values: Vec<_> = samples.iter().map(|&(value, _)| value).collect();
             let stats = Distribution::from_sorted(&values, inclusive);
             let start =
                 left + slot * g as f64 + (slot - cluster) * 0.5 + series_slot as f64 * pitch;
@@ -355,15 +359,18 @@ pub(super) fn render(ctx: &Canvas, out: &mut String) -> Option<()> {
             let inner_points = flag(visibility, "nonoutliers", false);
             let outliers = flag(visibility, "outliers", true);
             if inner_points || outliers {
-                for value in &values {
-                    let outside = *value < stats.low || *value > stats.high;
+                for (value, point) in samples {
+                    let outside = value < stats.low || value > stats.high;
                     if outside && outliers || !outside && inner_points {
                         write!(
                             out,
-                            r#"<circle cx="{x:.3}" cy="{:.3}" r="2.5" fill="{stroke}"/>"#,
-                            y(*value)
+                            r#"<circle cx="{x:.3}" cy="{:.3}" r="2.5" fill="{stroke}""#,
+                            y(value)
                         )
                         .unwrap();
+                        ctx.colors
+                            .hit_attrs(out, "point", source_index, Some(point));
+                        out.push_str("/>");
                     }
                 }
             }

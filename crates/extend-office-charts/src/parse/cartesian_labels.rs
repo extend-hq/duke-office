@@ -215,6 +215,7 @@ impl<'a> DataLabels<'a> {
         {
             svg.push_str(r#" font-style="italic""#);
         }
+        colors.hit_attrs(svg, "dataLabel", ordinal, Some(point.index));
         svg.push('>');
         if let Some(shape) = prop("spPr") {
             let fill = colors.shape_fill(shape).unwrap_or_else(|| "none".into());

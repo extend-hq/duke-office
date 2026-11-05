@@ -1,0 +1,18 @@
+{
+  "format": "OCMA1: unsigned LEB128 lengths and zigzag deltas, longitude/latitude at 1e-5 degrees, raw DEFLATE",
+  "inputs": [
+    {
+      "name": "countries-50m.json",
+      "sha256": "04342cdc1e3016bcd7db1630de95684d67b79fe3c8c460321e87aef469502394"
+    },
+    {
+      "name": "states-10m.json",
+      "sha256": "d76b391ccfa8bff601d51e3e3da5d43a89fa46cd5caca72ce731b383be5596d0"
+    }
+  ],
+  "countries": 241,
+  "states": 51,
+  "bytes": 399263,
+  "inflatedBytes": 531968,
+  "sha256": "9360ea7203122cf922bfbf4ad9e767345d6e5f0500eff0a93cb108f3dac16213"
+}

@@ -7,15 +7,16 @@ use std::f64::consts::{FRAC_PI_2, PI, TAU};
 use std::fmt::Write;
 
 #[derive(Default)]
-struct Branch<'a> {
-    label: &'a str,
+struct Branch {
+    label: String,
     value: f64,
     first: u32,
+    multiple_points: bool,
     palette: usize,
     children: Vec<usize>,
 }
 
-fn hierarchy(series: &ChartSeries) -> (Vec<Branch<'_>>, usize) {
+fn hierarchy(series: &ChartSeries, spreadsheet: bool) -> (Vec<Branch>, usize) {
     let mut branches = vec![Branch::default()];
     let levels = series
         .points
@@ -31,6 +32,7 @@ fn hierarchy(series: &ChartSeries) -> (Vec<Branch<'_>>, usize) {
     let mut path: Vec<Option<&str>> = vec![None; levels];
     let mut lookup = HashMap::new();
     let mut depth = 0;
+    let implicit_categories = spreadsheet && series.points.iter().all(|p| p.categories.is_empty());
     for point in &series.points {
         // A new parent starts a new group even if the first child is blank.
         let start = point.categories.iter().map(|c| c.level).max().unwrap_or(0);
@@ -46,10 +48,26 @@ fn hierarchy(series: &ChartSeries) -> (Vec<Branch<'_>>, usize) {
         else {
             continue;
         };
+        if implicit_categories {
+            let id = branches.len();
+            branches.push(Branch {
+                label: (u64::from(point.index) + 1).to_string(),
+                value: weight,
+                first: point.index,
+                palette: point.index as usize,
+                ..Branch::default()
+            });
+            branches[0].children.push(id);
+            branches[0].value += weight;
+            depth = depth.max(1);
+            continue;
+        }
         let mut parent = 0;
         let mut count = 0;
-        for &label in path.iter().rev().flatten() {
-            parent = *lookup.entry((parent, label)).or_insert_with(|| {
+        let mut labels = path.iter().rev().flatten().peekable();
+        while let Some(&label) = labels.next() {
+            let leaf = (spreadsheet && labels.peek().is_none()).then_some(point.index);
+            parent = *lookup.entry((parent, label, leaf)).or_insert_with(|| {
                 let id = branches.len();
                 let palette = if parent == 0 {
                     branches[0].children.len()
@@ -57,7 +75,7 @@ fn hierarchy(series: &ChartSeries) -> (Vec<Branch<'_>>, usize) {
                     branches[parent].palette
                 };
                 branches.push(Branch {
-                    label,
+                    label: label.to_owned(),
                     first: point.index,
                     palette,
                     ..Branch::default()
@@ -66,6 +84,7 @@ fn hierarchy(series: &ChartSeries) -> (Vec<Branch<'_>>, usize) {
                 id
             });
             branches[parent].value += weight;
+            branches[parent].multiple_points |= branches[parent].first != point.index;
             count += 1;
         }
         if parent != 0 {
@@ -131,6 +150,13 @@ fn treemap(
         return;
     }
     let leaf = b.children.is_empty();
+    let point = (leaf && !b.multiple_points).then_some(b.first);
+    ctx.colors.begin_hit(
+        out,
+        if point.is_some() { "point" } else { "series" },
+        ctx.source_indices[0],
+        point,
+    );
     let color = paint(ctx, b);
     let outline = ctx
         .colors
@@ -222,6 +248,7 @@ fn treemap(
         )
         .unwrap();
     }
+    ctx.colors.end_hit(out);
 }
 
 struct Rings {
@@ -276,6 +303,13 @@ fn sunburst(
             )
             .unwrap_or("white");
         let path = rings.path(inner, outer, angle, end);
+        let point = (b.children.is_empty() && !b.multiple_points).then_some(b.first);
+        ctx.colors.begin_hit(
+            out,
+            if point.is_some() { "point" } else { "series" },
+            ctx.source_indices[0],
+            point,
+        );
         write!(
             out,
             r#"<path d="{path}" fill="{color}" stroke="{outline}" stroke-width="2"/>"#
@@ -319,6 +353,7 @@ fn sunburst(
                 }
             }
         }
+        ctx.colors.end_hit(out);
         sunburst(
             ctx,
             tree,
@@ -343,7 +378,7 @@ pub(super) fn render(ctx: &Canvas, out: &mut String) -> Option<()> {
         "treemap" => false,
         _ => return None,
     };
-    let (mut tree, depth) = hierarchy(series);
+    let (mut tree, depth) = hierarchy(series, ctx.colors.spreadsheet_defaults);
     if depth == 0 || !tree[0].value.is_finite() {
         return Some(());
     }
@@ -373,7 +408,15 @@ pub(super) fn render(ctx: &Canvas, out: &mut String) -> Option<()> {
         .and_then(|n| n.attribute("val"));
     let props = data_labels.and_then(|l| l.descendants().find(|n| n.tag_name().name() == "defRPr"));
     let font = font_size(props, 12.);
-    let family = font_family(props, "Cambria");
+    let default_family = ctx.fonts.as_ref().map_or("Cambria", |fonts| {
+        let typeface = props.and_then(|p| {
+            p.children()
+                .find(|n| n.tag_name().name() == "latin")?
+                .attribute("typeface")
+        });
+        fonts.resolve(typeface)
+    });
+    let family = font_family(props, default_family);
     let label_fill = props
         .and_then(|p| ctx.colors.shape_fill(p))
         .or_else(|| ctx.colors.style_text("dataLabel", "#ffffff"))
@@ -385,12 +428,34 @@ pub(super) fn render(ctx: &Canvas, out: &mut String) -> Option<()> {
         parent: layout != Some("none"),
         banner: layout == Some("banner"),
     };
-    let rect = Rect {
+    let mut rect = Rect {
         x: 8.,
         y: ctx.title_bottom,
         w: (ctx.width - 16.).max(0.),
         h: (ctx.height - ctx.title_bottom - 8.).max(0.),
     };
+    if ctx.colors.spreadsheet_defaults {
+        let mut legend_order = tree[0].children.clone();
+        if depth == 1 {
+            legend_order.sort_by_key(|&id| tree[id].first);
+        }
+        let entries: Vec<_> = legend_order
+            .iter()
+            .map(|&id| (tree[id].label.as_str(), paint(ctx, &tree[id]), 0))
+            .collect();
+        let (mut right, mut bottom) = (rect.x + rect.w, rect.y + rect.h);
+        super::drawing::legend(
+            ctx,
+            out,
+            &entries,
+            &mut rect.x,
+            &mut rect.y,
+            &mut right,
+            &mut bottom,
+        );
+        rect.w = (right - rect.x).max(0.);
+        rect.h = (bottom - rect.y).max(0.);
+    }
     ctx.plot_background(out, rect.x, rect.y, rect.x + rect.w, rect.y + rect.h);
     write!(
         out,

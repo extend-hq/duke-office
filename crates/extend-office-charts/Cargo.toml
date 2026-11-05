@@ -1,6 +1,6 @@
 [package]
 name = "extend-office-charts"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 license = "MIT"
 description = "Render Office Open XML charts to SVG from native Rust or WebAssembly"
@@ -12,6 +12,7 @@ include = ["src/**", "Cargo.toml", "README.md", "LICENSE"]
 [features]
 default = ["extended-charts"]
 extended-charts = ["dep:base64", "dep:miniz_oxide"]
+map-fallback = ["extended-charts"]
 
 [dependencies]
 base64 = { version = "0.22", optional = true }

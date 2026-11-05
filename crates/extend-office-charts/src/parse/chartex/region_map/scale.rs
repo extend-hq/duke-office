@@ -82,10 +82,14 @@ impl MapScale {
             Key::Gradient(stops)
         };
         for point in &series.points {
-            if let Some(fill) = ctx
-                .colors
-                .explicit_fill(ctx.source_indices[0], Some(point.index))
-            {
+            let fill = if ctx.colors.spreadsheet_defaults {
+                ctx.colors
+                    .explicit_point_fill(ctx.source_indices[0], point.index)
+            } else {
+                ctx.colors
+                    .explicit_fill(ctx.source_indices[0], Some(point.index))
+            };
+            if let Some(fill) = fill {
                 fills.insert(point.index, fill.to_owned());
             }
         }

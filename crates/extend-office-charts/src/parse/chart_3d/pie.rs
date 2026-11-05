@@ -1,4 +1,4 @@
-use super::{polygon, shade, ChartColors, ChartData, Node, Point, Scene};
+use super::{begin_point_hit, polygon, shade, ChartColors, ChartData, Node, Point, Scene};
 use crate::chart::{chart_node, child};
 use std::f64::consts::{PI, TAU};
 use std::fmt::Write;
@@ -41,6 +41,7 @@ fn property(node: Node, name: &str) -> Option<f64> {
 }
 
 struct Slice {
+    index: u32,
     start: f64,
     end: f64,
     offset: (f64, f64),
@@ -101,7 +102,7 @@ pub(super) fn draw(
     colors: &ChartColors,
     out: &mut String,
 ) {
-    let Some((i, series)) = data
+    let Some((series_index, series)) = data
         .series
         .iter()
         .enumerate()
@@ -138,8 +139,56 @@ pub(super) fn draw(
         perspective
     };
     let inset = 14.4_f64.min(0.1 * scene.width.min(scene.height));
-    let inner_height = scene.height - 2. * inset;
-    let inner_width = scene.width - 2. * inset;
+    let mut left = scene.left;
+    let mut top = scene.top;
+    let mut width = scene.width;
+    let mut height = scene.height;
+    if colors.spreadsheet_defaults {
+        use crate::parse::chart_svg::{font_size, on, text_props, text_width, val};
+        let chart = group.ancestors().find(|n| chart_node(*n, "chart"));
+        let automatic = chart
+            .and_then(|n| child(n, "plotArea"))
+            .and_then(|n| child(n, "layout"))
+            .and_then(|n| child(n, "manualLayout"))
+            .is_none();
+        if automatic {
+            let title = chart.and_then(|n| child(n, "title"));
+            if title.is_some() && !on(val(title, "overlay")) {
+                let size = font_size(text_props(title, true).or(text_props(title, false)), 24.);
+                let space = size * 1.17 + 12.;
+                top += space;
+                height -= space;
+            }
+            if let Some(legend) = chart
+                .and_then(|n| child(n, "legend"))
+                .filter(|n| !on(val(Some(*n), "overlay")))
+            {
+                let size = font_size(text_props(Some(legend), false), 40. / 3.);
+                let pos = val(Some(legend), "legendPos").unwrap_or("r");
+                if matches!(pos, "l" | "r" | "tr") {
+                    let longest = series
+                        .points
+                        .iter()
+                        .filter_map(|p| p.categories.first())
+                        .map(|c| text_width(&c.label, size))
+                        .fold(0., f64::max);
+                    let space = longest + size * 1.055 + 13.333;
+                    if pos == "l" {
+                        left += space;
+                    }
+                    width -= space;
+                } else {
+                    let space = size * 1.76 + 10.;
+                    if pos == "t" {
+                        top += space;
+                    }
+                    height -= space;
+                }
+            }
+        }
+    }
+    let inner_height = (height - 2. * inset).max(1.);
+    let inner_width = (width - 2. * inset).max(1.);
     let focal = if perspective == 0. {
         f64::INFINITY
     } else {
@@ -173,8 +222,8 @@ pub(super) fn draw(
         / (sin + depth * cos - half_height * (cos - depth * sin) / focal).max(f64::EPSILON);
     let radius = horizontal.min(front).min(back) / (1. + max_offset);
     let cam = Camera {
-        x: scene.left + scene.width / 2.,
-        y: scene.top + scene.height / 2. - 0.002 * radius,
+        x: left + width / 2.,
+        y: top + height / 2. - 0.002 * radius,
         radius,
         thickness: radius * depth,
         sin,
@@ -201,16 +250,29 @@ pub(super) fn draw(
         let mid = (angle + end) / 2.;
         let offset = offsets.get(&idx).copied().unwrap_or(explosion) * radius;
         slices.push(Slice {
+            index: idx,
             start: angle,
             end,
             offset: (offset * mid.sin(), offset * mid.cos()),
-            fill: colors.fill(i, Some(idx)),
-            stroke: colors.outline(i, Some(idx)).unwrap_or("none").to_owned(),
+            fill: colors.fill(series_index, Some(idx)),
+            stroke: colors
+                .outline(series_index, Some(idx))
+                .unwrap_or("none")
+                .to_owned(),
         });
         angle = end;
     }
     slices.sort_by(|a, b| b.offset.1.total_cmp(&a.offset.1));
     for (i, slice) in slices.iter().enumerate() {
+        if colors.interactive {
+            let middle = (slice.start + slice.end) / 2.;
+            let anchor = cam.project(
+                slice.offset.0 + radius * 0.5 * middle.sin(),
+                slice.offset.1 + radius * 0.5 * middle.cos(),
+                cam.thickness,
+            );
+            begin_point_hit(out, colors, "slice", series_index, slice.index, anchor);
+        }
         let center = |e| cam.project(slice.offset.0, slice.offset.1, e);
         if slice.offset != (0., 0.) {
             for (a, visible) in [
@@ -226,7 +288,14 @@ pub(super) fn draw(
                             cam.rim(a, slice.offset, cam.thickness),
                             center(cam.thickness),
                         ],
-                        &shade(&slice.fill, 0.65),
+                        &shade(
+                            &slice.fill,
+                            if colors.spreadsheet_defaults {
+                                0.4
+                            } else {
+                                0.65
+                            },
+                        ),
                         &slice.stroke,
                     );
                 }
@@ -249,6 +318,13 @@ pub(super) fn draw(
         if slice.end - slice.start < 2. * PI - 1e-10 {
             top.push(center(cam.thickness));
         }
-        polygon(out, &top, &shade(&slice.fill, 0.923), &slice.stroke);
+        let top_light = if colors.spreadsheet_defaults {
+            0.4 + 0.6 * (elevation - PI / 4.).cos()
+        } else {
+            0.923
+        };
+        let fill = shade(&slice.fill, top_light);
+        polygon(out, &top, &fill, &slice.stroke);
+        colors.end_hit(out);
     }
 }

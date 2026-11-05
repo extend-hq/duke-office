@@ -13,31 +13,36 @@ const rustflags = [
   `--remap-path-prefix=${root}=.`,
 ].join("\x1f");
 const crate = resolve(root, "crates/extend-office-charts-wasm");
-const output = resolve(root, "browser/generated");
-mkdirSync(output, { recursive: true });
-const build = spawnSync(
-  "wasm-pack",
-  ["build", crate, "--target", "web",
-    "--release", "--no-typescript", "--no-pack", "--out-dir", output,
-    "--out-name", "office_charts", "--", "--locked"],
-  {
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      CARGO_PROFILE_RELEASE_OPT_LEVEL: "z",
-      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1",
-      CARGO_PROFILE_RELEASE_LTO: "true",
-      CARGO_PROFILE_RELEASE_PANIC: "abort",
-      CARGO_PROFILE_RELEASE_STRIP: "true",
-      CARGO_INCREMENTAL: "0",
-      CARGO_ENCODED_RUSTFLAGS: rustflags,
+const generated = resolve(root, "browser/generated");
+const digest = sourceDigest();
+for (const extended of [false, true]) {
+  const output = extended ? resolve(generated, "full") : generated;
+  mkdirSync(output, { recursive: true });
+  const build = spawnSync(
+    "wasm-pack",
+    ["build", crate, "--target", "web",
+      "--release", "--no-typescript", "--no-pack", "--out-dir", output,
+      "--out-name", "office_charts", "--", "--locked",
+      ...(extended ? ["--features", "map-fallback"] : [])],
+    {
+      stdio: "inherit",
+      env: {
+        ...process.env,
+        CARGO_PROFILE_RELEASE_OPT_LEVEL: "z",
+        CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "1",
+        CARGO_PROFILE_RELEASE_LTO: "true",
+        CARGO_PROFILE_RELEASE_PANIC: "abort",
+        CARGO_PROFILE_RELEASE_STRIP: "true",
+        CARGO_INCREMENTAL: "0",
+        CARGO_ENCODED_RUSTFLAGS: rustflags,
+      },
     },
-  },
-);
-if (build.error) throw build.error;
-if (build.status !== 0) process.exit(build.status ?? 1);
-const binary = resolve(output, "office_charts_bg.wasm");
-const compressed = gzipSync(readFileSync(binary), { level: 9 });
-writeFileSync(resolve(output, "payload.js"), `export default "${compressed.toString("base64")}";\n`);
-rmSync(resolve(output, ".gitignore"), { force: true });
-writeFileSync(resolve(output, "sources.sha256"), sourceDigest() + "\n");
+  );
+  if (build.error) throw build.error;
+  if (build.status !== 0) process.exit(build.status ?? 1);
+  const compressed = gzipSync(readFileSync(resolve(output, "office_charts_bg.wasm")), { level: 9 });
+  writeFileSync(resolve(output, "payload.js"), `export default "${compressed.toString("base64")}";\n`);
+  rmSync(resolve(output, ".gitignore"), { force: true });
+}
+if (digest !== sourceDigest()) throw new Error("Renderer inputs changed during build; rerun the build.");
+writeFileSync(resolve(generated, "sources.sha256"), digest + "\n");

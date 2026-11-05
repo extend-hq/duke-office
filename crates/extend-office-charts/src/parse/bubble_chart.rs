@@ -620,7 +620,7 @@ pub(super) fn render(
         };
         write!(
             svg,
-            r#"<circle cx="{cx:.2}" cy="{cy:.2}" r="{radius:.2}" fill="{}" stroke="{}"{shadow_attr} data-docx-series="{i}"/>"#,
+            r#"<circle cx="{cx:.2}" cy="{cy:.2}" r="{radius:.2}" fill="{}" stroke="{}"{shadow_attr} data-docx-series="{i}""#,
             if z < 0. {
                 "white".into()
             } else {
@@ -633,6 +633,11 @@ pub(super) fn render(
             }
         )
         .unwrap();
+        colors.hit_attrs(&mut svg, "bubble", i, Some(idx));
+        if colors.interactive {
+            write!(svg, r#" data-chart-x="{cx:.2}" data-chart-y="{cy:.2}""#).unwrap();
+        }
+        svg.push_str("/>");
     }
     svg.push_str("</g>");
     svg.push_str(&labels);
@@ -651,7 +656,9 @@ pub(super) fn render(
         let wrapped_lines: usize = name_lines.iter().map(|ls| ls.len() - 1).sum();
         let mut wrap_before = 0;
         for (i, (series, point, name)) in entries.iter().enumerate() {
-            write!(svg, r#"<g data-docx-series="{series}">"#).unwrap();
+            write!(svg, r#"<g data-docx-series="{series}""#).unwrap();
+            colors.hit_attrs(&mut svg, "legendEntry", *series, *point);
+            svg.push('>');
             let lines = &name_lines[i];
             let wrap_line_height = lf * 1.22;
             let (cx, cy) = if side_legend {

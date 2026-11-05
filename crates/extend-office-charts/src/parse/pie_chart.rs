@@ -11,6 +11,7 @@ use std::fmt::Write;
 
 struct Slice {
     index: u32,
+    aggregate: bool,
     value: f64,
     weight: f64,
     name: String,
@@ -32,6 +33,7 @@ fn slices(series: &ChartSeries, node: Node) -> Vec<Slice> {
             let value = number(p.value.as_deref()).unwrap_or(0.);
             Slice {
                 index: p.index,
+                aggregate: false,
                 value,
                 weight: value.abs(),
                 name: p
@@ -133,6 +135,8 @@ struct LabelStyle<'a> {
     size: f64,
     face: &'a str,
     legacy: bool,
+    spreadsheet: bool,
+    format: Option<&'a str>,
 }
 
 impl LabelStyle<'_> {
@@ -168,7 +172,11 @@ impl LabelStyle<'_> {
             items.push(p.name.clone())
         }
         if shown("showVal") {
-            items.push(p.value.to_string())
+            items.push(if self.spreadsheet {
+                super::chart_svg::format_value(p.value, self.format)
+            } else {
+                p.value.to_string()
+            })
         }
         if shown("showPercent") {
             items.push(format!("{:.0}%", fraction * 100.))
@@ -246,36 +254,93 @@ impl Ring<'_> {
                 .colors
                 .outline(self.series, Some(p.index))
                 .unwrap_or("none");
+            let point = (!p.aggregate).then_some(p.index);
+            if self.colors.interactive {
+                let (x, y) = Circle {
+                    r: (circle.r + self.inner) / 2.,
+                    ..circle
+                }
+                .at(bisector);
+                svg.push_str("<g");
+                self.colors.hit_attrs(svg, "slice", self.series, point);
+                write!(svg, r#" data-chart-x="{x:.2}" data-chart-y="{y:.2}">"#).unwrap();
+            }
+            let width = self
+                .colors
+                .spreadsheet_defaults
+                .then(|| self.colors.outline_width(self.series, p.index))
+                .flatten();
+            if let Some(width) = width {
+                write!(
+                    svg,
+                    r#"<g stroke-width="{width:.3}" stroke-linejoin="round">"#
+                )
+                .unwrap();
+            }
             sector(svg, circle, self.inner, angle, sweep, &fill, stroke);
+            if width.is_some() {
+                svg.push_str("</g>");
+            }
+            self.colors.end_hit(svg);
             if let Some(labels) = self.labels {
                 let placement = val(Some(labels.options), "dLblPos").unwrap_or("bestFit");
                 let r = if placement == "outEnd" || (placement == "bestFit" && sweep < 0.25 * PI) {
                     circle.r * 1.13
                 } else {
-                    (circle.r + self.inner) * 0.58
+                    (circle.r + self.inner)
+                        * if labels.spreadsheet && self.inner > 0. {
+                            0.5
+                        } else {
+                            0.58
+                        }
                 };
-                let (x, y) = Circle { r, ..circle }.at(bisector);
+                let (mut x, y) = Circle { r, ..circle }.at(bisector);
+                let width = circle.r
+                    * if labels.spreadsheet {
+                        if self.inner > 0. {
+                            1.0
+                        } else {
+                            0.85
+                        }
+                    } else {
+                        0.64
+                    };
+                if labels.spreadsheet && self.inner == 0. && r > circle.r {
+                    x += bisector.cos().signum() * width / 3.;
+                }
+                self.colors
+                    .begin_hit(label_svg, "dataLabel", self.series, point);
                 labels.write(
                     label_svg,
                     p,
                     p.weight / self.overall,
                     x,
                     y,
-                    (circle.r * 0.64).max(labels.size * 3.),
+                    width.max(labels.size * 3.),
                     &fill,
                 );
+                self.colors.end_hit(label_svg);
             }
             angle += sweep;
         }
     }
 }
 
-fn split<'a>(group: Node, points: &'a [Slice], total: f64) -> (Vec<&'a Slice>, Vec<&'a Slice>) {
+fn split<'a>(
+    group: Node,
+    points: &'a [Slice],
+    total: f64,
+    spreadsheet: bool,
+) -> (Vec<&'a Slice>, Vec<&'a Slice>) {
     let position = number(val(Some(group), "splitPos"));
     let mode = val(Some(group), "splitType").unwrap_or("auto");
-    let count = position
-        .unwrap_or((points.len() as f64 / 3.).round().max(1.))
-        .max(0.) as usize;
+    let automatic_count = points.len() as f64 / 3.;
+    let automatic_count = if spreadsheet {
+        automatic_count.ceil()
+    } else {
+        automatic_count.round()
+    };
+    let count = position.unwrap_or(automatic_count.max(1.)).max(0.) as usize;
     let last = points
         .len()
         .saturating_sub(count.min(points.len().saturating_sub(1)));
@@ -315,7 +380,7 @@ fn draw_split(
     if total <= 0. {
         return;
     }
-    let (mut first, second) = split(group, points, total);
+    let (mut first, second) = split(group, points, total, colors.spreadsheet_defaults);
     let combined = second.iter().map(|p| p.weight).sum::<f64>();
     let total_value = second.iter().map(|p| p.value.abs()).sum::<f64>();
     let explosion = points.iter().map(|p| p.explosion).fold(0., f64::max);
@@ -338,6 +403,7 @@ fn draw_split(
         return;
     }
     let other = Slice {
+        aggregate: true,
         index: points
             .iter()
             .map(|p| p.index)
@@ -356,17 +422,48 @@ fn draw_split(
         .clamp(5., 200.)
         / 100.;
     let gap = number(val(Some(group), "gapWidth"))
-        .unwrap_or(150.)
+        .unwrap_or(if colors.spreadsheet_defaults {
+            100.
+        } else {
+            150.
+        })
         .clamp(0., 500.)
         / 100.;
-    let units = if bar {
-        2. + gap / 2. + scale
-    } else {
-        2. + gap + scale * 2.
+    let units_for = |scale: f64| {
+        if bar {
+            2. + gap / 2. + scale
+        } else {
+            2. + gap + scale * 2.
+        }
     };
-    let label_inset = if labels.is_some() { 0.125 } else { 0. };
+    let visible_labels = labels.is_some_and(|labels| {
+        !colors.spreadsheet_defaults
+            || labels.options.descendants().any(|n| {
+                [
+                    "showVal",
+                    "showPercent",
+                    "showSerName",
+                    "showCatName",
+                    "showLegendKey",
+                ]
+                .iter()
+                .any(|k| chart_node(n, k))
+                    && n.attribute("val").map_or(true, |v| on(Some(v)))
+                    || chart_node(n, "tx")
+            })
+    });
+    let label_inset = if visible_labels { 0.125 } else { 0. };
     let space_w = (frame.width - (frame.width + 88. / 3.) * label_inset).max(1.);
     let space_h = (frame.height - (frame.height + 88. / 3.) * label_inset).max(1.);
+    let scale = if colors.spreadsheet_defaults
+        && scale > 1.
+        && space_w / units_for(scale) > space_h / 2. / scale
+    {
+        2.
+    } else {
+        scale
+    };
+    let units = units_for(scale);
     let effective = (space_w / units).min(space_h / 2. / scale.max(1.));
     let radius = effective / (1. + explosion);
     let left = frame.x - units * effective / 2.;
@@ -429,8 +526,11 @@ fn draw_split(
             let fill = colors.fill(0, Some(p.index));
             let stroke = colors.outline(0, Some(p.index)).unwrap_or("none");
             let w = scale * effective;
+            colors.begin_hit(svg, "slice", 0, Some(p.index));
             write!(svg,r#"<rect x="{bar_left:.3}" y="{y:.3}" width="{w:.3}" height="{h:.3}" fill="{fill}" stroke="{stroke}"/>"#).unwrap();
+            colors.end_hit(svg);
             if let Some(labels) = labels {
+                colors.begin_hit(label_svg, "dataLabel", 0, Some(p.index));
                 labels.write(
                     label_svg,
                     p,
@@ -444,6 +544,7 @@ fn draw_split(
                     w,
                     &fill,
                 );
+                colors.end_hit(label_svg);
             }
             y += h;
         }
@@ -486,6 +587,23 @@ fn plot_frame(plot: Node, width: f64, height: f64) -> Frame {
     }
 }
 
+fn legend_grid(
+    widths: impl Iterator<Item = f64>,
+    width: f64,
+    size: f64,
+) -> Option<(usize, f64, usize)> {
+    let spacing = size * (0.527 + 0.95);
+    let (count, longest, total) = widths.fold((0usize, 0f64, 0f64), |(n, max, sum), w| {
+        (n + 1, max.max(w), sum + w + spacing)
+    });
+    if count == 0 || total <= width - 2. * size {
+        return None;
+    }
+    let column_width = longest + spacing;
+    let columns = ((width - 2. * size) / column_width).floor().max(1.) as usize;
+    Some((columns, column_width, count.div_ceil(columns)))
+}
+
 fn legend(
     svg: &mut String,
     node: Node,
@@ -506,7 +624,15 @@ fn legend(
     let items: Vec<_> = entries
         .iter()
         .filter(|(_, idx, _)| !hidden.contains(idx))
-        .map(|e| (e, text_width(e.2, size)))
+        .map(|e| {
+            let advance = text_width(e.2, size);
+            let advance = if colors.spreadsheet_defaults && face.contains("Aptos Narrow") {
+                advance * 0.82
+            } else {
+                advance
+            };
+            (e, advance)
+        })
         .collect();
     let key = size * 0.527;
     let step = size * 1.76;
@@ -515,6 +641,9 @@ fn legend(
         .iter()
         .map(|(_, w)| w + key + size * 0.95)
         .sum::<f64>();
+    let grid = (colors.spreadsheet_defaults && !side)
+        .then(|| legend_grid(items.iter().map(|(_, w)| *w), width, size))
+        .flatten();
     let mut x = if side {
         if pos == "l" {
             size
@@ -524,6 +653,10 @@ fn legend(
     } else {
         (width - total) / 2. + size * 0.32
     };
+    if let Some((columns, column_width, _)) = grid {
+        x = (width - columns as f64 * column_width) / 2. + size * 0.32;
+    }
+    let start_x = x;
     let n = if side {
         items.len().min((height / step).floor() as usize)
     } else {
@@ -538,9 +671,21 @@ fn legend(
     } else if pos == "t" {
         size * 1.48
     } else {
-        height - size * 1.48
+        height
+            - size
+                * if colors.spreadsheet_defaults {
+                    1.68
+                } else {
+                    1.48
+                }
     };
-    for (&(series, index, label), w) in items.into_iter().take(n) {
+    if let Some((_, _, rows)) = grid {
+        if pos != "t" {
+            y -= rows.saturating_sub(1) as f64 * step;
+        }
+    }
+    for (i, (&(series, index, label), w)) in items.into_iter().take(n).enumerate() {
+        colors.begin_hit(svg, "legendEntry", series, None);
         let fill = colors.fill(series, Some(index));
         let stroke = colors.outline(series, Some(index)).unwrap_or("none");
         write!(svg,r#"<rect x="{x:.2}" y="{:.2}" width="{key:.2}" height="{key:.2}" fill="{fill}" stroke="{stroke}"/>"#,y-key/2.).unwrap();
@@ -553,8 +698,14 @@ fn legend(
             face,
             label,
         );
+        colors.end_hit(svg);
         if side {
             y += step;
+        } else if let Some((columns, column_width, _)) = grid {
+            x = start_x + ((i + 1) % columns) as f64 * column_width;
+            if (i + 1) % columns == 0 {
+                y += step;
+            }
         } else {
             x += w + key + size * 0.95;
         }
@@ -577,7 +728,25 @@ pub(super) fn render(
             .any(|k| chart_node(*n, k))
     })?;
     let kind = group.tag_name().name().strip_suffix("Chart")?;
-    if data.series.is_empty() || data.series.iter().any(|s| s.chart_type != kind) {
+    let nodes: Vec<_> = group.children().filter(|n| chart_node(*n, "ser")).collect();
+    let ring_series = nodes.len();
+    let scatter = child(plot, "scatterChart").filter(|_| colors.spreadsheet_defaults);
+    if let Some(overlay) = scatter {
+        let (rings, series) = data.series.split_at_checked(ring_series)?;
+        let expected = [group, overlay];
+        let groups = plot
+            .children()
+            .filter(|n| n.is_element() && n.tag_name().name().ends_with("Chart"));
+        if kind != "doughnut"
+            || !groups.eq(expected)
+            || child(chart, "legend").is_some()
+            || rings.iter().any(|s| s.chart_type != kind)
+            || series.iter().any(|s| s.chart_type != "scatter")
+            || series.len() != overlay.children().filter(|n| chart_node(*n, "ser")).count()
+        {
+            return None;
+        }
+    } else if data.series.is_empty() || data.series.iter().any(|s| s.chart_type != kind) {
         return None;
     }
     let base_props = text_props(Some(root), false);
@@ -601,7 +770,6 @@ pub(super) fn render(
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}"><rect width="{width}" height="{height}" rx="{corner:.2}" fill="{bg}" stroke="{border}"/>"#
     );
     let mut label_svg = String::new();
-    let nodes: Vec<_> = group.children().filter(|n| chart_node(*n, "ser")).collect();
     let count = if kind == "doughnut" { nodes.len() } else { 1 };
     let sets: Vec<_> = data
         .series
@@ -622,7 +790,7 @@ pub(super) fn render(
     let legend_props = text_props(legend_node, false).or(base_props);
     let legend_size = font_size(legend_props, size);
     let legend_face = font_family(legend_props, minor_latin.unwrap_or("Calibri"));
-    let entries: Vec<_> = if sets.len() > 1 && !colors.vary_by_point(first_index) {
+    let mut entries: Vec<_> = if sets.len() > 1 && !colors.vary_by_point(first_index) {
         ring_order
             .iter()
             .map(|&idx| {
@@ -639,17 +807,41 @@ pub(super) fn render(
             .map(|p| (first_index, p.index, p.name.as_str()))
             .collect()
     };
+    if colors.spreadsheet_defaults && colors.use_cached_point_count && sets.len() == 1 {
+        let count = child(nodes[first_index], "cat")
+            .and_then(|n| n.descendants().find(|p| chart_node(*p, "ptCount")))
+            .and_then(|n| n.attribute("val")?.parse::<u32>().ok())
+            .unwrap_or(0);
+        let known: std::collections::HashSet<_> = entries.iter().map(|e| e.1).collect();
+        // A styled blank category still has a legend key.
+        entries.extend(
+            nodes[first_index]
+                .children()
+                .filter(|n| chart_node(*n, "dPt"))
+                .filter_map(|n| val(Some(n), "idx")?.parse::<u32>().ok())
+                .filter(|i| *i < count && !known.contains(i))
+                .map(|i| (first_index, i, "")),
+        );
+        entries.sort_by_key(|entry| entry.1);
+    }
     let title = child(chart, "title");
     let title_props = text_props(title, true).or_else(|| text_props(title, false));
-    let title_font = font_size(title_props, if legacy { 24. } else { size });
+    let title_font = font_size(
+        title_props,
+        if legacy || colors.spreadsheet_defaults {
+            24.
+        } else {
+            size
+        },
+    );
     let title_face = font_family(title_props, minor_latin.unwrap_or("Calibri"));
-    if legacy
+    if (legacy || colors.spreadsheet_defaults)
         && child(plot, "layout")
             .and_then(|n| child(n, "manualLayout"))
             .is_none()
     {
         if title.is_some() && !on(val(title, "overlay")) {
-            let leading = if title_face.contains("Cambria") {
+            let leading = if colors.spreadsheet_defaults || title_face.contains("Cambria") {
                 1.17
             } else {
                 1.22
@@ -669,7 +861,25 @@ pub(super) fn render(
                 frame.x += if pos == "l" { w / 2. } else { -w / 2. };
                 frame.width -= w;
             } else {
-                let h = legend_size * 1.76 + 8.;
+                let rows = if colors.spreadsheet_defaults {
+                    legend_grid(
+                        entries.iter().map(|e| {
+                            text_width(e.2, legend_size)
+                                * if legend_face.contains("Aptos Narrow") {
+                                    0.82
+                                } else {
+                                    1.
+                                }
+                        }),
+                        width,
+                        legend_size,
+                    )
+                    .map_or(1, |(_, _, rows)| rows)
+                } else {
+                    1
+                };
+                let h = legend_size * 1.76 * rows as f64
+                    + if colors.spreadsheet_defaults { 10. } else { 8. };
                 frame.y += if pos == "t" { h / 2. } else { -h / 2. };
                 frame.height -= h;
             }
@@ -682,7 +892,41 @@ pub(super) fn render(
         .flatten()
         .map(|p| p.explosion)
         .fold(0., f64::max);
-    let r = frame.width.min(frame.height) / 2. / (1. + explosion);
+    let visible_labels = nodes.iter().any(|node| {
+        child(*node, "dLbls")
+            .or_else(|| child(group, "dLbls"))
+            .is_some_and(|labels| {
+                labels.descendants().any(|n| {
+                    [
+                        "showVal",
+                        "showPercent",
+                        "showSerName",
+                        "showCatName",
+                        "showLegendKey",
+                    ]
+                    .iter()
+                    .any(|k| chart_node(n, k))
+                        && n.attribute("val").map_or(true, |v| on(Some(v)))
+                        || chart_node(n, "tx")
+                })
+            })
+    });
+    let automatic = child(plot, "layout")
+        .and_then(|n| child(n, "manualLayout"))
+        .is_none();
+    let r = if colors.spreadsheet_defaults {
+        let inset = if visible_labels && automatic {
+            0.125
+        } else {
+            0.
+        };
+        (frame.width - width * inset)
+            .min(frame.height - height * inset)
+            .max(1.)
+            / 2.
+    } else {
+        frame.width.min(frame.height) / 2. / (1. + explosion)
+    };
     let hole = if kind == "doughnut" {
         number(val(Some(group), "holeSize"))
             .unwrap_or(50.)
@@ -700,12 +944,27 @@ pub(super) fn render(
         let points = &sets[i];
         let series = &data.series[i];
         let all_labels = child(nodes[i], "dLbls").or_else(|| child(group, "dLbls"));
+        let props = if colors.spreadsheet_defaults {
+            text_props(all_labels, false)
+        } else {
+            None
+        };
+        let label_size = font_size(props, size);
+        let label_face = font_family(props, minor_latin.unwrap_or("Calibri"));
         let labels = all_labels.map(|options| LabelStyle {
             options,
             series: series.name.as_deref().unwrap_or(""),
-            size,
-            face: &face,
-            legacy,
+            size: label_size,
+            face: if colors.spreadsheet_defaults {
+                &label_face
+            } else {
+                &face
+            },
+            legacy: legacy || colors.spreadsheet_defaults,
+            spreadsheet: colors.spreadsheet_defaults,
+            format: child(nodes[i], "val")
+                .and_then(|node| node.descendants().find(|n| chart_node(*n, "formatCode")))
+                .and_then(|n| n.text()),
         });
         if kind == "ofPie" {
             draw_split(
@@ -737,6 +996,19 @@ pub(super) fn render(
         }
         svg.push_str("</g>");
     }
+    if let Some(scatter) = scatter {
+        let side = frame.width.min(frame.height);
+        super::cartesian_chart::scatter_overlay(
+            &mut svg,
+            &mut label_svg,
+            scatter,
+            &data.series[ring_series..],
+            ring_series,
+            colors,
+            [frame.x - side / 2., frame.y - side / 2., side, side],
+            minor_latin.unwrap_or("Calibri"),
+        )?;
+    }
     svg.push_str(&label_svg);
     if title.is_some() {
         let props = title_props;
@@ -744,7 +1016,7 @@ pub(super) fn render(
             .title
             .as_deref()
             .or_else(|| {
-                if legacy {
+                if legacy || (colors.spreadsheet_defaults && count == 1) {
                     data.series.first()?.name.as_deref()
                 } else {
                     None
@@ -755,6 +1027,12 @@ pub(super) fn render(
         let bold = props
             .and_then(|n| n.attribute("b"))
             .map_or(true, |a| a != "0" && a != "false");
+        let paint = title_props
+            .filter(|_| colors.spreadsheet_defaults)
+            .and_then(|props| colors.shape_fill(props));
+        if let Some(paint) = &paint {
+            write!(svg, r#"<g fill="{paint}">"#).unwrap();
+        }
         if bold {
             svg.push_str("<g font-weight=\"bold\">");
         }
@@ -770,8 +1048,17 @@ pub(super) fn render(
         if bold {
             svg.push_str("</g>");
         }
+        if paint.is_some() {
+            svg.push_str("</g>");
+        }
     }
     if let Some(node) = legend_node {
+        let paint = legend_props
+            .filter(|_| colors.spreadsheet_defaults)
+            .and_then(|props| colors.shape_fill(props));
+        if let Some(paint) = &paint {
+            write!(svg, r#"<g fill="{paint}">"#).unwrap();
+        }
         legend(
             &mut svg,
             node,
@@ -782,6 +1069,9 @@ pub(super) fn render(
             legend_size,
             &legend_face,
         );
+        if paint.is_some() {
+            svg.push_str("</g>");
+        }
     }
     svg.push_str("</svg>");
     Some(svg)
@@ -827,12 +1117,13 @@ mod tests {
         let doc=roxmltree::Document::parse(r#"<ofPieChart xmlns="http://schemas.openxmlformats.org/drawingml/2006/chart"><splitType val="cust"/><custSplit><secondPiePt val="7"/></custSplit></ofPieChart>"#).unwrap();
         let points = [1, 4, 7].map(|index| Slice {
             index,
+            aggregate: false,
             value: 4.,
             weight: 1.,
             name: String::new(),
             explosion: 0.,
         });
-        let (main, second) = split(doc.root_element(), &points, 3.);
+        let (main, second) = split(doc.root_element(), &points, 3., false);
         assert_eq!(main.iter().map(|p| p.index).collect::<Vec<_>>(), [1, 4]);
         assert_eq!(second.iter().map(|p| p.index).collect::<Vec<_>>(), [7]);
     }

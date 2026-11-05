@@ -23,7 +23,7 @@ struct Outlines {
     point_widths: HashMap<u32, f64>,
 }
 impl Outlines {
-    fn new(series: Node) -> Self {
+    fn new(ctx: &Canvas, series: Node) -> Self {
         let width = |n| {
             child(n, "spPr")?
                 .children()
@@ -37,7 +37,14 @@ impl Outlines {
             .filter_map(|n| Some((n.attribute("idx")?.parse().ok()?, width(n)?)))
             .collect();
         Self {
-            series_width: width(series).unwrap_or(1.),
+            series_width: width(series)
+                .or_else(|| {
+                    ctx.colors
+                        .spreadsheet_defaults
+                        .then(|| ctx.colors.style_stroke_width("dataPointLine"))
+                        .flatten()
+                })
+                .unwrap_or(1.),
             point_widths,
         }
     }
@@ -54,6 +61,9 @@ impl Outlines {
 
 fn rect(
     out: &mut String,
+    ctx: &Canvas,
+    series: usize,
+    point: u32,
     x: f64,
     y: f64,
     width: f64,
@@ -67,6 +77,8 @@ fn rect(
             r#"<rect x="{x:.2}" y="{y:.2}" width="{width:.2}" height="{height:.2}" fill="{color}""#
         )
         .unwrap();
+        ctx.colors
+            .hit_attrs(out, "bar", ctx.source_indices[series], Some(point));
         if let Some((color, width)) =
             stroke.filter(|(color, width)| *color != "none" && *width > 0.)
         {
@@ -117,7 +129,7 @@ impl<'a> ChartAxes<'a> {
 fn funnel(ctx: &Canvas, series_index: usize, out: &mut String) -> Option<()> {
     let data = ctx.data.series.get(series_index)?;
     let series = ctx.series(series_index)?;
-    let outlines = Outlines::new(series);
+    let outlines = Outlines::new(ctx, series);
     let axes = ChartAxes::new(ctx.root);
     let font = Font::new(ctx, axes.cat, "#595959");
     let axis_stroke = Stroke::new(ctx, axes.cat, "#d9d9d9");
@@ -148,7 +160,12 @@ fn funnel(ctx: &Canvas, series_index: usize, out: &mut String) -> Option<()> {
         return Some(());
     }
     let stride = (bottom - top) / count;
-    let bar_height = stride / (1. + axes.gap_width(0.1));
+    let default_gap = if ctx.colors.spreadsheet_defaults {
+        1. / 3.
+    } else {
+        0.1
+    };
+    let bar_height = stride / (1. + axes.gap_width(default_gap));
     let tick = axes
         .cat
         .filter(|a| !enabled(*a, "hidden"))
@@ -173,6 +190,9 @@ fn funnel(ctx: &Canvas, series_index: usize, out: &mut String) -> Option<()> {
             let fill = ctx.paint(series_index, p.index, 0);
             rect(
                 out,
+                ctx,
+                series_index,
+                p.index,
                 center - width / 2.,
                 cy - bar_height / 2.,
                 width,
@@ -191,7 +211,14 @@ fn funnel(ctx: &Canvas, series_index: usize, out: &mut String) -> Option<()> {
                 ),
                 data.name.as_deref(),
             ) {
+                ctx.colors.begin_hit(
+                    out,
+                    "point",
+                    ctx.source_indices[series_index],
+                    Some(p.index),
+                );
                 data_font.text(out, center, cy + data_font.size * 0.367, "middle", &s);
+                ctx.colors.end_hit(out);
             }
         }
         if tick != "none" {
@@ -229,7 +256,7 @@ struct Bar<'a> {
 fn waterfall(ctx: &Canvas, series_index: usize, out: &mut String) -> Option<()> {
     let data = ctx.data.series.get(series_index)?;
     let series = ctx.series(series_index)?;
-    let outlines = Outlines::new(series);
+    let outlines = Outlines::new(ctx, series);
     let layout = child(series, "layoutPr");
     let totals: HashSet<u32> = layout
         .and_then(|l| child(l, "subtotals"))
@@ -289,10 +316,20 @@ fn waterfall(ctx: &Canvas, series_index: usize, out: &mut String) -> Option<()> 
         };
     let mut left = 9.;
     let mut right = ctx.width - 9.;
+    let legend_color = |palette| {
+        ctx.colors
+            .spreadsheet_defaults
+            .then(|| {
+                ctx.colors
+                    .explicit_fill(ctx.source_indices[series_index], None)
+            })
+            .flatten()
+            .unwrap_or_else(|| ctx.color(palette))
+    };
     let legend_entries = [
-        ("Increase", ctx.color(0)),
-        ("Decrease", ctx.color(1)),
-        ("Total", ctx.color(2)),
+        ("Increase", legend_color(0), series_index),
+        ("Decrease", legend_color(1), series_index),
+        ("Total", legend_color(2), series_index),
     ];
     legend(
         ctx,
@@ -389,7 +426,12 @@ fn waterfall(ctx: &Canvas, series_index: usize, out: &mut String) -> Option<()> 
         return Some(());
     }
     let stride = (right - left) / count;
-    let width = stride / (1. + axes.gap_width(0.5));
+    let default_gap = if ctx.colors.spreadsheet_defaults {
+        1. / 3.
+    } else {
+        0.5
+    };
+    let width = stride / (1. + axes.gap_width(default_gap));
     let abscissa = |p: &ChartPoint| left + (f64::from(p.index) + 0.5) * stride;
     for p in &data.points {
         if labels(axes.cat) {
@@ -427,6 +469,9 @@ fn waterfall(ctx: &Canvas, series_index: usize, out: &mut String) -> Option<()> 
         );
         rect(
             out,
+            ctx,
+            series_index,
+            b.point.index,
             x - width / 2.,
             y.min(start),
             width,
@@ -473,7 +518,14 @@ fn waterfall(ctx: &Canvas, series_index: usize, out: &mut String) -> Option<()> 
                     }
                 }
             };
+            ctx.colors.begin_hit(
+                out,
+                "point",
+                ctx.source_indices[series_index],
+                Some(b.point.index),
+            );
             data_font.text(out, x, baseline, "middle", &label);
+            ctx.colors.end_hit(out);
         }
     }
     Some(())

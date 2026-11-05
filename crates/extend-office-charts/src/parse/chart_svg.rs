@@ -169,3 +169,80 @@ pub(super) fn format_value(value: f64, code: Option<&str>) -> String {
     }
     value.to_string()
 }
+
+pub(super) fn date_label(serial: f64, epoch_1904: bool, code: &str) -> Option<String> {
+    if !(-657434. ..=2958465.).contains(&serial) || code.len() > 64 {
+        return None;
+    }
+    let mut serial = serial.floor() as i32;
+    if epoch_1904 {
+        serial += 1462;
+    }
+    let (year, month, day) = if serial == 60 {
+        // Excel's 1900 date system includes an extra leap day.
+        (1900, 2, 29)
+    } else {
+        let days = serial + i32::from(serial < 60) - 36526;
+        let mut year = 2000 + 400 * days.div_euclid(146097);
+        let mut day = days.rem_euclid(146097);
+        let leap = |y: i32| y % 4 == 0 && (y % 100 != 0 || y % 400 == 0);
+        while day >= 365 + i32::from(leap(year)) {
+            day -= 365 + i32::from(leap(year));
+            year += 1;
+        }
+        let mut month = 1;
+        for length in [
+            31,
+            28 + i32::from(leap(year)),
+            31,
+            30,
+            31,
+            30,
+            31,
+            31,
+            30,
+            31,
+            30,
+            31,
+        ] {
+            if day < length {
+                break;
+            }
+            day -= length;
+            month += 1;
+        }
+        (year, month, day + 1)
+    };
+    let code = code.to_ascii_lowercase();
+    let mut chars = code.chars().peekable();
+    let mut label = String::new();
+    let mut has_date = false;
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            label.push(chars.next()?);
+            continue;
+        }
+        if !matches!(c, 'm' | 'd' | 'y') {
+            if matches!(c, '/' | '-' | '.' | ' ') {
+                label.push(c);
+                continue;
+            }
+            return None;
+        }
+        let mut count = 1;
+        while chars.next_if_eq(&c).is_some() {
+            count += 1;
+        }
+        match (c, count) {
+            ('m', 1) => write!(label, "{month}").unwrap(),
+            ('m', 2) => write!(label, "{month:02}").unwrap(),
+            ('d', 1) => write!(label, "{day}").unwrap(),
+            ('d', 2) => write!(label, "{day:02}").unwrap(),
+            ('y', 2) => write!(label, "{:02}", year.rem_euclid(100)).unwrap(),
+            ('y', 4) => write!(label, "{year:04}").unwrap(),
+            _ => return None,
+        }
+        has_date = true;
+    }
+    has_date.then_some(label)
+}

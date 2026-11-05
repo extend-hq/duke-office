@@ -18,8 +18,10 @@ pub(super) struct GeoCache {
     pub us_only: bool,
     pub regional: Option<bool>,
     pub projection_bounds: Option<[f64; 4]>,
+    pub antimeridian_cut: bool,
 }
 
+#[derive(Clone)]
 pub(super) struct GeoRegion {
     pub name: String,
     pub entity_type: String,
@@ -257,6 +259,7 @@ fn read_clear(
         us_only,
         regional,
         projection_bounds,
+        antimeridian_cut: false,
     })
 }
 

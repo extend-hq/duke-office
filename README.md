@@ -7,7 +7,7 @@ Rust libraries for parsing Word documents and PowerPoint presentations, and rend
 | Crate | Purpose | Version | Downloads | API docs |
 | --- | --- | --- | --- | --- |
 | [extend-office-charts](crates/extend-office-charts) | Render Office chart definitions to SVG | [![extend-office-charts version](https://img.shields.io/crates/v/extend-office-charts.svg)](https://crates.io/crates/extend-office-charts) | [![extend-office-charts downloads](https://img.shields.io/crates/d/extend-office-charts.svg)](https://crates.io/crates/extend-office-charts) | [![extend-office-charts documentation](https://docs.rs/extend-office-charts/badge.svg)](https://docs.rs/extend-office-charts) |
-| [extend-office-charts-wasm](crates/extend-office-charts-wasm) | Render column and line charts in the browser | [![extend-office-charts-wasm version](https://img.shields.io/crates/v/extend-office-charts-wasm.svg)](https://crates.io/crates/extend-office-charts-wasm) | [![extend-office-charts-wasm downloads](https://img.shields.io/crates/d/extend-office-charts-wasm.svg)](https://crates.io/crates/extend-office-charts-wasm) | [![extend-office-charts-wasm documentation](https://docs.rs/extend-office-charts-wasm/badge.svg)](https://docs.rs/extend-office-charts-wasm) |
+| [extend-office-charts-wasm](crates/extend-office-charts-wasm) | Render Office charts in the browser | [![extend-office-charts-wasm version](https://img.shields.io/crates/v/extend-office-charts-wasm.svg)](https://crates.io/crates/extend-office-charts-wasm) | [![extend-office-charts-wasm downloads](https://img.shields.io/crates/d/extend-office-charts-wasm.svg)](https://crates.io/crates/extend-office-charts-wasm) | [![extend-office-charts-wasm documentation](https://docs.rs/extend-office-charts-wasm/badge.svg)](https://docs.rs/extend-office-charts-wasm) |
 | [extend-docx](crates/extend-docx) | Parse Word documents into a structured document model | [![extend-docx version](https://img.shields.io/crates/v/extend-docx.svg)](https://crates.io/crates/extend-docx) | [![extend-docx downloads](https://img.shields.io/crates/d/extend-docx.svg)](https://crates.io/crates/extend-docx) | [![extend-docx documentation](https://docs.rs/extend-docx/badge.svg)](https://docs.rs/extend-docx) |
 | [extend-docx-wasm](crates/extend-docx-wasm) | WebAssembly bindings for the Word parser | [![extend-docx-wasm version](https://img.shields.io/crates/v/extend-docx-wasm.svg)](https://crates.io/crates/extend-docx-wasm) | [![extend-docx-wasm downloads](https://img.shields.io/crates/d/extend-docx-wasm.svg)](https://crates.io/crates/extend-docx-wasm) | [![extend-docx-wasm documentation](https://docs.rs/extend-docx-wasm/badge.svg)](https://docs.rs/extend-docx-wasm) |
 | [extend-pptx](crates/extend-pptx) | Parse PowerPoint presentations into a structured slide model | [![extend-pptx version](https://img.shields.io/crates/v/extend-pptx.svg)](https://crates.io/crates/extend-pptx) | [![extend-pptx downloads](https://img.shields.io/crates/d/extend-pptx.svg)](https://crates.io/crates/extend-pptx) | [![extend-pptx documentation](https://docs.rs/extend-pptx/badge.svg)](https://docs.rs/extend-pptx) |
@@ -48,14 +48,14 @@ Measured November 4, 2026 using the React DOCX 0.14.0 release. These are retaine
 <details>
 <summary><strong>extend-office-charts-wasm — chart WebAssembly bindings</strong></summary>
 
-WebAssembly bindings for rendering Cartesian Office Open XML charts to SVG. See the [crate guide](crates/extend-office-charts-wasm/README.md). The [Word comparison](docs/chart-comparisons.md) measures the React DOCX integration; it does not measure standalone WASM loading or throughput.
+The default build includes two-dimensional bar, line, area, and scatter charts. Enable `extended-charts` for the other chart families supported by the Rust renderer. See the [crate guide](crates/extend-office-charts-wasm/README.md). The [Word comparison](docs/chart-comparisons.md) measures the React DOCX integration; it does not measure standalone WASM loading or throughput.
 
 </details>
 
 <details>
 <summary><strong>@extend-ai/extend-office-charts — browser package</strong></summary>
 
-Import `loadOfficeCharts` from `@extend-ai/extend-office-charts`, then call `(await loadOfficeCharts()).renderChart(chartXml, options)`. See the [TypeScript API](browser/index.d.ts) for renderer options.
+In the browser package, import `loadOfficeCharts` from `@extend-ai/extend-office-charts` for two-dimensional bar, line, area and scatter charts, or from `@extend-ai/extend-office-charts/full` to also load the Rust pie, bubble, radar, stock, 3D, surface and ChartEx renderers. Both expose `(await loadOfficeCharts()).renderChart(chartXml, options)`. Unsupported layouts can return `null`; support for a chart family alone does not establish Excel fidelity.
 
 The retained [Word gallery](docs/chart-comparisons.md) records the React DOCX 0.14.0 integration. Browser package versions and entry points have their own release history.
 

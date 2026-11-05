@@ -106,7 +106,11 @@ fn project(cache: &mut geo_cache::GeoCache, geography: Node) -> Option<Bounds> {
     let mut bounds = Bounds::new();
     for region in regions {
         let [west, _, east, _] = region.bounds?;
-        let center = longitude_midpoint(west, east);
+        let center = if world && cache.antimeridian_cut {
+            0.
+        } else {
+            longitude_midpoint(west, east)
+        };
         for ring in region.polygons.iter_mut().flatten() {
             *ring = projection.project_ring(ring, center);
             for &p in ring.iter() {
@@ -174,7 +178,22 @@ pub(super) fn render(ctx: &Canvas, face: &str, out: &mut String) -> Option<()> {
     let series = *ctx.data.series.first()?;
     let geography = child(child(source, "layoutPr")?, "geography")?;
     let dataset = dataset_for(ctx.root, source);
-    let mut cache = geo_cache::read(child(geography, "geoCache")?, dataset, &series.points)?;
+    let cache = child(geography, "geoCache")
+        .and_then(|cache| geo_cache::read(cache, dataset, &series.points));
+    let saved_geometry = cache.is_some();
+    #[cfg(feature = "map-fallback")]
+    let cache = cache.or_else(|| {
+        if !ctx.colors.spreadsheet_defaults {
+            return None;
+        }
+        let fallback = super::map_atlas::read(geography, &series.points);
+        out.push_str(if fallback.is_some() {
+            "<desc>Map uses offline country or state boundaries because the chart has no usable saved geometry.</desc>"
+        } else {
+            "<desc>Map boundaries are unavailable for these locations.</desc>"
+        });
+        fallback
+    });
     let dimension = dataset.and_then(crate::chart::map_color_dimension);
     let scale = scale::MapScale::new(ctx, dimension, source, series);
     let format = dimension
@@ -199,14 +218,35 @@ pub(super) fn render(ctx: &Canvas, face: &str, out: &mut String) -> Option<()> {
         &mut plot,
         &mut legend,
     );
+    let Some(mut cache) = cache else {
+        #[cfg(feature = "map-fallback")]
+        if ctx.colors.spreadsheet_defaults {
+            out.push_str(&legend);
+            return Some(());
+        }
+        return None;
+    };
     if plot.width() <= 0. || plot.height() <= 0. {
         return None;
     }
     let bounds = project(&mut cache, geography)?;
     let stroke = ctx
         .colors
-        .style_stroke("dataPoint", "#ffffff")
+        .spreadsheet_defaults
+        .then(|| {
+            ctx.colors
+                .outline(ctx.source_indices[0], None)
+                .map(str::to_owned)
+        })
+        .flatten()
+        .or_else(|| ctx.colors.style_stroke("dataPoint", "#ffffff"))
         .unwrap_or_else(|| "#ffffff".into());
+    let no_data_fill = ctx
+        .colors
+        .spreadsheet_defaults
+        .then(|| ctx.colors.explicit_fill(ctx.source_indices[0], None))
+        .flatten()
+        .unwrap_or("#e0e0e0");
     let default_width = outline_width(source)
         .or_else(|| ctx.colors.style_stroke_width("dataPoint"))
         .unwrap_or(1. / 3.);
@@ -224,13 +264,17 @@ pub(super) fn render(ctx: &Canvas, face: &str, out: &mut String) -> Option<()> {
         .filter_map(|n| Some((n.attribute("idx")?.parse().ok()?, outline_width(n)?)))
         .collect();
     let labels = child(source, "dataLabels");
+    let region_labels = child(source, "layoutPr")
+        .and_then(|node| child(node, "regionLabelLayout"))
+        .and_then(|node| node.attribute("val"))
+        .filter(|mode| *mode != "none" && ctx.colors.spreadsheet_defaults);
     let label_font = Font::with_defaults(ctx, labels, "#595959", face, 12.);
     let mut label_svg = String::new();
     for region in &cache.regions {
         let idx = region.point_index;
         let fill = idx
             .and_then(|i| scale.fills.get(&i))
-            .map_or("#e0e0e0", String::as_str);
+            .map_or(no_data_fill, String::as_str);
         let stroke = idx
             .and_then(|i| ctx.colors.outline(ctx.source_indices[0], Some(i)))
             .unwrap_or(&stroke);
@@ -240,6 +284,21 @@ pub(super) fn render(ctx: &Canvas, face: &str, out: &mut String) -> Option<()> {
             .unwrap_or(default_width);
         out.push_str("<path");
         if let Some(i) = idx {
+            ctx.colors
+                .hit_attrs(out, "point", ctx.source_indices[0], Some(i));
+            if ctx.colors.interactive {
+                let center = region.center.or_else(|| {
+                    let mut bounds = Bounds::new();
+                    for &point in region.polygons.iter().flatten().flatten() {
+                        bounds.add(point);
+                    }
+                    bounds.min_x.is_finite().then(|| bounds.center())
+                });
+                if let Some(center) = center {
+                    let (x, y) = transform.apply(center);
+                    write!(out, r#" data-chart-x="{x:.2}" data-chart-y="{y:.2}""#).unwrap();
+                }
+            }
             write!(
                 out,
                 r#" data-docx-series="{}" data-docx-point="{i}""#,
@@ -270,17 +329,82 @@ pub(super) fn render(ctx: &Canvas, face: &str, out: &mut String) -> Option<()> {
                     data_label(labels, &region.name, &value, series.name.as_deref())
                 {
                     let (x, y) = transform.apply(pos);
+                    ctx.colors
+                        .begin_hit(&mut label_svg, "point", ctx.source_indices[0], idx);
                     label_font.text(&mut label_svg, x, y, "middle", &label);
+                    ctx.colors.end_hit(&mut label_svg);
                 }
             }
         }
         out.push_str("</title></path>");
+        if idx.is_some() && region_labels.is_some() && !region.name.is_empty() {
+            let largest = region.polygons.iter().flatten().max_by(|a, b| {
+                let area = |ring: &Vec<(f64, f64)>| {
+                    ring.windows(2)
+                        .map(|p| p[0].0 * p[1].1 - p[1].0 * p[0].1)
+                        .sum::<f64>()
+                        .abs()
+                };
+                area(a).total_cmp(&area(b))
+            });
+            if let Some(ring) = largest {
+                let mut bounds = Bounds::new();
+                for &point in ring {
+                    bounds.add(transform.apply(point));
+                }
+                let size = 10.666667;
+                let fits = crate::parse::chart_svg::text_width(&region.name, size) + 6.
+                    < bounds.max_x - bounds.min_x
+                    && size * 1.3 < bounds.max_y - bounds.min_y;
+                if fits {
+                    let (x, y) = region
+                        .center
+                        .map(|p| transform.apply(p))
+                        .unwrap_or_else(|| bounds.center());
+                    let dark = crate::parse::chart_colors::rgba(fill).is_some_and(|[r, g, b, _]| {
+                        0.299 * f64::from(r) + 0.587 * f64::from(g) + 0.114 * f64::from(b) < 145.
+                    });
+                    let font = Font::with_defaults(
+                        ctx,
+                        None,
+                        if dark { "#ffffff" } else { "#333333" },
+                        face,
+                        size,
+                    );
+                    ctx.colors
+                        .begin_hit(&mut label_svg, "point", ctx.source_indices[0], idx);
+                    let default_value = labels
+                        .filter(|node| child(*node, "visibility").is_none())
+                        .and(point)
+                        .and_then(|point| point.value.as_deref())
+                        .map(|value| {
+                            number(Some(value))
+                                .map_or_else(|| value.to_owned(), |v| format_value(v, format))
+                        });
+                    let baseline = y + size * 0.33
+                        - if default_value.is_some() {
+                            size * 0.65
+                        } else {
+                            0.
+                        };
+                    font.text(&mut label_svg, x, baseline, "middle", &region.name);
+                    if let Some(value) = default_value {
+                        font.text(&mut label_svg, x, baseline + size * 1.3, "middle", &value);
+                    }
+                    ctx.colors.end_hit(&mut label_svg);
+                }
+            }
+        }
     }
     out.push_str(&label_svg);
-    let attribution = geography
-        .attribute("attribution")
-        .unwrap_or_default()
-        .trim();
+    let attribution = if saved_geometry {
+        geography
+            .attribute("attribution")
+            .unwrap_or_default()
+            .trim()
+    } else {
+        ""
+    };
     let mut y = plot.bottom - 2.;
     if !cache.credits.is_empty() {
         credit_text(

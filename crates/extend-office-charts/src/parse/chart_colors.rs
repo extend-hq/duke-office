@@ -106,6 +106,8 @@ fn color(node: Node, theme: &ThemeColorMap) -> Option<String> {
 struct Properties {
     fill: Option<String>,
     outline: Option<String>,
+    #[cfg(feature = "extended-charts")]
+    outline_width: Option<f64>,
     marker: Option<String>,
     marker_outline: Option<String>,
 }
@@ -119,6 +121,11 @@ impl Properties {
             outline: properties
                 .and_then(|p| drawing_child(p, "ln"))
                 .and_then(|p| servers.fill(p, theme)),
+            #[cfg(feature = "extended-charts")]
+            outline_width: properties
+                .and_then(|p| drawing_child(p, "ln"))
+                .and_then(|line| line.attribute("w")?.parse::<u32>().ok())
+                .map(|emu| f64::from(emu) / 9525.),
             marker: marker.and_then(|p| servers.fill(p, theme)),
             marker_outline: marker
                 .and_then(|m| drawing_child(m, "ln"))
@@ -132,6 +139,37 @@ struct Series {
     vary_by_point: bool,
     paint: Properties,
     points: HashMap<u32, Properties>,
+}
+
+pub(super) fn classic_style_id(root: Node) -> Option<u8> {
+    const MC: &str = "http://schemas.openxmlformats.org/markup-compatibility/2006";
+    const C14: &str = "http://schemas.microsoft.com/office/drawing/2007/8/2/chart";
+    let style_id = |node: Node| node.attribute("val")?.parse::<u8>().ok();
+    let alternate = root.children().find(|n| {
+        n.has_tag_name((MC, "AlternateContent"))
+            && n.descendants()
+                .any(|n| n.has_tag_name((C14, "style")) || chart_node(n, "style"))
+    });
+    let extended = alternate
+        .and_then(|n| {
+            n.children()
+                .filter(|c| c.has_tag_name((MC, "Choice")))
+                .flat_map(|c| c.children())
+                .find(|s| s.has_tag_name((C14, "style")))
+        })
+        .and_then(style_id)
+        .filter(|n| (101..=148).contains(n));
+    extended.or_else(|| {
+        child(root, "style")
+            .or_else(|| {
+                alternate?
+                    .children()
+                    .find(|n| n.has_tag_name((MC, "Fallback")))
+                    .and_then(|n| child(n, "style"))
+            })
+            .and_then(style_id)
+            .filter(|n| (1..=48).contains(n))
+    })
 }
 
 struct Palette(Vec<String>);
@@ -216,6 +254,46 @@ pub(super) struct ChartColors {
 }
 
 impl ChartColors {
+    pub(super) fn hit_attrs(
+        &self,
+        svg: &mut String,
+        kind: &str,
+        series: usize,
+        point: Option<u32>,
+    ) {
+        use std::fmt::Write;
+        if self.interactive {
+            write!(
+                svg,
+                r#" data-chart-kind="{kind}" data-chart-series="{series}""#
+            )
+            .unwrap();
+            if let Some(index) = point {
+                write!(svg, r#" data-chart-point="{index}""#).unwrap();
+            }
+        }
+    }
+
+    pub(super) fn begin_hit(
+        &self,
+        svg: &mut String,
+        kind: &str,
+        series: usize,
+        point: Option<u32>,
+    ) {
+        if self.interactive {
+            svg.push_str("<g");
+            self.hit_attrs(svg, kind, series, point);
+            svg.push('>');
+        }
+    }
+
+    pub(super) fn end_hit(&self, svg: &mut String) {
+        if self.interactive {
+            svg.push_str("</g>");
+        }
+    }
+
     pub fn new(root: Node, options: &RenderOptions<'_>, data: &crate::chart::ChartData) -> Self {
         let mut theme = default_drawing_scheme_colors();
         for (token, color) in [
@@ -385,6 +463,17 @@ impl ChartColors {
         self.legacy_defaults
     }
 
+    pub(super) fn theme_paint(&self, token: &str, tint: Option<f64>) -> String {
+        let rgb = &self.theme[token];
+        tint.and_then(|v| transform_rgb(rgb, [("tint", v)], true))
+            .unwrap_or_else(|| rgb.clone())
+    }
+
+    pub(super) fn theme_shade(&self, token: &str, amount: f64) -> String {
+        let rgb = &self.theme[token];
+        transform_rgb(rgb, [("shade", amount)], true).unwrap_or_else(|| rgb.clone())
+    }
+
     pub fn palette(&self, index: usize, highest: usize) -> String {
         #[cfg(feature = "extended-charts")]
         if let Some(palette) = &self.style_palette {
@@ -501,6 +590,11 @@ impl ChartColors {
         self.explicit(i, point, |p| p.fill.as_deref())
     }
 
+    #[cfg(feature = "extended-charts")]
+    pub fn explicit_point_fill(&self, series: usize, point: u32) -> Option<&str> {
+        self.series.get(series)?.points.get(&point)?.fill.as_deref()
+    }
+
     pub fn fill(&self, i: usize, point: Option<u32>) -> String {
         self.explicit_fill(i, point)
             .map(str::to_owned)
@@ -509,6 +603,16 @@ impl ChartColors {
 
     pub fn outline(&self, i: usize, point: Option<u32>) -> Option<&str> {
         self.explicit(i, point, |p| p.outline.as_deref())
+    }
+
+    #[cfg(feature = "extended-charts")]
+    pub fn outline_width(&self, series: usize, point: u32) -> Option<f64> {
+        let series = self.series.get(series)?;
+        series
+            .points
+            .get(&point)
+            .and_then(|p| p.outline_width)
+            .or(series.paint.outline_width)
     }
 
     fn default_stroke(&self, i: usize, point: Option<u32>) -> String {

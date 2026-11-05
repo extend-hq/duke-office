@@ -39,7 +39,7 @@ pub fn render_chart(xml: &str, options: &RenderOptions<'_>) -> Option<RenderedCh
     let svg = if root.has_tag_name((crate::chart::CHARTEX_NS, "chartSpace")) {
         #[cfg(feature = "extended-charts")]
         {
-            chartex::render(root, &data, &colors, width, height, options.font_family)
+            chartex::render(root, &data, &colors, width, height, options)
         }
         #[cfg(not(feature = "extended-charts"))]
         {
@@ -125,7 +125,9 @@ fn render_empty_chart(
                 .map(escape_xml_text)
                 .unwrap_or_else(|| format!("Series {}", i + 1));
             let color = colors.fill(i, None);
+            colors.begin_hit(&mut svg, "legendEntry", i, None);
             write!(svg, r#"<rect x="{}" y="{y}" width="8" height="8" fill="{color}"/><text x="{}" y="{}" font-size="11">{name}</text>"#,right+10.0,right+22.0,y+8.0).unwrap();
+            colors.end_hit(&mut svg);
         }
     }
     svg.push_str("</svg>");

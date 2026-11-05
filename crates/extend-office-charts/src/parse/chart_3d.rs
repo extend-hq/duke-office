@@ -20,6 +20,7 @@ struct Point {
 }
 
 struct Scene {
+    spreadsheet: bool,
     left: f64,
     top: f64,
     width: f64,
@@ -139,7 +140,13 @@ fn num(n: Option<Node>, name: &str) -> Option<f64> {
     number(val(n, name))
 }
 
-fn range(data: &ChartData, group: Node, axis: Option<Node>, intervals: f64) -> (f64, f64, f64) {
+fn range(
+    data: &ChartData,
+    group: Node,
+    axis: Option<Node>,
+    intervals: f64,
+    spreadsheet: bool,
+) -> (f64, f64, f64) {
     let scaling = axis.and_then(|a| child(a, "scaling"));
     let grouping = val(Some(group), "grouping");
     let stacked = matches!(grouping, Some("stacked" | "percentStacked"));
@@ -161,11 +168,16 @@ fn range(data: &ChartData, group: Node, axis: Option<Node>, intervals: f64) -> (
             high = high.max(v)
         }
     }
-    for (a, b) in totals.into_values() {
+    for (mut a, mut b) in totals.into_values() {
+        if spreadsheet && grouping == Some("percentStacked") && b > a {
+            let total = b - a;
+            a /= total;
+            b /= total;
+        }
         low = low.min(a);
         high = high.max(b)
     }
-    if grouping == Some("percentStacked") {
+    if !spreadsheet && grouping == Some("percentStacked") {
         low = if low < 0. { -1. } else { 0. };
         high = if high > 0. { 1. } else { 0. }
     }
@@ -204,6 +216,51 @@ fn stroke_line(out: &mut String, a: Point, b: Point, color: &str) {
     line(out, a.x, a.y, b.x, b.y, color)
 }
 
+fn begin_point_hit(
+    out: &mut String,
+    colors: &ChartColors,
+    kind: &str,
+    series: usize,
+    index: u32,
+    anchor: Point,
+) {
+    if colors.interactive {
+        out.push_str("<g");
+        colors.hit_attrs(out, kind, series, Some(index));
+        write!(
+            out,
+            r#" data-chart-x="{:.2}" data-chart-y="{:.2}">"#,
+            anchor.x, anchor.y
+        )
+        .unwrap();
+    }
+}
+
+fn point_anchor(out: &mut String, colors: &ChartColors, series: usize, index: u32, anchor: Point) {
+    begin_point_hit(out, colors, "point", series, index, anchor);
+    write!(
+        out,
+        r#"<circle cx="{:.2}" cy="{:.2}" r="4" fill="transparent"/>"#,
+        anchor.x, anchor.y
+    )
+    .unwrap();
+    colors.end_hit(out);
+}
+
+fn classic_style(root: Node) -> u32 {
+    root.descendants()
+        .filter(|n| n.tag_name().name() == "style")
+        .filter_map(|n| n.attribute("val")?.parse::<u32>().ok())
+        .find(|n| (101..=148).contains(n))
+        .or_else(|| {
+            root.descendants()
+                .filter(|n| chart_node(*n, "style"))
+                .filter_map(|n| n.attribute("val")?.parse().ok())
+                .find(|n| (1..=48).contains(n))
+        })
+        .unwrap_or(2)
+}
+
 fn grids(
     out: &mut String,
     scene: &Scene,
@@ -212,18 +269,28 @@ fn grids(
     colors: &ChartColors,
     horizontal: bool,
 ) {
+    let style = classic_style(chart.parent().unwrap_or(chart));
+    let is_surface = plot
+        .children()
+        .any(|n| n.tag_name().name().starts_with("surface"));
+    let style = if scene.spreadsheet && is_surface && style < 100 {
+        style + 100
+    } else {
+        style
+    };
     let axis = child(plot, "valAx");
     let grid = axis.and_then(|a| child(a, "majorGridlines"));
     let grid_color = grid
         .and_then(|g| child(g, "spPr"))
         .and_then(|s| colors.shape_stroke(s))
         .unwrap_or_else(|| {
-            if colors.legacy_defaults() {
-                "#868686"
+            if scene.spreadsheet {
+                colors.theme_paint("tx1", (style > 100).then_some(0.75))
+            } else if colors.legacy_defaults() {
+                "#868686".into()
             } else {
-                "#000000"
+                "#000000".into()
             }
-            .into()
         });
     let point = |x, y, z| {
         if horizontal {
@@ -271,9 +338,38 @@ fn grids(
             ],
         ),
     ] {
-        if let Some(p) = child(chart, name).and_then(|w| child(w, "spPr")) {
-            let fill = colors.shape_fill(p).unwrap_or_else(|| "none".into());
-            let stroke = colors.shape_stroke(p).unwrap_or_else(|| "none".into());
+        let properties = child(chart, name).and_then(|w| child(w, "spPr"));
+        if properties.is_some() || scene.spreadsheet {
+            let fill = properties
+                .and_then(|p| colors.shape_fill(p))
+                .unwrap_or_else(|| {
+                    if !scene.spreadsheet {
+                        return "none".into();
+                    }
+                    match style % 100 {
+                        33 | 34 => colors.theme_paint("tx1", Some(0.2)),
+                        35..=40 => colors.theme_paint(
+                            &format!("accent{}", style % 100 - 34),
+                            (style > 100).then_some(0.2),
+                        ),
+                        41..=48 => colors.theme_paint("tx1", Some(0.95)),
+                        _ => "none".into(),
+                    }
+                });
+            let fill = if scene.spreadsheet && is_surface {
+                surface::matte_color(&fill, 0.4 + 0.75 / 3_f64.sqrt())
+            } else {
+                fill
+            };
+            let stroke = properties
+                .and_then(|p| colors.shape_stroke(p))
+                .unwrap_or_else(|| {
+                    if scene.spreadsheet && fill != "none" {
+                        grid_color.clone()
+                    } else {
+                        "none".into()
+                    }
+                });
             polygon(out, &points, &fill, &stroke);
         }
     }
@@ -336,7 +432,12 @@ fn legend(
     let wire = kind.starts_with("surface")
         && child(group, "wireframe")
             .is_some_and(|n| !matches!(n.attribute("val"), Some("0" | "false" | "off")));
-    let mut entries: Vec<(String, String)> = if kind.starts_with("surface") {
+    struct Entry {
+        name: String,
+        fill: String,
+        source: Option<(usize, Option<u32>)>,
+    }
+    let mut entries: Vec<Entry> = if kind.starts_with("surface") {
         let count = ((scene.high - scene.low) / scene.step)
             .ceil()
             .clamp(1., 160.) as usize;
@@ -345,12 +446,13 @@ fn legend(
             .map(|i| {
                 let v = scene.low + i as f64 * scene.step;
                 let fill = surface::band_color(group, colors, i, count);
-                (
-                    format!("{}-{}", format_tick(v), format_tick(v + scene.step)),
-                    super::colors::transform_rgb(&fill, [("shade", 0.75)], true)
+                Entry {
+                    name: format!("{}-{}", format_tick(v), format_tick(v + scene.step)),
+                    fill: super::colors::transform_rgb(&fill, [("shade", 0.75)], true)
                         .map(|c| c + fill.get(7..).unwrap_or(""))
                         .unwrap_or(fill),
-                )
+                    source: None,
+                }
             })
             .collect()
     } else if kind == "pie3DChart" {
@@ -359,20 +461,24 @@ fn legend(
             .into_iter()
             .flat_map(|s| s.points.iter())
             .filter(|p| p.value.is_some())
-            .map(|p| {
-                (
-                    p.categories
-                        .first()
-                        .map_or_else(|| (u64::from(p.index) + 1).to_string(), |c| c.label.clone()),
-                    colors.fill(0, Some(p.index)),
-                )
+            .map(|p| Entry {
+                name: p
+                    .categories
+                    .first()
+                    .map_or_else(|| (u64::from(p.index) + 1).to_string(), |c| c.label.clone()),
+                fill: colors.fill(0, Some(p.index)),
+                source: Some((0, Some(p.index))),
             })
             .collect()
     } else {
         data.series
             .iter()
             .enumerate()
-            .map(|(i, s)| (s.name.clone().unwrap_or_default(), colors.fill(i, None)))
+            .map(|(i, s)| Entry {
+                name: s.name.clone().unwrap_or_default(),
+                fill: colors.fill(i, None),
+                source: Some((i, None)),
+            })
             .collect()
     };
     if matches!(kind, "bar3DChart" | "area3DChart" | "line3DChart")
@@ -383,10 +489,22 @@ fn legend(
     {
         entries.reverse();
     }
+    if scene.spreadsheet
+        && ((kind.starts_with("surface")
+            && matches!(val(Some(legend), "legendPos"), Some("t" | "b")))
+            || (kind == "bar3DChart"
+                && val(Some(group), "barDir") == Some("bar")
+                && matches!(
+                    val(Some(group), "grouping"),
+                    Some("stacked" | "percentStacked")
+                )))
+    {
+        entries.reverse();
+    }
     let key = size * 0.525;
     let longest = entries
         .iter()
-        .map(|(n, _)| text_width(n, size))
+        .map(|e| text_width(&e.name, size))
         .fold(0., f64::max);
     let stride = size * 1.75;
     let placement = val(Some(legend), "legendPos").unwrap_or("r");
@@ -396,7 +514,7 @@ fn legend(
         "b" | "t" => {
             (w - entries
                 .iter()
-                .map(|(n, _)| text_width(n, size) + key + 12.)
+                .map(|e| text_width(&e.name, size) + key + 12.)
                 .sum::<f64>())
                 / 2.
         }
@@ -407,7 +525,26 @@ fn legend(
         "b" => h - 12.,
         _ => (h - stride * (entries.len().saturating_sub(1) as f64)) / 2.,
     };
-    for (i, (name, fill)) in entries.iter().enumerate() {
+    if scene.spreadsheet {
+        let ink = text_props(Some(legend), false)
+            .and_then(|p| colors.shape_fill(p))
+            .unwrap_or_else(|| {
+                colors.theme_paint(
+                    if classic_style(chart.parent().unwrap_or(chart)) % 100 >= 41 {
+                        "bg1"
+                    } else {
+                        "tx1"
+                    },
+                    None,
+                )
+            });
+        write!(out, r#"<g fill="{ink}">"#).unwrap();
+    }
+    for (i, entry) in entries.iter().enumerate() {
+        let Entry { name, fill, source } = entry;
+        if let Some((series, point)) = source {
+            colors.begin_hit(out, "legendEntry", *series, *point);
+        }
         let y = y0 + if horizontal { 0. } else { i as f64 * stride };
         let (stroke, fill) = if wire {
             (fill.as_str(), "none")
@@ -429,9 +566,15 @@ fn legend(
             font,
             name,
         );
+        if source.is_some() {
+            colors.end_hit(out);
+        }
         if horizontal {
             x += text_width(name, size) + key + 12.;
         }
+    }
+    if scene.spreadsheet {
+        out.push_str("</g>");
     }
 }
 
@@ -473,11 +616,19 @@ pub(super) fn render(
         val_axis,
         if let Some(h) = manual_h {
             (h / (size * 3.)).floor().clamp(1., 10.)
-        } else if bars || kind == "line3DChart" {
+        } else if (bars && (!colors.spreadsheet_defaults || on(val(val_axis, "delete"))))
+            || (colors.spreadsheet_defaults && kind == "area3DChart")
+            || (!colors.spreadsheet_defaults && kind == "line3DChart")
+        {
             10.
+        } else if colors.spreadsheet_defaults && bars {
+            (height / (size * 3.)).floor().clamp(1., 10.)
+        } else if colors.spreadsheet_defaults && contour && on(val(Some(group), "wireframe")) {
+            (height / (size * 6.)).clamp(2., 8.)
         } else {
             5.
         },
+        colors.spreadsheet_defaults,
     );
     let n = data
         .series
@@ -502,7 +653,20 @@ pub(super) fn render(
     } else {
         1. / 3.
     };
+    let between = val(val_axis, "crossBetween") == Some("between");
+    let surface = kind.starts_with("surface");
+    let surface_ratio = if colors.spreadsheet_defaults && surface {
+        let span = if between && n > 1. { n - 1. } else { n };
+        let levels = ((n + series - if between { 0. } else { 1. }) / 2.).floor();
+        Some((
+            levels.max(1.) / span * num(view, "hPercent").map_or(height / width, |v| v / 100.),
+            series / span,
+        ))
+    } else {
+        None
+    };
     let mut scene = Scene {
+        spreadsheet: colors.spreadsheet_defaults,
         low,
         high,
         step,
@@ -538,10 +702,16 @@ pub(super) fn render(
         } else {
             height * 0.89
         },
-        model_height: num(view, "hPercent")
-            .map_or(default_height, |h| h / 100.)
+        model_height: surface_ratio
+            .map_or_else(
+                || num(view, "hPercent").map_or(default_height, |h| h / 100.),
+                |(h, _)| h,
+            )
             .clamp(0.015, 5.),
-        model_depth: (depth * num(view, "depthPercent").unwrap_or(100.) / 100.).clamp(0.002, 20.),
+        model_depth: (surface_ratio.map_or(depth, |(_, d)| d)
+            * num(view, "depthPercent").unwrap_or(100.)
+            / 100.)
+            .clamp(0.002, 20.),
         rot_x: num(view, "rotX")
             .unwrap_or(if contour {
                 90.
@@ -563,6 +733,10 @@ pub(super) fn render(
         origin: Point { x: 0., y: 0. },
         scale: 1.,
     };
+    if scene.spreadsheet && horizontal {
+        scene.model_depth *= scene.model_height;
+    }
+    let mut plot_bounds = None;
     if let Some(manual) = manual {
         let x = num(Some(manual), "x");
         let y = num(Some(manual), "y");
@@ -584,11 +758,28 @@ pub(super) fn render(
         if bars && num(view, "hPercent").is_none() {
             scene.model_height = 0.84 * scene.height / scene.width;
         }
-    } else if !is_pie && !contour {
-        let (mut l, mut t, mut r, mut b) =
-            axes::margins(root, plot, data, width, height, &font, size, horizontal);
+    } else if !is_pie && (!contour || scene.spreadsheet) {
+        let (mut l, mut t, mut r, mut b) = axes::margins(
+            root,
+            plot,
+            data,
+            width,
+            height,
+            &font,
+            size,
+            horizontal,
+            scene.spreadsheet,
+        );
+        let axis_margins = (l, t, r, b);
         b += table::reserved_height(plot, data, size);
-        if colors.legacy_defaults() {
+        if scene.spreadsheet {
+            if let Some(title) = child(chart, "title").filter(|n| !on(val(Some(*n), "overlay"))) {
+                let props = text_props(Some(title), true).or(text_props(Some(title), false));
+                t += font_size(props, size * 1.8) * 1.36;
+            }
+            r += axes::depth_margin(plot, data, size);
+        }
+        if colors.legacy_defaults() || scene.spreadsheet {
             if let Some(legend) = child(chart, "legend").filter(|n| !on(val(Some(*n), "overlay"))) {
                 let longest = data
                     .series
@@ -611,6 +802,12 @@ pub(super) fn render(
             l = (l - size * 0.3).max(0.);
             b = (b - size * 0.3).max(0.);
         }
+        plot_bounds = Some((
+            scene.left + l - axis_margins.0,
+            scene.top + t - axis_margins.1,
+            (scene.width - l - r + axis_margins.0 + axis_margins.2).max(1.),
+            (scene.height - t - b + axis_margins.1 + axis_margins.3).max(1.),
+        ));
         scene.left += l;
         scene.top += t;
         scene.width = (scene.width - l - r).max(1.);
@@ -637,17 +834,31 @@ pub(super) fn render(
     } else {
         height.min(336.) / 25.2
     };
+    let dark = scene.spreadsheet && classic_style(root) % 100 >= 41;
     let sp = child(root, "spPr");
-    let fill = sp
-        .and_then(|p| colors.shape_fill(p))
-        .unwrap_or_else(|| "white".into());
+    let fill = sp.and_then(|p| colors.shape_fill(p)).unwrap_or_else(|| {
+        if dark {
+            colors.theme_paint("tx1", None)
+        } else {
+            "white".into()
+        }
+    });
     let border = sp
         .and_then(|p| colors.shape_stroke(p))
         .unwrap_or_else(|| "#868686".into());
     let mut out = format!(
         r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}"><rect width="{width}" height="{height}" rx="{corner}" fill="{fill}" stroke="{border}"/>"#
     );
-    if !is_pie && !contour {
+    if scene.spreadsheet {
+        if let Some(p) = child(plot, "spPr") {
+            if let Some((x, y, w, h)) = plot_bounds {
+                let fill = colors.shape_fill(p).unwrap_or_else(|| "none".into());
+                let stroke = colors.shape_stroke(p).unwrap_or_else(|| "none".into());
+                write!(out, r#"<rect x="{x:.2}" y="{y:.2}" width="{w:.2}" height="{h:.2}" fill="{fill}" stroke="{stroke}"/>"#).unwrap();
+            }
+        }
+    }
+    if !is_pie && (!contour || scene.spreadsheet) {
         grids(&mut out, &scene, chart, plot, colors, horizontal);
     }
     match kind {
@@ -655,7 +866,7 @@ pub(super) fn render(
         "surface3DChart" | "surfaceChart" => surface::draw(&scene, data, group, colors, &mut out),
         _ => planes::draw(&scene, data, group, colors, &mut out),
     }
-    if !is_pie && !contour {
+    if !is_pie && (!contour || scene.spreadsheet) {
         axes::draw(
             &mut out, &scene, plot, data, horizontal, &font, size, colors,
         );
@@ -671,13 +882,22 @@ pub(super) fn render(
             size,
         );
     }
-    if let Some(label) = data.title.as_ref() {
-        let props = text_props(child(chart, "title"), true);
+    let title = child(chart, "title");
+    if let Some(label) = data.title.as_deref().or_else(|| {
+        (scene.spreadsheet && title.is_some() && !on(val(Some(chart), "autoTitleDeleted")))
+            .then_some("Chart Title")
+    }) {
+        let props = text_props(title, true).or_else(|| {
+            scene
+                .spreadsheet
+                .then(|| text_props(title, false))
+                .flatten()
+        });
         let run = child(chart, "title")
             .and_then(|n| n.descendants().find(|r| r.tag_name().name() == "rPr"));
         let sz = font_size(
             run.or(props),
-            if colors.legacy_defaults() {
+            if colors.legacy_defaults() || scene.spreadsheet {
                 size * 1.8
             } else {
                 size
@@ -686,8 +906,24 @@ pub(super) fn render(
         let color = run
             .and_then(|n| colors.shape_fill(n))
             .or_else(|| props.and_then(|n| colors.shape_fill(n)))
-            .unwrap_or_else(|| "#000000".into());
-        write!(out, r#"<g font-weight="bold" fill="{color}">"#).unwrap();
+            .unwrap_or_else(|| {
+                if dark {
+                    colors.theme_paint("bg1", None)
+                } else {
+                    "#000000".into()
+                }
+            });
+        let weight = if scene.spreadsheet
+            && run
+                .or(props)
+                .and_then(|p| p.attribute("b"))
+                .is_some_and(|s| !on(Some(s)))
+        {
+            "normal"
+        } else {
+            "bold"
+        };
+        write!(out, r#"<g font-weight="{weight}" fill="{color}">"#).unwrap();
         text(
             &mut out,
             width / 2.,

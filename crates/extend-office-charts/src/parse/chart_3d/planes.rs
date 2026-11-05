@@ -119,6 +119,7 @@ impl Extrusion<'_> {
         value: [f64; 2],
         horizontal: bool,
         shape: &str,
+        start_radius: f64,
         end_radius: f64,
     ) {
         let pyramidal = matches!(shape, "pyramid" | "pyramidToMax");
@@ -145,8 +146,8 @@ impl Extrusion<'_> {
         let invert = horizontal ^ (value[1] < value[0]);
         for i in 0..count {
             let next = (i + 1) % count;
-            let a = shape_point(i, value[0], 1.);
-            let b = shape_point(next, value[0], 1.);
+            let a = shape_point(i, value[0], start_radius);
+            let b = shape_point(next, value[0], start_radius);
             let c = shape_point(next, value[1], end_radius);
             let d = shape_point(i, value[1], end_radius);
             let angle = (i as f64 + if pyramidal { 1. } else { 0.5 }) * std::f64::consts::TAU
@@ -267,6 +268,21 @@ pub(super) fn draw(
             }
         }
     }
+    let mut stack_extents = BTreeMap::<u32, (f64, f64)>::new();
+    if scene.spreadsheet && stacked {
+        for (_, s) in &series {
+            for p in &s.points {
+                if let Some(value) = point_value(p) {
+                    let extent = stack_extents.entry(p.index).or_default();
+                    if value < 0. {
+                        extent.0 += value;
+                    } else {
+                        extent.1 += value;
+                    }
+                }
+            }
+        }
+    }
     let mut sums = BTreeMap::<u32, (f64, f64)>::new();
     let mut drawn: Vec<(f64, String)> = Vec::new();
     for (order, (source, s)) in series.iter().enumerate() {
@@ -278,13 +294,16 @@ pub(super) fn draw(
         let center = if reverse_depth { 1. - center } else { center };
         let near = center - depth * 0.5;
         let far = center + depth * 0.5;
-        let fill = if lines {
+        let fill = if lines && !scene.spreadsheet {
             colors.line(*source)
         } else {
             colors.fill(*source, None)
         };
         let stroke = colors.outline(*source, None).unwrap_or("none");
-        let mut shapes = format!(r#"<g data-docx-series="{source}">"#);
+        let mut shapes = format!(r#"<g data-docx-series="{source}""#);
+        colors.hit_attrs(&mut shapes, "series", *source, None);
+        shapes.push('>');
+        let mut anchors = String::new();
         let mut previous: Option<Strip> = None;
         let shape = setting(xml_series[order], "shape")
             .or_else(|| setting(group, "shape"))
@@ -348,42 +367,86 @@ pub(super) fn draw(
                     (lo.min(hi), lo.max(hi), h0.min(h1), h0.max(h1))
                 };
                 let ink = colors.fill(*source, Some(index));
+                let invert = scene.spreadsheet
+                    && horizontal
+                    && value < 0.
+                    && on(setting(xml_series[order], "invertIfNegative"));
                 let paint = Extrusion {
                     scene,
                     near,
                     far,
-                    fill: &ink,
-                    stroke: colors.outline(*source, Some(index)).unwrap_or("none"),
+                    fill: if invert { "#ffffff" } else { &ink },
+                    stroke: if scene.spreadsheet && shape != "box" {
+                        "none"
+                    } else {
+                        colors.outline(*source, Some(index)).unwrap_or(if invert {
+                            &ink
+                        } else {
+                            "none"
+                        })
+                    },
                 };
+                if colors.interactive {
+                    let middle = (lo + hi) / 2.;
+                    let top = if horizontal {
+                        scene.project(h1, middle, center)
+                    } else {
+                        scene.project(middle, h1, center)
+                    };
+                    begin_point_hit(&mut shapes, colors, "bar3D", *source, index, top);
+                }
                 if matches!(
                     shape,
                     "cylinder" | "cone" | "coneToMax" | "pyramid" | "pyramidToMax"
                 ) {
-                    let end_radius = if shape == "cylinder" {
+                    let mut start_radius = 1.;
+                    let mut end_radius = if shape == "cylinder" {
                         1.
                     } else if series_max > 0. {
                         (1. - value.abs() / series_max).clamp(0., 1.)
                     } else {
                         0.
                     };
+                    if scene.spreadsheet && stacked && shape != "cylinder" {
+                        let total =
+                            stack_extents
+                                .get(&index)
+                                .map_or(0., |&(lo, hi)| if value < 0. { -lo } else { hi });
+                        let total = if percent {
+                            total
+                                / totals
+                                    .get(&index)
+                                    .copied()
+                                    .unwrap_or(1.)
+                                    .max(f64::MIN_POSITIVE)
+                        } else {
+                            total
+                        };
+                        if total > 0. {
+                            start_radius = (1. - base.abs() / total).clamp(0., 1.);
+                            end_radius = (1. - (base + value).abs() / total).clamp(0., 1.);
+                        }
+                    }
                     paint.shaped_bar(
                         &mut shapes,
                         [lo, hi],
                         [h0, h1],
                         horizontal,
                         shape,
+                        start_radius,
                         end_radius,
                     );
-                    continue;
+                } else {
+                    let start = Strip {
+                        index,
+                        x: x0,
+                        bottom: y0,
+                        top: y1,
+                    };
+                    let end = Strip { x: x1, ..start };
+                    paint.prism(&mut shapes, &start, &end);
                 }
-                let start = Strip {
-                    index,
-                    x: x0,
-                    bottom: y0,
-                    top: y1,
-                };
-                let end = Strip { x: x1, ..start };
-                paint.prism(&mut shapes, &start, &end);
+                colors.end_hit(&mut shapes);
             } else {
                 let x = category(
                     if lines
@@ -403,6 +466,20 @@ pub(super) fn draw(
                     bottom: h0,
                     top: h1,
                 };
+                if colors.interactive
+                    && s.points
+                        .binary_search_by_key(&index, |p| p.index)
+                        .ok()
+                        .is_some_and(|i| point_value(&s.points[i]).is_some())
+                {
+                    point_anchor(
+                        &mut anchors,
+                        colors,
+                        *source,
+                        index,
+                        scene.project(x, h1, center),
+                    );
+                }
                 if let Some(prev) = previous.as_ref().filter(|prev| {
                     matches!(blanks, "span" | "zero") || index.checked_sub(prev.index) == Some(1)
                 }) {
@@ -462,6 +539,7 @@ pub(super) fn draw(
             }
         }
         let depth_order = center * scene.rot_y.to_radians().cos();
+        shapes.push_str(&anchors);
         shapes.push_str("</g>");
         drawn.push((depth_order, shapes));
     }

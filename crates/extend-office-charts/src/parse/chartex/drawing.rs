@@ -47,15 +47,19 @@ impl Font {
             .clone()
             .find_map(|n| numeric(n.attribute("sz")))
             .map_or(default_size, |n| (n / 75.).clamp(1., 256.));
-        let face = properties
-            .clone()
-            .find_map(|p| {
-                p.children()
-                    .find(|n| n.tag_name().name() == "latin")?
-                    .attribute("typeface")
-            })
-            .filter(|s| !s.starts_with('+'))
-            .unwrap_or(default_face);
+        let typeface = properties.clone().find_map(|p| {
+            p.children()
+                .find(|n| n.tag_name().name() == "latin")?
+                .attribute("typeface")
+        });
+        let face = ctx.fonts.as_ref().map_or_else(
+            || {
+                typeface
+                    .filter(|s| !s.starts_with('+'))
+                    .unwrap_or(default_face)
+            },
+            |fonts| fonts.resolve(typeface),
+        );
         let fill = properties
             .clone()
             .find_map(|p| ctx.colors.shape_fill(p))
@@ -152,7 +156,7 @@ pub(super) fn data_label(
 pub(super) fn legend(
     ctx: &Canvas,
     out: &mut String,
-    entries: &[(&str, &str)],
+    entries: &[(&str, &str, usize)],
     left: &mut f64,
     top: &mut f64,
     right: &mut f64,
@@ -173,14 +177,32 @@ pub(super) fn legend(
     let key = font.size * 0.775;
     let widths: Vec<_> = entries
         .iter()
-        .map(|(s, _)| font.width(s) + 2. * spacing)
+        .map(|(s, _, _)| font.width(s) + 2. * spacing)
         .collect();
-    let width = widths.iter().sum::<f64>() - spacing * 2. / 3.;
+    let mut width = widths.iter().sum::<f64>() - spacing * 2. / 3.;
     let height = (entries.len() as f64) * spacing * 1.65;
     let side_width = widths.iter().copied().fold(0., f64::max) + spacing * 0.75;
     let pos = node.attribute("pos").unwrap_or("t");
     let reserve = !on(node.attribute("overlay"));
     let side = matches!(pos, "l" | "r");
+    let hierarchy = ctx.data.series.first().is_some_and(|series| {
+        matches!(series.chart_type.as_str(), "treemap" | "sunburst")
+    });
+    let rows = if ctx.colors.spreadsheet_defaults && hierarchy && !side {
+        (width / (ctx.width * 0.8).max(spacing)).ceil().max(1.) as usize
+    } else {
+        1
+    };
+    let columns = entries.len().div_ceil(rows).max(1);
+    let rows = entries.len().div_ceil(columns);
+    let mut column_widths = vec![0_f64; columns];
+    for (i, &value) in widths.iter().enumerate() {
+        column_widths[i % columns] = column_widths[i % columns].max(value);
+    }
+    if rows > 1 {
+        width = column_widths.iter().sum::<f64>() - spacing * 2. / 3.;
+    }
+    let extra_height = (rows - 1) as f64 * spacing * 2.;
     let align = node.attribute("align").unwrap_or("ctr");
     let align_at = |extent: f64, size: f64| match align {
         "min" | "l" | "t" => 8.,
@@ -199,7 +221,7 @@ pub(super) fn legend(
     let y = if side {
         align_at(ctx.height, height) + spacing
     } else if pos == "b" {
-        ctx.height - spacing * 1.5
+        ctx.height - spacing * 1.5 - extra_height
     } else {
         ctx.title_bottom + spacing * 1.35
     };
@@ -207,12 +229,15 @@ pub(super) fn legend(
         match pos {
             "r" => *right -= side_width,
             "l" => *left += side_width,
-            "b" => *bottom -= 2.75 * spacing,
-            _ => *top += 3.2 * spacing,
+            "b" => *bottom -= 2.75 * spacing + extra_height,
+            _ => *top += 3.2 * spacing + extra_height,
         }
     }
+    let start_x = x;
     let (mut x, mut y) = (x, y);
-    for (i, (name, color)) in entries.iter().enumerate() {
+    for (i, (name, color, series)) in entries.iter().enumerate() {
+        ctx.colors
+            .begin_hit(out, "legendEntry", ctx.source_indices[*series], None);
         let y0 = y - key / 2.;
         write!(
             out,
@@ -220,8 +245,15 @@ pub(super) fn legend(
         )
         .unwrap();
         font.text(out, x + spacing * 1.17, y + spacing * 0.367, "start", name);
+        ctx.colors.end_hit(out);
         if side {
             y += spacing * 1.65;
+        } else if rows > 1 {
+            x += column_widths[i % columns];
+            if (i + 1) % columns == 0 {
+                x = start_x;
+                y += spacing * 2.;
+            }
         } else {
             x += widths[i];
         }

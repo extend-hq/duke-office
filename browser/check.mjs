@@ -3,13 +3,18 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { gunzipSync } from "node:zlib";
 import { loadOfficeCharts } from "@extend-ai/extend-office-charts";
+import { loadOfficeCharts as loadFullCharts } from "@extend-ai/extend-office-charts/full";
 import { sourceDigest } from "./source-digest.mjs";
 import payload from "./generated/payload.js";
+import fullPayload from "./generated/full/payload.js";
 
 const storedDigest = readFileSync(new URL("./generated/sources.sha256", import.meta.url), "utf8").trim();
 assert.equal(sourceDigest(), storedDigest, "Renderer inputs changed. Run npm run build:browser.");
-const binary = readFileSync(new URL("./generated/office_charts_bg.wasm", import.meta.url));
-assert.deepEqual(gunzipSync(Buffer.from(payload, "base64")), binary);
+const require = createRequire(import.meta.url);
+for (const [entry, embedded] of [["", payload], ["/full", fullPayload]]) {
+  const binary = readFileSync(require.resolve(`@extend-ai/extend-office-charts${entry}/office_charts_bg.wasm`));
+  assert.deepEqual(gunzipSync(Buffer.from(embedded, "base64")), binary);
+}
 
 const xml = `<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart">
   <c:chart><c:plotArea><c:barChart><c:barDir val="col"/><c:grouping val="clustered"/>
@@ -22,7 +27,6 @@ const xml = `<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/
   </c:plotArea></c:chart></c:chartSpace>`;
 
 const renderer = await loadOfficeCharts();
-const require = createRequire(import.meta.url);
 assert.equal(await require("@extend-ai/extend-office-charts").loadOfficeCharts(), renderer);
 const options = { width: 320, height: 200, interactive: true, spreadsheetDefaults: true };
 const cached = renderer.renderChart(xml, options);
@@ -45,3 +49,14 @@ const updated = renderer.renderChart(xml, {
 assert.match(updated, /Updated category/);
 assert.notEqual(updated, cached);
 assert.equal(renderer.renderChart("<invalid/>"), null);
+
+const full = await loadFullCharts();
+assert.equal(await require("@extend-ai/extend-office-charts/full").loadOfficeCharts(), full);
+assert.equal(full.renderChart(xml, options), cached);
+const series = xml.match(/<c:ser>[\s\S]*?<\/c:ser>/)[0];
+const pie = xml.replace(/<c:barChart>[\s\S]*?<\/c:valAx>/,
+  `<c:pieChart><c:varyColors val="1"/>${series}</c:pieChart>`);
+assert.equal(renderer.renderChart(pie, options), null);
+const fullPie = full.renderChart(pie, options);
+assert.match(fullPie, /<path\b/);
+assert.match(fullPie, /data-chart-series="0" data-chart-point="1"/);

@@ -24,7 +24,7 @@ pub(super) fn render(
         Key::Categories(items) => {
             let entries: Vec<_> = items
                 .iter()
-                .map(|(k, v)| (k.as_str(), v.as_str()))
+                .map(|(k, v)| (k.as_str(), v.as_str(), 0))
                 .collect();
             if matches!(node.attribute("pos").unwrap_or("r"), "l" | "r") {
                 side_key(ctx, node, &entries, face, plot, out);
@@ -41,7 +41,10 @@ pub(super) fn render(
             );
         }
         Key::Gradient(stops) if !stops.is_empty() => {
+            ctx.colors
+                .begin_hit(out, "legendEntry", ctx.source_indices[0], None);
             gradient(ctx, node, stops, name, format, face, plot, out);
+            ctx.colors.end_hit(out);
         }
         _ => {}
     }
@@ -50,7 +53,7 @@ pub(super) fn render(
 fn side_key(
     ctx: &Canvas,
     node: Node,
-    entries: &[(&str, &str)],
+    entries: &[(&str, &str, usize)],
     face: &str,
     plot: &mut Rect,
     out: &mut String,
@@ -68,7 +71,7 @@ fn side_key(
     let em = font.size;
     let width = entries
         .iter()
-        .map(|(name, _)| advance(name, em, font.face()))
+        .map(|(name, _, _)| advance(name, em, font.face()))
         .fold(0., f64::max)
         + 2.8 * em;
     let height = (2. * entries.len() as f64 + 0.8) * em;
@@ -81,9 +84,12 @@ fn side_key(
         node.attribute("align").unwrap_or("ctr"),
     ) + em;
     let key = em * 0.8;
-    for &(name, color) in entries {
+    for &(name, color, series) in entries {
+        ctx.colors
+            .begin_hit(out, "legendEntry", ctx.source_indices[series], None);
         write!(out, r#"<rect x="{:.2}" y="{y:.2}" width="{key:.2}" height="{key:.2}" fill="{color}" stroke="white" stroke-width=".33"/>"#, x + em).unwrap();
         font.text(out, x + 2.2 * em, y + key, "start", name);
+        ctx.colors.end_hit(out);
         y += 2. * em;
     }
     if !on(node.attribute("overlay")) {

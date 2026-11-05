@@ -336,6 +336,8 @@ pub(super) fn render(ctx: &Canvas, out: &mut String) -> Option<()> {
         let fill = ctx
             .colors
             .rectangle_fill(ctx.paint(0, b.index, 0), 0, [x, ypos, width, h]);
+        ctx.colors
+            .begin_hit(out, "series", ctx.source_indices[0], None);
         let _ = write!(
             out,
             r#"<rect x="{x:.2}" y="{ypos:.2}" width="{width:.2}" height="{h:.2}" fill="{fill}" data-docx-series="{}"/>"#,
@@ -364,6 +366,7 @@ pub(super) fn render(ctx: &Canvas, out: &mut String) -> Option<()> {
                 &value,
             );
         }
+        ctx.colors.end_hit(out);
         if category_labels {
             let stride = ((category_font.width(&b.label) + 3.) / band).ceil().max(1.) as usize;
             if i % stride == 0 {
@@ -392,12 +395,16 @@ pub(super) fn render(ctx: &Canvas, out: &mut String) -> Option<()> {
             let y = bottom - plot_height * secondary_scale.fraction(cumulative / total);
             let _ = write!(path, "{} {x:.2} {y:.2}", if i == 0 { "M" } else { "L" });
         }
-        let fill = ctx.stroke(pareto_series.unwrap_or(0));
+        let series_index = pareto_series?;
+        let fill = ctx.stroke(series_index);
         let _ = write!(
             out,
-            r#"<path d="{path}" fill="none" stroke="{fill}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" data-docx-series="{}"/>"#,
-            ctx.source_indices[pareto_series.unwrap_or(0)]
+            r#"<path d="{path}" fill="none" stroke="{fill}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" data-docx-series="{}""#,
+            ctx.source_indices[series_index]
         );
+        ctx.colors
+            .hit_attrs(out, "line", ctx.source_indices[series_index], None);
+        out.push_str("/>");
         if percentage_labels {
             secondary_stroke.line(out, right, top, right, bottom);
             let major = number(
