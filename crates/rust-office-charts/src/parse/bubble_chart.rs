@@ -1,7 +1,7 @@
 //! Layout of classic bubble charts.
 use super::chart_colors::ChartColors;
 use super::chart_svg::{
-    font_family, font_size, line, number, on, text, text_props, text_width, val,
+    font_family, font_size, line, number, on, text, text_props, text_width, title_position, val,
 };
 use crate::chart::{chart_node, child, ChartData};
 use roxmltree::Node;
@@ -291,19 +291,32 @@ pub(super) fn render(
         svg.push_str(r#"<style>text[font-family^="Calibri,"]{font-size-adjust:0.46436}</style>"#);
     }
     if let Some(title) = title_label {
+        let styled_title = legacy
+            || (colors.spreadsheet_defaults
+                && super::chart_colors::classic_style_id(root).is_some());
         let bold = title_props
             .and_then(|p| p.attribute("b"))
-            .map_or(legacy, |s| on(Some(s)));
+            .map_or(styled_title, |s| on(Some(s)));
         if bold {
             svg.push_str(r#"<g font-weight="bold">"#);
         }
+        let (x, y, anchor) = title_position(
+            child(chart, "title").filter(|_| colors.spreadsheet_defaults),
+            width,
+            height,
+            tf,
+            10.33 + tf * 0.917,
+        );
         text(
             &mut svg,
-            width / 2.,
-            10.33 + tf * 0.917,
-            "middle",
+            x,
+            y,
+            anchor,
             tf,
-            &font_family(title_props, if legacy { default_face } else { "Arial" }),
+            &font_family(
+                title_props,
+                if styled_title { default_face } else { "Arial" },
+            ),
             title,
         );
         if bold {

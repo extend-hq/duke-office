@@ -47,6 +47,50 @@ pub(super) fn font_family(props: Option<Node>, default: &str) -> String {
     format!("{}, {fallback}", escape_xml_text(name))
 }
 
+pub(super) fn title_position(
+    title: Option<Node>,
+    width: f64,
+    height: f64,
+    size: f64,
+    default_y: f64,
+) -> (f64, f64, &'static str) {
+    let layout = title
+        .and_then(|n| child(n, "layout"))
+        .and_then(|n| child(n, "manualLayout"));
+    let x = number(val(layout, "x")).map(|v| width * v + size * 0.2);
+    let y = number(val(layout, "y")).map(|v| height * v + size * 0.915);
+    (
+        x.unwrap_or(width / 2.),
+        y.unwrap_or(default_y),
+        if x.is_some() { "start" } else { "middle" },
+    )
+}
+
+pub(super) fn title_lines(label: &str, size: f64, width: f64) -> Vec<String> {
+    if text_width(label, size) <= width {
+        return vec![label.to_owned()];
+    }
+    let mut lines = Vec::new();
+    let mut line = String::new();
+    for word in label.split_whitespace() {
+        let next = if line.is_empty() {
+            word.to_owned()
+        } else {
+            format!("{line} {word}")
+        };
+        if !line.is_empty() && text_width(&next, size) > width {
+            lines.push(line);
+            line = word.to_owned();
+        } else {
+            line = next;
+        }
+    }
+    if !line.is_empty() {
+        lines.push(line);
+    }
+    lines
+}
+
 pub(super) fn text_width(s: &str, size: f64) -> f64 {
     // The model has no platform font shaper. Keep these advances in ems so
     // margins track the text size even when the browser substitutes a font.

@@ -10,14 +10,14 @@ pub(super) struct PaintServers {
 }
 
 impl PaintServers {
-    pub(super) fn new(root: Node, theme: &ThemeColorMap) -> Self {
+    pub(super) fn new(root: Node, theme: &ThemeColorMap, spreadsheet: bool) -> Self {
         let mut paints = Self::default();
         for node in root.descendants().filter(|n| drawing(*n)) {
             let id = paints.ids.len();
             if !matches!(node.tag_name().name(), "gradFill" | "pattFill") {
                 continue;
             }
-            if let Some(markup) = definition(node, theme, &id.to_string()) {
+            if let Some(markup) = definition_for_mode(node, theme, &id.to_string(), spreadsheet) {
                 paints.ids.insert(node.id(), id);
                 paints.markup.push_str(&markup);
             }
@@ -128,18 +128,112 @@ fn stop_markup(stops: &[(f64, String)]) -> String {
     result
 }
 
+fn radial_stop_markup(stops: &[(f64, String)]) -> Option<String> {
+    let colors: Vec<_> = stops
+        .iter()
+        .map(|(_, value)| rgba(value))
+        .collect::<Option<_>>()?;
+    let shaped = stops.first().is_some_and(|s| s.0 == 0.)
+        && stops.last().is_some_and(|s| s.0 == 1.)
+        && (stops.len() == 2 || stops.len() == 3 && stops[0].1.eq_ignore_ascii_case(&stops[2].1));
+    let mut result = String::new();
+    for (i, pair) in stops.windows(2).enumerate() {
+        let (start, end) = (colors[i], colors[i + 1]);
+        let (offset, end_offset) = (pair[0].0, pair[1].0);
+        if end_offset <= offset {
+            return None;
+        }
+        let at = |t: f64| -> [u8; 4] {
+            std::array::from_fn(|c| {
+                let ratio = if !shaped || c == 3 {
+                    t
+                } else if start[c] < end[c] {
+                    1. - (1. - t).powf(1.875)
+                } else {
+                    t.powf(1.875)
+                };
+                let value = f64::from(start[c]) + (f64::from(end[c]) - f64::from(start[c])) * ratio;
+                if c == 3 {
+                    return value.round() as u8;
+                }
+                // Preserve the radial ramp's linear-light quantization.
+                let linear = ((value / 255.).powf(2.2) * 255.).round() / 255.;
+                let srgb = if linear <= 0.0031308 {
+                    linear * 12.92
+                } else {
+                    1.055 * linear.powf(1. / 2.4) - 0.055
+                };
+                (srgb * 255.).round().clamp(0., 255.) as u8
+            })
+        };
+        let mut transitions = Vec::new();
+        for c in 0..3 {
+            if start[c] == end[c] {
+                continue;
+            }
+            for bucket in 0..255 {
+                let threshold = ((f64::from(bucket) + 0.5) / 255.).powf(1. / 2.2) * 255.;
+                let ratio =
+                    (threshold - f64::from(start[c])) / (f64::from(end[c]) - f64::from(start[c]));
+                if !(0. < ratio && ratio < 1.) {
+                    continue;
+                }
+                let t = if !shaped {
+                    ratio
+                } else if start[c] < end[c] {
+                    1. - (1. - ratio).powf(1. / 1.875)
+                } else {
+                    ratio.powf(1. / 1.875)
+                };
+                transitions.push(t);
+            }
+        }
+        transitions.sort_by(f64::total_cmp);
+        transitions.dedup_by(|a, b| (*a - *b).abs() < 1e-12);
+        let mut emit = |t: f64, color: [u8; 4]| {
+            let x = offset + (end_offset - offset) * t;
+            let [r, g, b, a] = color;
+            write!(
+                result,
+                r##"<stop offset="{x}" stop-color="#{r:02x}{g:02x}{b:02x}{a:02x}"/>"##
+            )
+            .unwrap();
+        };
+        emit(0., at(0.));
+        for t in transitions {
+            emit(t, at((t - 1e-10).max(0.)));
+            emit(t, at((t + 1e-10).min(1.)));
+        }
+        emit(1., at(1.));
+    }
+    (!result.is_empty()).then_some(result)
+}
+
 pub(super) fn definition(node: Node, theme: &ThemeColorMap, id: &str) -> Option<String> {
+    definition_for_mode(node, theme, id, false)
+}
+
+fn definition_for_mode(
+    node: Node,
+    theme: &ThemeColorMap,
+    id: &str,
+    spreadsheet: bool,
+) -> Option<String> {
     match node.tag_name().name() {
-        "gradFill" => gradient(node, theme, id),
+        "gradFill" => gradient(node, theme, id, spreadsheet),
         "pattFill" => pattern(node, theme, id),
         _ => None,
     }
 }
 
-fn gradient(node: Node, theme: &ThemeColorMap, id: &str) -> Option<String> {
+fn gradient(node: Node, theme: &ThemeColorMap, id: &str, spreadsheet: bool) -> Option<String> {
     let values = stops(node, theme);
     let path = drawing_child(node, "path");
-    let stops = stop_markup(&values);
+    let stops = if spreadsheet && path.is_some_and(|p| p.attribute("path") == Some("circle")) {
+        radial_stop_markup(&values).unwrap_or_else(|| stop_markup(&values))
+    } else {
+        stop_markup(&values)
+    };
     if let Some(path) = path {
         let inset = drawing_child(path, "fillToRect");
         let inset_at = |attr| {

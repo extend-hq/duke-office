@@ -1,6 +1,6 @@
 use super::chart_colors::ChartColors;
 use super::chart_svg::{
-    font_family, font_size, line, number, on, text, text_props, text_width, val,
+    font_family, font_size, line, number, on, text, text_props, text_width, title_position, val,
 };
 use crate::chart::{chart_node, child, ChartData};
 use roxmltree::Node;
@@ -913,24 +913,40 @@ pub(super) fn render(
                     "#000000".into()
                 }
             });
+        let unstyled_title =
+            scene.spreadsheet && super::chart_colors::classic_style_id(root).is_none();
         let weight = if scene.spreadsheet
-            && run
+            && !run
                 .or(props)
                 .and_then(|p| p.attribute("b"))
-                .is_some_and(|s| !on(Some(s)))
+                .map_or(!unstyled_title, |s| on(Some(s)))
         {
             "normal"
         } else {
             "bold"
         };
         write!(out, r#"<g font-weight="{weight}" fill="{color}">"#).unwrap();
+        let (x, y, anchor) = title_position(
+            title.filter(|_| scene.spreadsheet),
+            width,
+            height,
+            sz,
+            10. + sz * 0.95,
+        );
         text(
             &mut out,
-            width / 2.,
-            10. + sz * 0.95,
-            "middle",
+            x,
+            y,
+            anchor,
             sz,
-            &font_family(props, minor_latin.unwrap_or("Cambria")),
+            &font_family(
+                props,
+                if unstyled_title {
+                    "Arial"
+                } else {
+                    minor_latin.unwrap_or("Cambria")
+                },
+            ),
             label,
         );
         out.push_str("</g>");

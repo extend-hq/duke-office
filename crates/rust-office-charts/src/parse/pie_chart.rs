@@ -1,7 +1,7 @@
 //! DrawingML pie, doughnut, and split pie plots.
 use super::chart_colors::ChartColors;
 use super::chart_svg::{
-    font_family, font_size, line, number, on, text, text_props, text_width, val,
+    font_family, font_size, line, number, on, text, text_props, text_width, title_position, val,
 };
 use crate::chart::{chart_node, child, ChartData, ChartSeries};
 use roxmltree::Node;
@@ -834,7 +834,16 @@ pub(super) fn render(
             size
         },
     );
-    let title_face = font_family(title_props, minor_latin.unwrap_or("Calibri"));
+    let unstyled_title =
+        colors.spreadsheet_defaults && super::chart_colors::classic_style_id(root).is_none();
+    let title_face = font_family(
+        title_props,
+        if unstyled_title {
+            "Arial"
+        } else {
+            minor_latin.unwrap_or("Calibri")
+        },
+    );
     if (legacy || colors.spreadsheet_defaults)
         && child(plot, "layout")
             .and_then(|n| child(n, "manualLayout"))
@@ -1026,7 +1035,7 @@ pub(super) fn render(
         let font = title_font;
         let bold = props
             .and_then(|n| n.attribute("b"))
-            .map_or(true, |a| a != "0" && a != "false");
+            .map_or(!unstyled_title, |a| a != "0" && a != "false");
         let paint = title_props
             .filter(|_| colors.spreadsheet_defaults)
             .and_then(|props| colors.shape_fill(props));
@@ -1036,15 +1045,14 @@ pub(super) fn render(
         if bold {
             svg.push_str("<g font-weight=\"bold\">");
         }
-        text(
-            &mut svg,
-            width / 2.,
-            10.4 + font * 0.925,
-            "middle",
+        let (x, y, anchor) = title_position(
+            title.filter(|_| colors.spreadsheet_defaults),
+            width,
+            height,
             font,
-            &title_face,
-            label,
+            10.4 + font * 0.925,
         );
+        text(&mut svg, x, y, anchor, font, &title_face, label);
         if bold {
             svg.push_str("</g>");
         }

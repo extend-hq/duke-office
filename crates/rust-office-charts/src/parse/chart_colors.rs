@@ -350,7 +350,7 @@ impl ChartColors {
                 mapped.insert(token.to_ascii_lowercase(), value.clone());
             }
         }
-        let servers = paint::PaintServers::new(root, &mapped);
+        let servers = paint::PaintServers::new(root, &mapped, options.spreadsheet_defaults);
         let palette = Palette::legacy(root, &mapped);
         #[cfg(feature = "extended-charts")]
         let style_palette = (root.tag_name().namespace() == Some(CHARTEX_NS))

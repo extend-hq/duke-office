@@ -3,7 +3,9 @@
 mod marks;
 
 use super::chart_colors::ChartColors;
-use super::chart_svg::{font_family, font_size, line, number, text_props, text_width, val};
+use super::chart_svg::{
+    font_family, font_size, line, number, text_props, text_width, title_lines, title_position, val,
+};
 use super::util::escape_xml_text;
 use crate::chart::{chart_node, child, ChartData, ChartSeries};
 use roxmltree::Node;
@@ -1578,12 +1580,41 @@ pub(super) fn render(
     let title_props = text_props(title, true)
         .or(text_props(title, false))
         .or(base);
+    let unstyled_title =
+        colors.spreadsheet_defaults && super::chart_colors::classic_style_id(root).is_none();
     let canvas = CanvasPaint::new(root, colors);
     let title_size = font_size(
         title_props,
-        canvas.title_size.unwrap_or(if legacy { 24. } else { size }),
+        canvas
+            .title_size
+            .unwrap_or(if legacy || colors.spreadsheet_defaults {
+                24.
+            } else {
+                size
+            }),
     );
-    let title_face = font_family(title_props, default_face);
+    let title_face = font_family(
+        title_props,
+        if unstyled_title {
+            "Arial"
+        } else {
+            default_face
+        },
+    );
+    let title_lines = chart_title
+        .map(|label| {
+            if colors.spreadsheet_defaults
+                && title
+                    .and_then(|n| child(n, "layout"))
+                    .and_then(|n| child(n, "manualLayout"))
+                    .is_none()
+            {
+                title_lines(label, title_size, width * 0.8)
+            } else {
+                vec![label.to_owned()]
+            }
+        })
+        .unwrap_or_default();
     let legend_props = text_props(legend, false).or(base);
     let lf = font_size(legend_props, size);
     let legend_face = font_family(legend_props, default_face);
@@ -1597,7 +1628,9 @@ pub(super) fn render(
         bottom: height - inset.min(height * 0.18),
     };
     if chart_title.is_some() && !flag(title, "overlay", !(legacy || colors.spreadsheet_defaults)) {
-        rect.top += title_size * 1.17 + 12. + if legacy { 4. / 3. } else { 0. };
+        rect.top += title_size * (1.17 + title_lines.len().saturating_sub(1) as f64 * 1.22)
+            + 12.
+            + if legacy { 4. / 3. } else { 0. };
     }
     if !entries.is_empty() && !flag(legend, "overlay", !(legacy || colors.spreadsheet_defaults)) {
         let text_extent = entries
@@ -1923,31 +1956,32 @@ pub(super) fn render(
     }
     labels.push_str("</g>");
     write!(svg, r#"<g clip-path="url(#plot)">{geometry}</g>{labels}"#).unwrap();
-    if let Some(label) = chart_title {
+    if chart_title.is_some() {
         let paint = title_props
             .and_then(|p| colors.shape_fill(p))
             .unwrap_or_else(|| label_fill.clone());
         write!(svg, r#"<g fill="{paint}">"#).unwrap();
-        let layout = colors
-            .spreadsheet_defaults
-            .then(|| {
-                title
-                    .and_then(|n| child(n, "layout"))
-                    .and_then(|n| child(n, "manualLayout"))
-            })
-            .flatten();
-        let x = number(val(layout, "x")).map(|n| n * width + title_size * 0.2);
-        let y = number(val(layout, "y")).map(|n| n * height + title_size * 0.915);
-        text(
-            &mut svg,
-            x.unwrap_or(width / 2.),
-            y.unwrap_or(10.66 + title_size * 0.915),
-            if x.is_some() { "start" } else { "middle" },
+        let (x, y, anchor) = title_position(
+            title.filter(|_| colors.spreadsheet_defaults),
+            width,
+            height,
             title_size,
-            &title_face,
-            label,
-            title_props.and_then(|n| n.attribute("b")).is_none_or(truth),
+            10.66 + title_size * 0.915,
         );
+        for (index, label) in title_lines.iter().enumerate() {
+            text(
+                &mut svg,
+                x,
+                y + index as f64 * title_size * 1.22,
+                anchor,
+                title_size,
+                &title_face,
+                label,
+                title_props
+                    .and_then(|n| n.attribute("b"))
+                    .map_or(!unstyled_title, truth),
+            );
+        }
         svg.push_str("</g>");
     }
     let paint = legend_props

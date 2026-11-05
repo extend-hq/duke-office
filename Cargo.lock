@@ -564,7 +564,7 @@ dependencies = [
 
 [[package]]
 name = "rust-office-charts"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64",
  "miniz_oxide 0.8.9",
@@ -574,7 +574,7 @@ dependencies = [
 
 [[package]]
 name = "rust-office-charts-wasm"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "rust-office-charts",
  "serde",
