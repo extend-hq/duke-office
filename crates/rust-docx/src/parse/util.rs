@@ -879,7 +879,7 @@ pub fn rasterize_windows_metafile_to_png_data_uri(
     None
 }
 
-/// Converts vector EMF assets to an SVG data URI. WMF and EMFs containing
+/// Converts supported EMF drawing records to an SVG data URI. WMF and EMFs containing
 /// unsupported drawing records return `None` so the caller
 /// keeps the unsupported-image placeholder.
 pub fn windows_metafile_to_svg_data_uri(bytes: &[u8]) -> Option<String> {

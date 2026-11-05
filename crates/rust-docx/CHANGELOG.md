@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.5
+
+- Render opaque 24-bit and 32-bit EMF bitmap transfers as PNG-backed SVG previews in native and WebAssembly parsing.
+
 ## 0.2.3
 
 - Return visible outline and list markers as paragraph `listLabel` metadata while preserving source text offsets.
