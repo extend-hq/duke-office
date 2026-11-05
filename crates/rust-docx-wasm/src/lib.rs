@@ -8,6 +8,8 @@ use js_sys::{Array, Object, Reflect};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
+mod model_transport;
+
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = performance, js_name = now)]
@@ -232,22 +234,31 @@ pub fn build_doc_model_from_package(package: &JsValue) -> Result<String, JsValue
 }
 
 #[wasm_bindgen]
+pub fn build_doc_model_from_package_js(package: &JsValue) -> Result<JsValue, JsValue> {
+    let pkg = value_to_ooxml_package(package)?;
+    let model = build_doc_model(&pkg);
+    let assets = Reflect::get(package, &JsValue::from_str("binaryAssets"))?;
+    model_transport::model_to_js(model, &pkg, &assets)
+}
+
+#[wasm_bindgen]
 pub fn build_doc_model_from_bytes(bytes: &[u8]) -> Result<JsValue, JsValue> {
     let started_at = performance_now();
     let pkg = parse_document_bytes(bytes).map_err(|error| JsValue::from_str(&error))?;
     let parsed_at = performance_now();
     let model = build_doc_model(&pkg);
-    let model_json = serde_json::to_string(&model)
-        .map_err(|error| JsValue::from_str(&format!("Model serialization failed: {error}")))?;
-    let model_js = js_sys::JSON::parse(&model_json)
-        .map_err(|error| JsValue::from_str(&format!("Model JSON parse failed: {error:?}")))?;
+    let package_started_at = performance_now();
+    let package_js = package_to_js(&pkg)?;
+    let package_ms = performance_now() - package_started_at;
+    let assets = Reflect::get(&package_js, &JsValue::from_str("binaryAssets"))?;
+    let model_js = model_transport::model_to_js(model, &pkg, &assets)?;
     let built_at = performance_now();
 
     let result = Object::new();
     Reflect::set(
         &result,
         &JsValue::from_str("package"),
-        &package_to_js(&pkg)?,
+        &package_js,
     )
     .map_err(|error| JsValue::from_str(&format!("Failed to set package: {error:?}")))?;
     Reflect::set(&result, &JsValue::from_str("model"), &model_js)
@@ -256,12 +267,12 @@ pub fn build_doc_model_from_bytes(bytes: &[u8]) -> Result<JsValue, JsValue> {
     Reflect::set(
         &timings,
         &JsValue::from_str("parseMs"),
-        &JsValue::from_f64(parsed_at - started_at + performance_now() - built_at),
+        &JsValue::from_f64(parsed_at - started_at + package_ms),
     )?;
     Reflect::set(
         &timings,
         &JsValue::from_str("buildModelMs"),
-        &JsValue::from_f64(built_at - parsed_at),
+        &JsValue::from_f64(built_at - parsed_at - package_ms),
     )?;
     Reflect::set(&result, &JsValue::from_str("timings"), &timings)?;
     Ok(result.into())
