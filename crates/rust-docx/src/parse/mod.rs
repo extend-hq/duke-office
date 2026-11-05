@@ -21,6 +21,7 @@ mod relationships;
 mod scan;
 mod sections;
 mod shapes;
+mod smartart;
 mod style;
 mod styles;
 mod symbols;

@@ -2143,10 +2143,14 @@ fn parse_run_image_block_inner(
         None
     };
 
-    let standalone_shape_svg =
-        render_standalone_word_shape_svg(active_run_xml, width_px, height_px, context);
+    let diagram = super::smartart::render_diagram(
+        active_run_xml, width_px.unwrap_or(640.0), height_px.unwrap_or(360.0), context,
+    );
+    let is_diagram = diagram.is_some();
+    let standalone_shape_svg = diagram.or_else(||
+        render_standalone_word_shape_svg(active_run_xml, width_px, height_px, context));
     let contains_grouped_or_standalone_shape =
-        re::get_unchecked(r"(?i)<wpg:wgp\b|<wps:wsp\b").is_match(active_run_xml);
+        is_diagram || re::get_unchecked(r"(?i)<wpg:wgp\b|<wps:wsp\b").is_match(active_run_xml);
     let contains_text_box_content =
         re::get_unchecked(r"(?i)<w:txbxContent\b").is_match(active_run_xml);
 
@@ -2194,7 +2198,12 @@ fn parse_run_image_block_inner(
         && (contains_grouped_or_standalone_shape || relationship_id.is_none())
     {
         let svg = standalone_shape_svg.as_deref().unwrap_or_default();
-        if !re::get_unchecked(r"(?i)<wpg:wgp\b").is_match(active_run_xml) {
+        if svg.contains("data-office-art=\"true\"") {
+            width_px = width_px.map(|width| width.max(1.0));
+            height_px = height_px.map(|height| height.max(1.0));
+        }
+        if !re::get_unchecked(r"(?i)<wpg:wgp\b").is_match(active_run_xml)
+            && !svg.contains("data-office-art=\"true\"") {
             let transform = extract_balanced_tag_blocks(active_run_xml, "a:xfrm")
                 .into_iter()
                 .next()
@@ -2239,7 +2248,7 @@ fn parse_run_image_block_inner(
             r#type: ImageRunNodeType::Image,
             block_id: None,
             content_nodes: None,
-            semantic_kind: None,
+            semantic_kind: is_diagram.then(|| "diagram".to_string()),
             math_ml: None,
             src: Some(svg_data_uri(svg)),
             alt: Some(alt.unwrap_or_else(|| {

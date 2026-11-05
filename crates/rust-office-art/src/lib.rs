@@ -9,8 +9,13 @@ use crate::xml::{
 
 use crate::xml::escape_xml_text;
 
+mod geometry;
 mod raster;
+mod shapes;
+pub mod smartart;
 mod xml;
+
+pub use shapes::{render_shape, StyleReferenceKind};
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,6 +43,19 @@ pub struct ResolvedColor {
 
 pub trait PictureContext {
     fn resolve_color(&self, xml: &str) -> Option<ResolvedColor>;
+
+    fn resolve_image(&self, _relationship_id: &str) -> Option<String> {
+        None
+    }
+
+    fn resolve_style_reference(
+        &self,
+        _kind: StyleReferenceKind,
+        _index: u32,
+        _placeholder_xml: &str,
+    ) -> Option<String> {
+        None
+    }
 }
 
 pub fn normalize_raster(source: &str) -> Option<String> {
@@ -270,6 +288,22 @@ fn adjusted_value(geometry: &str, name: &str, default: f64) -> Option<f64> {
 }
 
 fn geometry_path(properties: &str, width: f64, height: f64) -> Option<String> {
+    if direct_child_tag(properties, "a:custGeom").is_none() {
+        if let Some(path) = legacy_geometry_path(properties, width, height) {
+            return Some(path);
+        }
+    }
+    let paths = geometry::geometry_paths(properties, width, height)?;
+    let path = paths
+        .into_iter()
+        .filter(|path| path.fill != geometry::PathFill::None)
+        .map(|path| path.d)
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!path.is_empty()).then_some(path)
+}
+
+fn legacy_geometry_path(properties: &str, width: f64, height: f64) -> Option<String> {
     if let Some(geometry) = direct_child_tag(properties, "a:custGeom") {
         let paths = direct_child_tag(geometry, "a:pathLst")?;
         let paths = extract_direct_child_tag_ranges(paths);
@@ -349,6 +383,30 @@ fn geometry_path(properties: &str, width: f64, height: f64) -> Option<String> {
     })
 }
 
+fn preset_dash_segments(preset: &str) -> Option<&'static [f64]> {
+    Some(match preset {
+        "solid" => &[],
+        "dot" => &[1.0, 3.0],
+        "dash" => &[4.0, 3.0],
+        "dashDot" => &[4.0, 3.0, 1.0, 3.0],
+        "sysDot" => &[1.0, 1.0],
+        "sysDash" => &[3.0, 1.0],
+        "sysDashDot" => &[3.0, 1.0, 1.0, 1.0],
+        "sysDashDotDot" => &[3.0, 1.0, 1.0, 1.0, 1.0, 1.0],
+        "lgDash" => &[8.0, 3.0],
+        "lgDashDot" => &[8.0, 3.0, 1.0, 3.0],
+        "lgDashDotDot" => &[8.0, 3.0, 1.0, 3.0, 1.0, 3.0],
+        _ => return None,
+    })
+}
+
+fn rectangular_picture(properties: &str) -> bool {
+    direct_child_tag(properties, "a:custGeom").is_none()
+        && direct_child_tag(properties, "a:prstGeom")
+            .and_then(|geometry| get_attribute_ref(geometry, "prst"))
+            .is_none_or(|preset| preset == "rect")
+}
+
 fn border(properties: &str, colors: &impl PictureContext) -> Option<(String, f64)> {
     let Some(line) = direct_child_tag(properties, "a:ln") else {
         return Some((String::new(), 0.0));
@@ -373,12 +431,12 @@ fn border(properties: &str, colors: &impl PictureContext) -> Option<(String, f64
         "sq" => "square",
         _ => "butt",
     };
-    let join = if direct_child_tag(line, "a:round").is_some() {
-        "round"
+    let join = if direct_child_tag(line, "a:miter").is_some() {
+        "miter"
     } else if direct_child_tag(line, "a:bevel").is_some() {
         "bevel"
     } else {
-        "miter"
+        "round"
     };
     let miter = match direct_child_tag(line, "a:miter") {
         Some(xml) => percentage(xml, "lim", 8.0)?,
@@ -389,20 +447,15 @@ fn border(properties: &str, colors: &impl PictureContext) -> Option<(String, f64
         r##"fill="none" stroke="{}" stroke-opacity="{}" stroke-width="{}" stroke-linecap="{cap}" stroke-linejoin="{join}" stroke-miterlimit="{miter}""##,
         escape_xml_text(&color.color),
         color.opacity.unwrap_or(1.0),
-        width * 2.0,
+        width
+            * if rectangular_picture(properties) {
+                1.0
+            } else {
+                2.0
+            },
     );
     if let Some(dash) = direct_child_tag(line, "a:prstDash") {
-        let segments: &[f64] = match get_attribute_ref(dash, "val").unwrap_or("solid") {
-            "solid" => &[],
-            "dot" | "sysDot" => &[1.0, 1.0],
-            "dash" | "sysDash" => &[3.0, 1.0],
-            "lgDash" => &[8.0, 3.0],
-            "dashDot" | "sysDashDot" => &[3.0, 1.0, 1.0, 1.0],
-            "lgDashDot" => &[8.0, 3.0, 1.0, 3.0],
-            "lgDashDotDot" => &[8.0, 3.0, 1.0, 3.0, 1.0, 3.0],
-            "sysDashDotDot" => &[3.0, 1.0, 1.0, 1.0, 1.0, 1.0],
-            _ => return None,
-        };
+        let segments = preset_dash_segments(get_attribute_ref(dash, "val").unwrap_or("solid"))?;
         if !segments.is_empty() {
             let values = segments
                 .iter()
@@ -629,6 +682,7 @@ fn apply_shape_effects(
     matrix: Matrix,
     colors: &impl PictureContext,
     defs: &mut String,
+    glow_from_source: bool,
 ) -> Option<(String, Bounds)> {
     let local = Bounds::rect(width, height).expanded(margin);
     let mut source_bounds = local;
@@ -681,11 +735,19 @@ fn apply_shape_effects(
                 let dilation = radius / 2.0;
                 let effect_bounds = bounds.expanded(dilation + 3.0 * deviation);
                 color_filter(defs, &id, effect_bounds, xml, colors, deviation, dilation)?;
-                let _ = write!(
-                    underlay,
-                    r##"<g filter="url(#{id})"><path d="{path}" fill="white" transform="{}"/></g>"##,
-                    matrix.markup()
-                );
+                if glow_from_source {
+                    let _ = write!(
+                        underlay,
+                        r##"<g filter="url(#{id})"><use xlink:href="#picture-body" transform="{}"/></g>"##,
+                        matrix.markup()
+                    );
+                } else {
+                    let _ = write!(
+                        underlay,
+                        r##"<g filter="url(#{id})"><path d="{path}" fill="white" transform="{}"/></g>"##,
+                        matrix.markup()
+                    );
+                }
                 bounds = bounds.union(effect_bounds);
             }
             "a:outerShdw" | "a:reflection" => {
@@ -802,7 +864,7 @@ fn raster_metrics(source: &str) -> Option<(f64, f64, f64, f64)> {
             bytes.get(offset..offset.checked_add(2)?)?.try_into().ok()?,
         ))
     };
-    let mut dpi = (96.0, 96.0);
+    let mut dpi = (72.0, 72.0);
     let (width, height) = if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
         let dimensions = (be_u32(16)? as f64, be_u32(20)? as f64);
         let mut offset = 8usize;
@@ -810,10 +872,14 @@ fn raster_metrics(source: &str) -> Option<(f64, f64, f64, f64)> {
             let length = be_u32(offset)? as usize;
             let kind = bytes.get(offset + 4..offset + 8)?;
             if kind == b"pHYs" && length == 9 && bytes.get(offset + 16) == Some(&1) {
-                dpi = (
-                    be_u32(offset + 8)? as f64 * 0.0254,
-                    be_u32(offset + 12)? as f64 * 0.0254,
-                );
+                let x = be_u32(offset + 8)?;
+                let y = be_u32(offset + 12)?;
+                if x > 0 {
+                    dpi.0 = x as f64 * 0.0254;
+                }
+                if y > 0 {
+                    dpi.1 = y as f64 * 0.0254;
+                }
             }
             if kind == b"IDAT" {
                 break;
@@ -903,21 +969,7 @@ fn tile_picture(
     defs: &mut String,
 ) -> Option<String> {
     let tile = direct_child_tag(fill, "a:tile")?;
-    let (pixel_width, pixel_height, mut dpi_x, mut dpi_y) = raster_metrics(intrinsic_source)?;
-    let dpi = number(fill, "dpi", 0.0)?;
-    if dpi > 0.0 {
-        dpi_x = dpi;
-        dpi_y = dpi;
-    } else if extract_balanced_tag_slices(fill, "a14:useLocalDpi")
-        .into_iter()
-        .next()
-        .is_some_and(|xml| {
-            get_attribute_ref(xml, "val").is_some_and(|value| matches!(value, "0" | "false"))
-        })
-    {
-        dpi_x = 96.0;
-        dpi_y = 96.0;
-    }
+    let (pixel_width, pixel_height, dpi_x, dpi_y) = raster_metrics(intrinsic_source)?;
     let sx = percentage(tile, "sx", 1.0)?;
     let sy = percentage(tile, "sy", 1.0)?;
     let image_width = pixel_width * 96.0 / dpi_x * sx;
@@ -1073,6 +1125,17 @@ pub fn render_picture(
     };
     let border_element = if border.is_empty() {
         String::new()
+    } else if rectangular_picture(properties) {
+        let line_width =
+            number(direct_child_tag(properties, "a:ln")?, "w", 12700.0)?.max(0.0) / 9525.0;
+        let outset = line_width / 2.0;
+        format!(
+            r##"<rect x="{}" y="{}" width="{}" height="{}" {border}/>"##,
+            -outset,
+            -outset,
+            width + line_width,
+            height + line_width
+        )
     } else {
         let bounds = Bounds::rect(width, height).expanded(margin);
         let _ = write!(
@@ -1123,6 +1186,7 @@ pub fn render_picture(
         matrix,
         context,
         &mut defs,
+        false,
     )?;
     let paint_width = paint.right - paint.left;
     let paint_height = paint.bottom - paint.top;

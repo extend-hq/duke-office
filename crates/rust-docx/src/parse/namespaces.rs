@@ -29,6 +29,9 @@ pub(crate) fn prefix(uri: &str) -> Option<&'static str> {
         "http://schemas.microsoft.com/office/word/2010/wordml" => Some("w14"),
         "http://schemas.microsoft.com/office/word/2012/wordml" => Some("w15"),
         "http://schemas.microsoft.com/office/word/2010/wordprocessingDrawing" => Some("wp14"),
+        "http://schemas.openxmlformats.org/drawingml/2006/diagram"
+        | "http://purl.oclc.org/ooxml/drawingml/diagram" => Some("dgm"),
+        "http://schemas.microsoft.com/office/drawing/2008/diagram" => Some("dsp"),
         "http://schemas.microsoft.com/office/drawing/2010/main" => Some("a14"),
         "http://schemas.microsoft.com/office/drawing/2016/SVG/main" => Some("asvg"),
         "urn:schemas-microsoft-com:vml" => Some("v"),

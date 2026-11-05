@@ -5,6 +5,7 @@ use std::{
     sync::OnceLock,
 };
 
+use base64::Engine;
 use quick_xml::{
     events::{BytesStart, Event},
     Reader,
@@ -398,6 +399,7 @@ fn deobfuscate_embedded_font(path: &str, data: &mut [u8]) -> bool {
 
 #[derive(Debug, Clone)]
 struct XmlNode {
+    source_xml: Option<String>,
     name: String,
     attributes: Vec<(String, String)>,
     text: String,
@@ -405,23 +407,27 @@ struct XmlNode {
 }
 
 impl XmlNode {
-    fn from_start(start: &BytesStart<'_>) -> Self {
-        Self {
+    fn from_start(
+        start: &BytesStart<'_>,
+        decoder: quick_xml::encoding::Decoder,
+    ) -> Result<Self, quick_xml::Error> {
+        Ok(Self {
+            source_xml: None,
             name: String::from_utf8_lossy(local_name(start.name().as_ref())).into_owned(),
             attributes: start
                 .attributes()
                 .with_checks(false)
                 .flatten()
                 .map(|attribute| {
-                    (
+                    Ok((
                         String::from_utf8_lossy(local_name(attribute.key.as_ref())).into_owned(),
-                        String::from_utf8_lossy(attribute.value.as_ref()).into_owned(),
-                    )
+                        attribute.decode_and_unescape_value(decoder)?.into_owned(),
+                    ))
                 })
-                .collect(),
+                .collect::<Result<_, quick_xml::Error>>()?,
             text: String::new(),
             children: Vec::new(),
-        }
+        })
     }
 
     fn attr(&self, name: &str) -> Option<&str> {
@@ -471,6 +477,7 @@ struct XmlBudget {
     attributes: usize,
     text_bytes: usize,
     attribute_bytes: usize,
+    source_xml_bytes: usize,
 }
 
 impl XmlBudget {
@@ -501,10 +508,27 @@ impl XmlBudget {
 
     fn consume_text(&mut self, bytes: usize, limits: &ParseLimits) -> Result<(), ParseError> {
         self.text_bytes = self.text_bytes.saturating_add(bytes);
-        if self.text_bytes > limits.max_xml_text_bytes {
+        if self.text_bytes.saturating_add(self.source_xml_bytes) > limits.max_xml_text_bytes {
             return Err(ParseError::ResourceLimit("XML text bytes".into()));
         }
         Ok(())
+    }
+
+    fn retain_source_xml(
+        &mut self,
+        source: &[u8],
+        limits: &ParseLimits,
+        context: &str,
+    ) -> Result<String, ParseError> {
+        self.source_xml_bytes = self.source_xml_bytes.saturating_add(source.len());
+        if self.text_bytes.saturating_add(self.source_xml_bytes) > limits.max_xml_text_bytes {
+            return Err(ParseError::ResourceLimit(
+                "XML retained source bytes".into(),
+            ));
+        }
+        let source = std::str::from_utf8(source)
+            .map_err(|error| ParseError::Corrupt(format!("{context}: {error}")))?;
+        Ok(source.to_owned())
     }
 }
 
@@ -512,20 +536,40 @@ fn parse_xml_tree(xml: &[u8], limits: &ParseLimits, context: &str) -> Result<Xml
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(false);
     let mut stack = Vec::<XmlNode>::new();
+    let mut source_starts = Vec::new();
     let mut root = None;
     let mut budget = XmlBudget::default();
     loop {
+        let source_start = reader.buffer_position() as usize;
         match reader.read_event() {
             Ok(Event::Start(start)) => {
                 if stack.len() >= limits.max_xml_depth {
                     return Err(ParseError::ResourceLimit("XML nesting depth".into()));
                 }
                 budget.consume_node(&start, limits)?;
-                stack.push(XmlNode::from_start(&start));
+                source_starts.push(
+                    matches!(
+                        local_name(start.name().as_ref()),
+                        b"pic" | b"sp" | b"cxnSp" | b"fmtScheme"
+                    )
+                    .then_some(source_start),
+                );
+                stack.push(
+                    XmlNode::from_start(&start, reader.decoder())
+                        .map_err(|error| ParseError::Corrupt(format!("{context}: {error}")))?,
+                );
             }
             Ok(Event::Empty(start)) => {
                 budget.consume_node(&start, limits)?;
-                let node = XmlNode::from_start(&start);
+                let mut node = XmlNode::from_start(&start, reader.decoder())
+                    .map_err(|error| ParseError::Corrupt(format!("{context}: {error}")))?;
+                if matches!(node.name.as_str(), "pic" | "sp" | "cxnSp" | "fmtScheme") {
+                    node.source_xml = Some(budget.retain_source_xml(
+                        &xml[source_start..reader.buffer_position() as usize],
+                        limits,
+                        context,
+                    )?);
+                }
                 if let Some(parent) = stack.last_mut() {
                     parent.children.push(node);
                 } else if root.replace(node).is_some() {
@@ -550,9 +594,16 @@ fn parse_xml_tree(xml: &[u8], limits: &ParseLimits, context: &str) -> Result<Xml
                 }
             }
             Ok(Event::End(_)) => {
-                let node = stack.pop().ok_or_else(|| {
+                let mut node = stack.pop().ok_or_else(|| {
                     ParseError::Corrupt(format!("{context} contains an unmatched closing tag"))
                 })?;
+                if let Some(Some(start)) = source_starts.pop() {
+                    node.source_xml = Some(budget.retain_source_xml(
+                        &xml[start..reader.buffer_position() as usize],
+                        limits,
+                        context,
+                    )?);
+                }
                 if let Some(parent) = stack.last_mut() {
                     parent.children.push(node);
                 } else if root.replace(node).is_some() {
@@ -674,6 +725,8 @@ struct ThemeDataInternal {
     fill_styles: Vec<XmlNode>,
     background_fill_styles: Vec<XmlNode>,
     line_styles: Vec<XmlNode>,
+    effect_styles: Vec<XmlNode>,
+    format_scheme_xml: Option<String>,
 }
 
 impl ThemeDataInternal {
@@ -681,6 +734,7 @@ impl ThemeDataInternal {
         crate::PresentationTheme {
             id: self.id.clone(),
             name: self.name.clone(),
+            format_scheme_xml: self.format_scheme_xml.clone(),
             colors: self.colors.clone(),
             major_fonts: self.major_fonts.clone(),
             minor_fonts: self.minor_fonts.clone(),
@@ -1133,6 +1187,7 @@ fn parse_theme(
         major_fonts: parse_fonts(font_scheme.and_then(|scheme| scheme.child("majorFont"))),
         minor_fonts: parse_fonts(font_scheme.and_then(|scheme| scheme.child("minorFont"))),
         rels,
+        format_scheme_xml: format_scheme.and_then(|node| node.source_xml.clone()),
         fill_styles: format_scheme
             .and_then(|scheme| scheme.child("fillStyleLst"))
             .map(|list| list.children.clone())
@@ -1143,6 +1198,10 @@ fn parse_theme(
             .unwrap_or_default(),
         line_styles: format_scheme
             .and_then(|scheme| scheme.child("lnStyleLst"))
+            .map(|list| list.children.clone())
+            .unwrap_or_default(),
+        effect_styles: format_scheme
+            .and_then(|scheme| scheme.child("effectStyleLst"))
             .map(|list| list.children.clone())
             .unwrap_or_default(),
     })
@@ -2320,10 +2379,14 @@ fn shape_line(node: &XmlNode, colors: Option<&ColorContext<'_>>) -> Option<Optio
         .map(|line| style_matrix_line(line, colors))
 }
 
+#[derive(Clone, Copy)]
 struct NodeParseContext<'a, 'color> {
     slide_index: usize,
+    paint_scale: (f64, f64),
     rels: &'a HashMap<String, String>,
     related_parts: &'a HashMap<String, Vec<u8>>,
+    related_relationships: &'a HashMap<String, HashMap<String, String>>,
+    assets: &'a BTreeMap<String, PresentationAsset>,
     chart_companions: &'a HashMap<String, ChartCompanionParts>,
     legacy_chart_defaults: bool,
     limits: &'a ParseLimits,
@@ -2386,10 +2449,40 @@ fn parse_shape_node(
         colors: context.colors,
         rels: context.rels,
     };
+    let transform = inherited_shape_transform(node, layout, master);
+    let (properties_xml, style_xml) = shape_appearance_xml(
+        &[
+            (Some(node), Some(context.rels)),
+            (layout, context.layout_rels),
+            (master, context.master_rels),
+        ],
+        &transform,
+    );
+    let rendered = rust_office_art::render_shape(
+        &properties_xml,
+        &style_xml,
+        transform.width as f64 * context.paint_scale.0 / 9525.0,
+        transform.height as f64 * context.paint_scale.1 / 9525.0,
+        &OfficeArtColors {
+            colors: context.colors,
+            limits: context.limits,
+            assets: context.assets,
+            relationships: context.rels,
+        },
+    );
+    if rendered.is_none() && transform.width > 0 && transform.height > 0 {
+        context.diagnostics.warn("unsupported-shape-appearance", "Shape paint could not be rendered by the shared engine; structured geometry, fill, line and source XML remain available.", Some("shape"));
+    }
+    let (shape_svg, paint_bounds) = rendered
+        .map(|paint| (Some(paint.svg), paint.paint_bounds))
+        .unwrap_or_default();
     SlideNode::Shape {
         id,
         name,
-        transform: inherited_shape_transform(node, layout, master),
+        transform,
+        shape_svg,
+        paint_bounds,
+        source_xml: node.source_xml.clone(),
         geometry: ShapeGeometry {
             preset: geometry,
             path: custom_geometry_path(node),
@@ -2437,6 +2530,284 @@ fn parse_shape_node(
     }
 }
 
+fn load_picture_assets(
+    archive: &mut ZipArchive<Cursor<&[u8]>>,
+    paths: &BTreeMap<String, String>,
+    assets: &mut BTreeMap<String, PresentationAsset>,
+    limits: &ParseLimits,
+) -> Result<(), ParseError> {
+    for path in paths
+        .keys()
+        .filter(|path| !assets.contains_key(*path))
+        .cloned()
+        .collect::<Vec<_>>()
+    {
+        if let Some(data) = read_entry(archive, &path, limits)? {
+            assets.insert(
+                path.clone(),
+                PresentationAsset {
+                    id: path.clone(),
+                    content_type: content_type(&path),
+                    byte_length: data.len(),
+                    file_name: path.rsplit('/').next().map(str::to_owned),
+                    data: Some(data.into()),
+                },
+            );
+        }
+    }
+    Ok(())
+}
+
+struct OfficeArtColors<'a, 'b> {
+    colors: Option<&'a ColorContext<'b>>,
+    limits: &'a ParseLimits,
+    assets: &'a BTreeMap<String, PresentationAsset>,
+    relationships: &'a HashMap<String, String>,
+}
+
+impl rust_office_art::PictureContext for OfficeArtColors<'_, '_> {
+    fn resolve_image(&self, relationship_id: &str) -> Option<String> {
+        let id = self
+            .relationships
+            .get(relationship_id)
+            .map(String::as_str)
+            .unwrap_or(relationship_id);
+        let asset = self.assets.get(id)?;
+        Some(format!(
+            "data:{};base64,{}",
+            asset.content_type,
+            base64::engine::general_purpose::STANDARD.encode(asset.data.as_ref()?)
+        ))
+    }
+
+    fn resolve_color(&self, xml: &str) -> Option<rust_office_art::ResolvedColor> {
+        let node = parse_xml_tree(xml.as_bytes(), self.limits, "picture color").ok()?;
+        let color = parse_color(&node, self.colors)?;
+        Some(rust_office_art::ResolvedColor {
+            color: color.value,
+            opacity: color.alpha,
+        })
+    }
+    fn resolve_style_reference(
+        &self,
+        kind: rust_office_art::StyleReferenceKind,
+        index: u32,
+        placeholder_xml: &str,
+    ) -> Option<String> {
+        let theme = self.colors?.theme?;
+        let index = index as usize;
+        let style = match kind {
+            rust_office_art::StyleReferenceKind::Fill if index >= 1001 => {
+                theme.background_fill_styles.get(index - 1001)?
+            }
+            rust_office_art::StyleReferenceKind::Fill => {
+                theme.fill_styles.get(index.checked_sub(1)?)?
+            }
+            rust_office_art::StyleReferenceKind::Line => {
+                theme.line_styles.get(index.checked_sub(1)?)?
+            }
+            rust_office_art::StyleReferenceKind::Effect => {
+                let style = theme.effect_styles.get(index.checked_sub(1)?)?;
+                if style.child("scene3d").is_some() || style.child("sp3d").is_some() {
+                    return None;
+                }
+                style.child("effectLst")?
+            }
+        };
+        let placeholder = parse_xml_tree(placeholder_xml.as_bytes(), self.limits, "style color")
+            .ok()
+            .and_then(|node| parse_color(&node, self.colors));
+        let mut output = String::new();
+        office_art_node_xml_with_color(
+            style,
+            "a",
+            &mut output,
+            placeholder.as_ref(),
+            Some(&theme.rels),
+        );
+        Some(output)
+    }
+}
+
+fn office_art_node_xml(node: &XmlNode, prefix: &str, output: &mut String) {
+    office_art_node_xml_with_color(node, prefix, output, None, None);
+}
+
+fn office_art_node_xml_with_color(
+    node: &XmlNode,
+    prefix: &str,
+    output: &mut String,
+    placeholder: Option<&ColorValue>,
+    relationships: Option<&HashMap<String, String>>,
+) {
+    let prefix = if node.name == "useLocalDpi" {
+        "a14"
+    } else {
+        prefix
+    };
+    let replacement = (node.name == "schemeClr" && node.attr("val") == Some("phClr"))
+        .then_some(placeholder)
+        .flatten();
+    let name = if replacement.is_some() {
+        "srgbClr"
+    } else {
+        &node.name
+    };
+    output.push_str(&format!("<{prefix}:{name}"));
+    for (name, value) in &node.attributes {
+        if value.starts_with("http://schemas.") || value.starts_with("http://purl.org/") {
+            continue;
+        }
+        let relationship = matches!(name.as_str(), "embed" | "link");
+        let resolved = relationship
+            .then(|| relationships.and_then(|rels| rels.get(value)))
+            .flatten();
+        let value = if let Some(resolved) = resolved {
+            resolved.as_str()
+        } else if name == "val" {
+            replacement
+                .map(|color| color.value.trim_start_matches('#'))
+                .unwrap_or(value)
+        } else {
+            value
+        };
+        output.push_str(&format!(
+            " {}{}=\"{}\"",
+            if relationship { "r:" } else { "" },
+            name,
+            quick_xml::escape::escape(value)
+        ));
+    }
+    output.push('>');
+    output.push_str(&quick_xml::escape::escape(&node.text));
+    if let Some(alpha) = replacement.and_then(|color| color.alpha) {
+        output.push_str(&format!(
+            r#"<a:alpha val="{}"/>"#,
+            (alpha * 100000.0).round()
+        ));
+    }
+    for child in &node.children {
+        office_art_node_xml_with_color(child, "a", output, placeholder, relationships);
+    }
+    output.push_str(&format!("</{prefix}:{name}>"));
+}
+
+fn shape_appearance_xml(
+    sources: &[(Option<&XmlNode>, Option<&HashMap<String, String>>)],
+    frame: &Transform,
+) -> (String, String) {
+    let mut properties = format!(
+        r#"<a:spPr><a:xfrm rot="{}" flipH="{}" flipV="{}"><a:off x="0" y="0"/><a:ext cx="{}" cy="{}"/></a:xfrm>"#,
+        frame.rotation.unwrap_or(0.0) * 60000.0,
+        frame.flip_horizontal.unwrap_or(false) as u8,
+        frame.flip_vertical.unwrap_or(false) as u8,
+        frame.width,
+        frame.height
+    );
+    let mut inherited = std::collections::HashSet::new();
+    if sources
+        .first()
+        .and_then(|(source, _)| *source)
+        .and_then(|source| source.attr("useBgFill"))
+        .and_then(bool_value)
+        .unwrap_or(false)
+    {
+        properties.push_str("<a:noFill/>");
+        inherited.insert("fill");
+    }
+    for (source, relationships) in sources
+        .iter()
+        .filter_map(|(source, rels)| Some(((*source)?.child("spPr")?, *rels)))
+    {
+        for child in &source.children {
+            let key = match child.name.as_str() {
+                "noFill" | "solidFill" | "gradFill" | "pattFill" | "blipFill" | "grpFill" => "fill",
+                "custGeom" | "prstGeom" => "geometry",
+                "effectLst" | "effectDag" => "effects",
+                name => name,
+            };
+            if child.name != "xfrm" && inherited.insert(key) {
+                office_art_node_xml_with_color(child, "a", &mut properties, None, relationships);
+            }
+        }
+    }
+    properties.push_str("</a:spPr>");
+    let mut style = "<a:style>".to_owned();
+    inherited.clear();
+    for source in sources
+        .iter()
+        .filter_map(|(source, _)| (*source)?.child("style"))
+    {
+        for child in &source.children {
+            if inherited.insert(&child.name) {
+                office_art_node_xml(child, "a", &mut style);
+            }
+        }
+    }
+    style.push_str("</a:style>");
+    (properties, style)
+}
+
+fn picture_appearance_xml(
+    fill: &XmlNode,
+    sources: &[Option<&XmlNode>],
+    frame: &Transform,
+) -> String {
+    let mut xml = "<pic:pic>".to_owned();
+    office_art_node_xml(fill, "pic", &mut xml);
+    xml.push_str(&format!(r#"<pic:spPr><a:xfrm rot="{}" flipH="{}" flipV="{}"><a:off x="0" y="0"/><a:ext cx="{}" cy="{}"/></a:xfrm>"#,
+        frame.rotation.unwrap_or(0.0) * 60000.0, frame.flip_horizontal.unwrap_or(false) as u8,
+        frame.flip_vertical.unwrap_or(false) as u8, frame.width, frame.height));
+    let mut inherited = std::collections::HashSet::new();
+    for properties in sources
+        .iter()
+        .flatten()
+        .filter_map(|source| source.child("spPr"))
+    {
+        for child in &properties.children {
+            if child.name != "xfrm" && inherited.insert(&child.name) {
+                office_art_node_xml(child, "a", &mut xml);
+            }
+        }
+    }
+    xml.push_str("</pic:spPr></pic:pic>");
+    xml
+}
+
+fn picture_needs_rendering(
+    fill: &XmlNode,
+    sources: &[Option<&XmlNode>],
+    frame: &Transform,
+) -> bool {
+    frame.rotation.is_some_and(|value| value != 0.0)
+        || frame.flip_horizontal.unwrap_or(false)
+        || frame.flip_vertical.unwrap_or(false)
+        || fill.child("tile").is_some()
+        || image_crop(fill).is_some()
+        || fill
+            .child("stretch")
+            .and_then(|node| node.child("fillRect"))
+            .is_some_and(|node| !node.attributes.is_empty())
+        || fill
+            .child("blip")
+            .is_some_and(|node| node.children.iter().any(|child| child.name != "extLst"))
+        || sources
+            .iter()
+            .flatten()
+            .filter_map(|node| node.child("spPr"))
+            .any(|properties| {
+                properties
+                    .children
+                    .iter()
+                    .any(|child| match child.name.as_str() {
+                        "custGeom" | "scene3d" | "sp3d" | "effectDag" | "ln" => true,
+                        "effectLst" => !child.children.is_empty(),
+                        "prstGeom" => child.attr("prst").is_some_and(|value| value != "rect"),
+                        _ => false,
+                    })
+            })
+}
+
 fn parse_image_node(
     node: &XmlNode,
     node_index: usize,
@@ -2458,11 +2829,20 @@ fn parse_image_node(
     .into_iter()
     .find_map(|(source, rels)| {
         let fill = source?.child("blipFill")?;
-        let relationship = fill
-            .child("blip")?
-            .attr("embed")
-            .or_else(|| fill.child("blip")?.attr("link"))?;
-        let asset_id = rels?.get(relationship)?.clone();
+        let blip = fill.child("blip")?;
+        let rels = rels?;
+        let alternative = blip
+            .descendant("svgBlip")
+            .and_then(|svg| svg.attr("embed"))
+            .and_then(|id| rels.get(id))
+            .filter(|id| context.assets.contains_key(*id));
+        let asset_id = alternative
+            .or_else(|| {
+                blip.attr("embed")
+                    .or_else(|| blip.attr("link"))
+                    .and_then(|id| rels.get(id))
+            })?
+            .clone();
         Some((fill, asset_id))
     });
     let asset_id = resolved_fill.as_ref().map(|(_, asset_id)| asset_id.clone());
@@ -2484,6 +2864,40 @@ fn parse_image_node(
         fill.child("blip")
             .and_then(|blip| parse_blip_effects(blip, context.colors))
     });
+    let transform = inherited_shape_transform(node, layout, master);
+    let sources = [Some(node), layout, master];
+    let rendered = resolved_fill.as_ref().and_then(|(fill, asset_id)| {
+        let asset = context.assets.get(asset_id)?;
+        let bytes = asset.data.as_ref()?;
+        let source = format!(
+            "data:{};base64,{}",
+            asset.content_type,
+            base64::engine::general_purpose::STANDARD.encode(bytes)
+        );
+        let appearance = picture_appearance_xml(fill, &sources, &transform);
+        rust_office_art::render_picture(
+            &appearance,
+            &source,
+            transform.width as f64 * context.paint_scale.0 / 9525.0,
+            transform.height as f64 * context.paint_scale.1 / 9525.0,
+            &OfficeArtColors {
+                colors: context.colors,
+                limits: context.limits,
+                assets: context.assets,
+                relationships: context.rels,
+            },
+        )
+    });
+    if rendered.is_none()
+        && resolved_fill
+            .as_ref()
+            .is_some_and(|(fill, _)| picture_needs_rendering(fill, &sources, &transform))
+    {
+        context.diagnostics.warn("unsupported-picture-appearance", "Picture appearance is retained in source XML; the available asset and basic effects are used as fallback.", Some("image"));
+    }
+    let (picture_svg, paint_bounds) = rendered
+        .map(|paint| (Some(paint.svg), paint.paint_bounds))
+        .unwrap_or_default();
     if asset_id.is_none() {
         context.diagnostics.warn(
             "missing-asset",
@@ -2494,12 +2908,15 @@ fn parse_image_node(
     SlideNode::Image {
         id,
         name,
-        transform: inherited_shape_transform(node, layout, master),
+        transform,
         asset_id: asset_id.unwrap_or_else(|| "missing-asset".into()),
         crop,
         opacity,
         preserve_aspect_ratio,
         effects,
+        picture_svg,
+        paint_bounds,
+        source_xml: node.source_xml.clone(),
     }
 }
 
@@ -3009,51 +3426,24 @@ struct ParsedChart {
     svg: Option<String>,
 }
 
-fn render_cartesian_chart(
+fn render_shared_chart(
     root: &XmlNode,
     xml: &[u8],
     frame: &Transform,
     context: &NodeParseContext<'_, '_>,
     companions: Option<&ChartCompanionParts>,
 ) -> Option<String> {
-    let chart = root.child("chart")?;
-    let plot = chart.child("plotArea")?;
-    let mut groups = plot
-        .children
-        .iter()
-        .filter(|node| node.name.ends_with("Chart"));
-    let group = groups.next()?;
-    let column = group.name == "barChart" && group.child("barDir")?.attr("val") == Some("col");
-    let multi_level = group
-        .children_named("ser")
-        .filter_map(|series| {
-            series
-                .child("cat")?
-                .child("multiLvlStrRef")?
-                .child("multiLvlStrCache")
-        })
-        .any(|cache| cache.children_named("lvl").count() > 1);
-    if groups.next().is_some()
-        || multi_level
-        || (!column && group.name != "lineChart")
-        || frame.width < frame.height
-        || frame.height <= 0
-        || [
-            "trendline",
-            "errBars",
-            "upDownBars",
-            "hiLowLines",
-            "dropLines",
-            "dTable",
-            "blipFill",
-            "dateAx",
-            "manualLayout",
-        ]
-        .iter()
-        .any(|unsupported| root.descendant(unsupported).is_some())
-    {
+    if frame.width <= 0 || frame.height <= 0 {
         return None;
     }
+    let chart = root.child("chart");
+    let group = chart
+        .and_then(|chart| chart.child("plotArea"))
+        .and_then(|plot| {
+            plot.children
+                .iter()
+                .find(|node| node.name.ends_with("Chart"))
+        });
 
     let colors = context.colors;
     let theme = colors.and_then(|context| context.theme);
@@ -3069,16 +3459,18 @@ fn render_cartesian_chart(
         palette
     });
     let xml = std::str::from_utf8(xml).ok()?;
-    let automatic_title = chart
-        .child("title")
-        .is_some_and(|title| title.child("tx").is_none())
-        && !matches!(
-            chart
-                .child("autoTitleDeleted")
-                .and_then(|node| node.attr("val")),
-            Some("1" | "true")
-        )
-        && group.children_named("ser").count() == 1;
+    let automatic_title = chart.is_some_and(|chart| {
+        chart
+            .child("title")
+            .is_some_and(|title| title.child("tx").is_none())
+            && !matches!(
+                chart
+                    .child("autoTitleDeleted")
+                    .and_then(|node| node.attr("val")),
+                Some("1" | "true")
+            )
+            && group.is_some_and(|group| group.children_named("ser").count() == 1)
+    });
     let data = automatic_title
         .then(|| {
             let mut data = rust_office_charts::parse_chart_xml(xml)?;
@@ -3189,7 +3581,7 @@ fn parse_chart_part(
         })
         .collect();
     Ok(ParsedChart {
-        svg: render_cartesian_chart(&root, xml, transform, context, companions),
+        svg: render_shared_chart(&root, xml, transform, context, companions),
         chart_type: chart_type.into(),
         title: chart_title(&root),
         series,
@@ -3212,53 +3604,59 @@ fn paragraphs_have_text(paragraphs: &[TextParagraph]) -> bool {
         .any(|paragraph| paragraph.runs.iter().any(|run| !run.text.trim().is_empty()))
 }
 
-fn parse_smartart_data(root: &XmlNode, context: &NodeParseContext<'_, '_>) -> ParsedSmartArtData {
+fn parse_smartart_data(xml: &[u8], context: &NodeParseContext<'_, '_>) -> ParsedSmartArtData {
+    let Some(data) = std::str::from_utf8(xml)
+        .ok()
+        .and_then(rust_office_art::smartart::parse_smartart_data)
+    else {
+        context.diagnostics.warn(
+            "unsupported-smartart-data",
+            "The SmartArt data model could not be read within the shared parser limits.",
+            Some("smartart"),
+        );
+        return ParsedSmartArtData::default();
+    };
     let mut parsed = ParsedSmartArtData {
-        drawing_relationship_id: root
-            .descendant("dataModelExt")
-            .and_then(|extension| extension.attr("relId"))
-            .map(str::to_owned),
-        background: root
-            .child("bg")
-            .and_then(|background| parse_fill(background, context.colors, context.rels)),
+        drawing_relationship_id: data.drawing_relationship_id.clone(),
+        background: data
+            .background_xml
+            .as_deref()
+            .and_then(|xml| {
+                parse_xml_tree(xml.as_bytes(), context.limits, "SmartArt background").ok()
+            })
+            .and_then(|node| parse_fill(&node, context.colors, context.rels)),
         ..Default::default()
     };
-    let Some(points) = root.child("ptLst") else {
-        return parsed;
-    };
-    for point in points.children_named("pt") {
-        let Some(model_id) = point.attr("modelId") else {
-            continue;
-        };
-        let point_type = point.attr("type");
-        if point_type == Some("pres") {
-            if let Some(semantic_id) = point
-                .child("prSet")
-                .and_then(|properties| properties.attr("presAssocID"))
-            {
-                parsed
-                    .presentation_to_semantic
-                    .insert(model_id.to_owned(), semantic_id.to_owned());
-            }
+    for point in &data.points {
+        if let Some(association) = point.presentation_association.as_ref() {
+            parsed
+                .presentation_to_semantic
+                .insert(point.model_id.clone(), association.clone());
+        }
+        if matches!(
+            point.kind.as_str(),
+            "pres" | "doc" | "parTrans" | "sibTrans"
+        ) {
             continue;
         }
-        if matches!(point_type, Some("doc" | "parTrans" | "sibTrans")) {
-            continue;
-        }
+        let text_body = point
+            .text_body_xml
+            .as_deref()
+            .and_then(|xml| parse_xml_tree(xml.as_bytes(), context.limits, "SmartArt text").ok());
         let text_context = TextParseContext {
             presentation_text_style: context.presentation_text_style,
             shape_default_style: RunStyle::default(),
             colors: context.colors,
             rels: context.rels,
         };
-        let paragraphs = parse_text_paragraphs(point.child("t"), None, None, None, &text_context);
+        let paragraphs = parse_text_paragraphs(text_body.as_ref(), None, None, None, &text_context);
         if paragraphs_have_text(&paragraphs) {
             parsed
                 .semantic_text
-                .insert(model_id.to_owned(), paragraphs.clone());
+                .insert(point.model_id.clone(), paragraphs.clone());
             parsed
                 .semantic_labels
-                .push((model_id.to_owned(), paragraphs));
+                .push((point.model_id.clone(), paragraphs));
         }
     }
     parsed
@@ -3287,55 +3685,106 @@ fn mapped_smartart_text<'a>(
 fn parse_materialized_smartart(
     frame_node: &XmlNode,
     node_index: usize,
-    drawing_root: &XmlNode,
+    drawing: &rust_office_art::smartart::SmartArtDrawing,
     data: &ParsedSmartArtData,
     context: &NodeParseContext<'_, '_>,
 ) -> Option<SlideNode> {
-    let shape_tree = drawing_root.descendant("spTree")?;
-    let (frame_id, frame_name) = node_identity(frame_node, context.slide_index, node_index);
-    let mut children = Vec::new();
-    for (shape_index, shape) in shape_tree.children.iter().enumerate() {
-        if !matches!(shape.name.as_str(), "sp" | "cxnSp") {
-            continue;
+    fn parse_cached_node(
+        entry: &rust_office_art::smartart::SmartArtDrawingNode,
+        index: usize,
+        frame_id: &str,
+        data: &ParsedSmartArtData,
+        context: &NodeParseContext<'_, '_>,
+    ) -> Option<SlideNode> {
+        let shape = parse_xml_tree(
+            entry.source_xml.as_bytes(),
+            context.limits,
+            "SmartArt drawing",
+        )
+        .ok()?;
+        if shape.child("txXfrm").is_some() {
+            context.diagnostics.warn(
+                "unsupported-smartart-text-transform",
+                "An independent SmartArt text transform is preserved in source XML; text uses the shape frame as a rendering fallback.",
+                Some("smartart"),
+            );
         }
-        let model_id = shape
-            .attr("modelId")
-            .map(str::to_owned)
-            .unwrap_or_else(|| format!("shape-{shape_index}"));
-        let mut parsed = parse_shape_node(shape, shape_index, context);
-        if let SlideNode::Shape {
-            id,
-            name,
-            paragraphs,
-            ..
-        } = &mut parsed
-        {
-            *id = format!("{frame_id}:smartart:{model_id}");
-            if name.is_empty() {
-                *name = format!("SmartArt shape {}", shape_index + 1);
-            }
+        let model_id = entry
+            .model_id
+            .clone()
+            .unwrap_or_else(|| format!("shape-{index}"));
+        let mut parsed = parse_slide_node(&shape, index, context).ok().flatten()?;
+        let (id, name) = match &mut parsed {
+            SlideNode::Shape { id, name, .. }
+            | SlideNode::Image { id, name, .. }
+            | SlideNode::Group { id, name, .. }
+            | SlideNode::Table { id, name, .. }
+            | SlideNode::Chart { id, name, .. }
+            | SlideNode::Unknown { id, name, .. } => (id, name),
+        };
+        *id = format!("{frame_id}:smartart:{model_id}");
+        if name.is_empty() {
+            *name = format!("SmartArt shape {}", index + 1);
+        }
+        if let SlideNode::Shape { paragraphs, .. } = &mut parsed {
             if !paragraphs_have_text(paragraphs) {
                 if let Some(mapped) = mapped_smartart_text(&model_id, data) {
                     *paragraphs = mapped.clone();
                 }
             }
         }
-        children.push(parsed);
+        if let SlideNode::Group {
+            id,
+            children,
+            transform,
+            child_transform,
+            ..
+        } = &mut parsed
+        {
+            let child_context = group_paint_context(context, transform, child_transform.as_ref());
+            *children = entry
+                .children
+                .iter()
+                .enumerate()
+                .filter_map(|(index, entry)| {
+                    parse_cached_node(entry, index, id, data, &child_context)
+                })
+                .collect();
+        }
+        Some(parsed)
     }
+    let (frame_id, frame_name) = node_identity(frame_node, context.slide_index, node_index);
+    let frame = parse_transform(frame_node.child("xfrm"));
+    let properties = drawing
+        .group_properties_xml
+        .as_deref()
+        .and_then(|xml| parse_xml_tree(xml.as_bytes(), context.limits, "SmartArt group").ok());
+    let drawing_xfrm = properties
+        .as_ref()
+        .and_then(|properties| properties.child("xfrm"));
+    let child_transform =
+        parse_child_transform(drawing_xfrm).or_else(|| Some(smartart_child_transform(&frame)));
+    let child_context = group_paint_context(context, &frame, child_transform.as_ref());
+    let children = drawing
+        .nodes
+        .iter()
+        .enumerate()
+        .filter_map(|(index, entry)| {
+            parse_cached_node(entry, index, &frame_id, data, &child_context)
+        })
+        .collect::<Vec<_>>();
     if children.is_empty() {
         return None;
     }
-    let frame = parse_transform(frame_node.child("xfrm"));
-    let drawing_xfrm = shape_tree
-        .child("grpSpPr")
-        .and_then(|properties| properties.child("xfrm"));
+    if !drawing.unsupported_elements.is_empty() {
+        context.diagnostics.warn("unsupported-smartart-content", "Some cached SmartArt drawing elements are retained by the shared reader but cannot be rendered.", Some("smartart"));
+    }
     Some(SlideNode::Group {
         id: frame_id,
         name: frame_name,
         transform: frame.clone(),
         children,
-        child_transform: parse_child_transform(drawing_xfrm)
-            .or_else(|| Some(smartart_child_transform(&frame))),
+        child_transform,
     })
 }
 
@@ -3394,6 +3843,9 @@ fn smartart_fallback_group(
         Vec::with_capacity(count.saturating_add(usize::from(data.background.is_some())));
     if let Some(fill) = data.background.clone() {
         children.push(SlideNode::Shape {
+            shape_svg: None,
+            paint_bounds: None,
+            source_xml: None,
             id: format!("{frame_id}:smartart:background"),
             name: "SmartArt background".into(),
             transform: smartart_child_transform(&frame),
@@ -3426,6 +3878,9 @@ fn smartart_fallback_group(
         let horizontal_inset = (cell_width / 20).max(0);
         let vertical_inset = (cell_height / 12).max(0);
         children.push(SlideNode::Shape {
+            shape_svg: None,
+            paint_bounds: None,
+            source_xml: None,
             id: format!("{frame_id}:smartart:fallback:{model_id}"),
             name: format!("SmartArt item {}", label_index + 1),
             transform: Transform {
@@ -3521,20 +3976,47 @@ fn parse_smartart_frame(
         );
         return Ok(None);
     };
-    let data_root = parse_xml_tree(data_xml, context.limits, data_path)?;
-    let data = parse_smartart_data(&data_root, context);
+    parse_xml_tree(data_xml, context.limits, data_path)?;
+    let data_rels = context
+        .related_relationships
+        .get(data_path)
+        .unwrap_or(context.rels);
+    let data_context = NodeParseContext {
+        rels: data_rels,
+        ..*context
+    };
+    let data = parse_smartart_data(data_xml, &data_context);
     if let Some(drawing_relationship_id) = data.drawing_relationship_id.as_deref() {
-        if let Some(drawing_path) = context.rels.get(drawing_relationship_id) {
+        if let Some(drawing_path) = data_rels
+            .get(drawing_relationship_id)
+            .or_else(|| context.rels.get(drawing_relationship_id))
+        {
             if let Some(drawing_xml) = context.related_parts.get(drawing_path) {
-                let drawing_root = parse_xml_tree(drawing_xml, context.limits, drawing_path)?;
-                if let Some(group) = parse_materialized_smartart(
-                    frame_node,
-                    node_index,
-                    &drawing_root,
-                    &data,
-                    context,
-                ) {
-                    return Ok(Some(group));
+                parse_xml_tree(drawing_xml, context.limits, drawing_path)?;
+                let drawing_context = NodeParseContext {
+                    rels: context
+                        .related_relationships
+                        .get(drawing_path)
+                        .unwrap_or(context.rels),
+                    layout_root: None,
+                    master_root: None,
+                    layout_rels: None,
+                    master_rels: None,
+                    ..*context
+                };
+                if let Some(drawing) = std::str::from_utf8(drawing_xml)
+                    .ok()
+                    .and_then(rust_office_art::smartart::parse_smartart_drawing)
+                {
+                    if let Some(group) = parse_materialized_smartart(
+                        frame_node,
+                        node_index,
+                        &drawing,
+                        &data,
+                        &drawing_context,
+                    ) {
+                        return Ok(Some(group));
+                    }
                 }
             } else {
                 context.diagnostics.warn(
@@ -3595,6 +4077,9 @@ fn parse_graphic_frame(
                 None,
             )
         };
+        if chart.svg.is_none() && chart_xml.is_some() {
+            context.diagnostics.warn("unsupported-chart-rendering", "The chart source and cached series are retained; shared SVG rendering is unavailable for this chart.", Some("chart"));
+        }
         let (id, name) = node_identity(node, context.slide_index, node_index);
         return Ok(SlideNode::Chart {
             id,
@@ -3638,6 +4123,29 @@ fn parse_graphic_frame(
     })
 }
 
+fn group_paint_context<'a, 'color>(
+    context: &NodeParseContext<'a, 'color>,
+    frame: &Transform,
+    child: Option<&Transform>,
+) -> NodeParseContext<'a, 'color> {
+    let child = child.unwrap_or(frame);
+    let scale = |parent: f64, extent: i64, child_extent: i64| {
+        let scale = parent * extent as f64 / child_extent as f64;
+        if scale.is_finite() && scale > 0.0 {
+            scale
+        } else {
+            parent
+        }
+    };
+    NodeParseContext {
+        paint_scale: (
+            scale(context.paint_scale.0, frame.width, child.width),
+            scale(context.paint_scale.1, frame.height, child.height),
+        ),
+        ..*context
+    }
+}
+
 fn parse_group_node(
     node: &XmlNode,
     node_index: usize,
@@ -3647,18 +4155,21 @@ fn parse_group_node(
     let xfrm = node
         .child("grpSpPr")
         .and_then(|properties| properties.child("xfrm"));
+    let transform = parse_transform(xfrm);
+    let child_transform = parse_child_transform(xfrm);
+    let child_context = group_paint_context(context, &transform, child_transform.as_ref());
     let mut children = Vec::new();
     for (child_index, child) in node.children.iter().enumerate() {
-        if let Some(child) = parse_slide_node(child, child_index, context)? {
+        if let Some(child) = parse_slide_node(child, child_index, &child_context)? {
             children.push(child);
         }
     }
     Ok(SlideNode::Group {
         id,
         name,
-        transform: parse_transform(xfrm),
+        transform,
         children,
-        child_transform: parse_child_transform(xfrm),
+        child_transform,
     })
 }
 
@@ -3808,8 +4319,11 @@ fn parse_slide(
         if let (Some(master), Some(master_rels)) = (context.master_root, context.master_rels) {
             let master_context = NodeParseContext {
                 slide_index: context.slide_index,
+                paint_scale: context.paint_scale,
                 rels: master_rels,
                 related_parts: context.related_parts,
+                related_relationships: context.related_relationships,
+                assets: context.assets,
                 chart_companions: context.chart_companions,
                 legacy_chart_defaults: context.legacy_chart_defaults,
                 limits: context.limits,
@@ -3832,8 +4346,11 @@ fn parse_slide(
     if let (Some(layout), Some(layout_rels)) = (context.layout_root, context.layout_rels) {
         let layout_context = NodeParseContext {
             slide_index: context.slide_index,
+            paint_scale: context.paint_scale,
             rels: layout_rels,
             related_parts: context.related_parts,
+            related_relationships: context.related_relationships,
+            assets: context.assets,
             chart_companions: context.chart_companions,
             legacy_chart_defaults: context.legacy_chart_defaults,
             limits: context.limits,
@@ -4088,6 +4605,7 @@ pub fn parse(bytes: &[u8], limits: &ParseLimits) -> Result<PresentationDocument,
 
     let mut slides = Vec::with_capacity(slide_paths.len());
     let mut asset_paths = BTreeMap::<String, String>::new();
+    let mut assets = BTreeMap::new();
     let mut layout_parts = BTreeMap::<String, ParsedXmlPart>::new();
     let mut master_parts = BTreeMap::<String, ParsedXmlPart>::new();
     let mut theme_parts = BTreeMap::<String, ThemeDataInternal>::new();
@@ -4173,18 +4691,31 @@ pub fn parse(bytes: &[u8], limits: &ParseLimits) -> Result<PresentationDocument,
             }
         }
         let mut related_parts = HashMap::new();
+        let mut related_relationships = HashMap::new();
         let mut chart_companions: HashMap<String, ChartCompanionParts> = HashMap::new();
-        for (target, is_chart_part) in related_paths {
+        while let Some((target, is_chart_part)) = related_paths.pop_first() {
+            if related_parts.contains_key(&target) { continue; }
+            if related_parts.len() >= limits.max_entries { return Err(ParseError::ResourceLimit("related presentation parts".into())); }
             if let Some(bytes) = read_entry(&mut archive, &target, limits)? {
                 related_parts.insert(target.clone(), bytes);
-                if !is_chart_part || chart_companions.contains_key(&target) {
+                let Some(rels_xml) = read_entry(&mut archive, &relationship_part_path(&target), limits)? else { continue; };
+                let part_rels = relationships(&rels_xml, &target, limits.max_xml_depth)?;
+                for path in part_rels.values().filter(|path| path.starts_with("ppt/media/")) {
+                    asset_paths.insert(path.clone(), path.clone());
+                }
+                if !is_chart_part {
+                    for path in part_rels.values().filter(|path| path.starts_with("ppt/diagrams/")) {
+                        if !related_parts.contains_key(path) { related_paths.entry(path.clone()).or_insert(false); }
+                    }
+                    for (kind, path) in relationship_targets_by_type(&rels_xml, &target, limits.max_xml_depth)? {
+                        if is_diagram_relationship_type(&kind) && !related_parts.contains_key(&path) {
+                            related_paths.entry(path).or_insert(false);
+                        }
+                    }
+                    related_relationships.insert(target.clone(), part_rels);
                     continue;
                 }
-                let Some(rels_xml) =
-                    read_entry(&mut archive, &relationship_part_path(&target), limits)?
-                else {
-                    continue;
-                };
+                related_relationships.insert(target.clone(), part_rels);
                 let mut companions = ChartCompanionParts::default();
                 for (rel_type, rel_target) in
                     relationship_targets_by_type(&rels_xml, &target, limits.max_xml_depth)?
@@ -4215,6 +4746,7 @@ pub fn parse(bytes: &[u8], limits: &ParseLimits) -> Result<PresentationDocument,
             Some(&slide_rels),
             layout.as_ref().map(|part| &part.rels),
             master.as_ref().map(|part| &part.rels),
+            theme.as_ref().map(|part| &part.rels),
         ]
         .into_iter()
         .flatten()
@@ -4226,6 +4758,7 @@ pub fn parse(bytes: &[u8], limits: &ParseLimits) -> Result<PresentationDocument,
                 asset_paths.insert(target.clone(), target.clone());
             }
         }
+        load_picture_assets(&mut archive, &asset_paths, &mut assets, limits)?;
         let notes = if let Some(target) = slide_rels
             .values()
             .find(|target| target.starts_with("ppt/notesSlides/"))
@@ -4271,8 +4804,11 @@ pub fn parse(bytes: &[u8], limits: &ParseLimits) -> Result<PresentationDocument,
             };
             let context = NodeParseContext {
                 slide_index: index,
+                paint_scale: (1.0, 1.0),
                 rels: &slide_rels,
                 related_parts: &related_parts,
+                related_relationships: &related_relationships,
+                assets: &assets,
                 chart_companions: &chart_companions,
                 legacy_chart_defaults,
                 limits,
@@ -4364,7 +4900,9 @@ pub fn parse(bytes: &[u8], limits: &ParseLimits) -> Result<PresentationDocument,
         asset_paths.insert(target.clone(), target.clone());
     }
 
+    load_picture_assets(&mut archive, &asset_paths, &mut assets, limits)?;
     let empty_related_parts = HashMap::new();
+    let empty_related_relationships = HashMap::new();
     let empty_chart_companions = HashMap::new();
     let mut masters = Vec::new();
     for part in master_parts.values() {
@@ -4380,8 +4918,11 @@ pub fn parse(bytes: &[u8], limits: &ParseLimits) -> Result<PresentationDocument,
             };
             let context = NodeParseContext {
                 slide_index: 0,
+                paint_scale: (1.0, 1.0),
                 rels: &part.rels,
                 related_parts: &empty_related_parts,
+                related_relationships: &empty_related_relationships,
+                assets: &assets,
                 chart_companions: &empty_chart_companions,
                 legacy_chart_defaults,
                 limits,
@@ -4427,8 +4968,11 @@ pub fn parse(bytes: &[u8], limits: &ParseLimits) -> Result<PresentationDocument,
             };
             let context = NodeParseContext {
                 slide_index: 0,
+                paint_scale: (1.0, 1.0),
                 rels: &part.rels,
                 related_parts: &empty_related_parts,
+                related_relationships: &empty_related_relationships,
+                assets: &assets,
                 chart_companions: &empty_chart_companions,
                 legacy_chart_defaults,
                 limits,
@@ -4456,21 +5000,6 @@ pub fn parse(bytes: &[u8], limits: &ParseLimits) -> Result<PresentationDocument,
         });
     }
 
-    let mut assets = BTreeMap::new();
-    for asset_path in asset_paths.keys() {
-        if let Some(data) = read_entry(&mut archive, asset_path, limits)? {
-            assets.insert(
-                asset_path.clone(),
-                PresentationAsset {
-                    id: asset_path.clone(),
-                    content_type: content_type(asset_path),
-                    byte_length: data.len(),
-                    file_name: asset_path.rsplit('/').next().map(str::to_owned),
-                    data: Some(data.into()),
-                },
-            );
-        }
-    }
     let mut embedded_fonts = Vec::new();
     let mut font_warnings = Vec::new();
     for font in embedded_font_refs {

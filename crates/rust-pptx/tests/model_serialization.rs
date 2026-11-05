@@ -13,6 +13,9 @@ fn shape(
     vertical_alignment: Option<VerticalAlignment>,
 ) -> SlideNode {
     SlideNode::Shape {
+            shape_svg: None,
+            paint_bounds: None,
+            source_xml: None,
         id: "shape-1".into(),
         name: "Styled shape".into(),
         transform: Transform {
@@ -112,6 +115,9 @@ fn image_fields_serialize_to_the_typescript_model_contract() {
         opacity: None,
         preserve_aspect_ratio: true,
         effects: None,
+        picture_svg: None,
+        paint_bounds: None,
+        source_xml: None,
     };
 
     let value = serde_json::to_value(node).unwrap();

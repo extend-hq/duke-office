@@ -653,7 +653,7 @@ checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
 name = "rust-docx"
-version = "0.2.6"
+version = "0.2.8"
 dependencies = [
  "arc-swap",
  "base64",
@@ -678,7 +678,7 @@ dependencies = [
 
 [[package]]
 name = "rust-docx-wasm"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "js-sys",
  "rust-docx",
@@ -690,10 +690,11 @@ dependencies = [
 
 [[package]]
 name = "rust-office-art"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64",
  "image",
+ "roxmltree",
  "serde",
 ]
 
@@ -719,11 +720,13 @@ dependencies = [
 
 [[package]]
 name = "rust-pptx"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
+ "base64",
  "cfb",
  "flate2",
  "quick-xml 0.37.5",
+ "rust-office-art",
  "rust-office-charts",
  "serde",
  "serde_bytes",
@@ -734,7 +737,7 @@ dependencies = [
 
 [[package]]
 name = "rust-pptx-wasm"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "rust-pptx",
  "serde",

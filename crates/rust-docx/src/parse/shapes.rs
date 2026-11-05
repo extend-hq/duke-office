@@ -641,7 +641,7 @@ fn collect_affine_grouped_drawings<'a>(
 }
 
 fn group_needs_affine(xml: &str) -> bool {
-    crate::xml::extract_balanced_tag_slices(xml, "a:xfrm")
+    xml.contains("<wps:wsp") || crate::xml::extract_balanced_tag_slices(xml, "a:xfrm")
         .into_iter()
         .any(|xml| {
             ["rot", "flipH", "flipV"].into_iter().any(|name| {
@@ -676,7 +676,8 @@ pub(crate) fn drawing_group_paint_bounds(
     height: f64,
 ) -> Option<Box<ImagePaintBounds>> {
     let opening = &svg[..crate::xml::tag_token_end(svg, 0)?];
-    if get_attribute(opening, "data-group-paint").as_deref() != Some("true") {
+    if get_attribute(opening, "data-group-paint").as_deref() != Some("true")
+        && get_attribute(opening, "data-office-art").as_deref() != Some("true") {
         return None;
     }
     let values = get_attribute(opening, "viewBox")?
@@ -974,6 +975,39 @@ pub fn render_standalone_word_shape_svg(
                 .into_iter()
                 .next()
                 .unwrap_or_default();
+            let untransformed_properties = crate::xml::direct_child_tag(&shape_properties_xml, "a:xfrm")
+                .map(|transform| shape_properties_xml.replacen(transform, "", 1))
+                .unwrap_or_else(|| shape_properties_xml.to_string());
+            let shared_width = (ext_x_px as f64 * scale_x).max(0.0);
+            let shared_height = (ext_y_px as f64 * scale_y).max(0.0);
+            if let Some(rendered) = render_shared_shape(
+                shape_xml, &untransformed_properties, &style_xml,
+                shared_width, shared_height, false, context,
+            ) {
+                let bounds = rendered.paint_bounds.as_ref();
+                let bx = bounds.map_or(0.0, |value| value.x_px);
+                let by = bounds.map_or(0.0, |value| value.y_px);
+                let bw = bounds.map_or(shape_width as f64, |value| value.width_px);
+                let bh = bounds.map_or(shape_height as f64, |value| value.height_px);
+                if let Some(matrix) = drawing.affine {
+                    let local = DrawingAffine::frame(off_x_px, off_y_px, shared_width, shared_height, &transform_xml)?;
+                    include_group_paint(&mut paint_canvas, matrix.compose(local), [bx, by, bx + bw, by + bh])?;
+                }
+                let mut svg = rendered.svg;
+                let ids = re::get_unchecked(r#"\bid="([^"]+)""#).captures_iter(&svg)
+                    .filter_map(|value| value.get(1).map(|value| value.as_str().to_string()))
+                    .collect::<Vec<_>>();
+                for id in ids {
+                    let scoped = format!("office-art-{shape_index}-{id}");
+                    svg = svg.replace(&format!(r#"id="{id}""#), &format!(r#"id="{scoped}""#))
+                        .replace(&format!("url(#{id})"), &format!("url(#{scoped})"))
+                        .replace(&format!(r##"href="#{id}""##), &format!(r##"href="#{scoped}""##));
+                }
+                svg = svg.replacen("<svg ", &format!(r#"<svg x="{bx}" y="{by}" "#), 1);
+                let shared_transform = svg_grouped_shape_transform(off_x_px, off_y_px, shared_width, shared_height, &transform_xml);
+                elements.push(drawing.wrap(format!(r#"<g{shared_transform}>{svg}</g>"#)));
+                continue;
+            }
             let fill = drawing
                 .bitmap_fill_supported
                 .then(|| {
@@ -1135,6 +1169,14 @@ pub fn render_standalone_word_shape_svg(
     let shape_xml = crate::xml::extract_balanced_tag_slices(run_xml, "wps:wsp")
         .into_iter()
         .next()?;
+    let shared_properties = crate::xml::direct_child_tag(shape_xml, "wps:spPr").unwrap_or_default();
+    let shared_style = crate::xml::direct_child_tag(shape_xml, "wps:style").unwrap_or_default();
+    if let Some(rendered) = render_shared_shape(
+        shape_xml, shared_properties, shared_style,
+        width_px.unwrap_or(320.0), height_px.unwrap_or(240.0), true, context,
+    ) {
+        return Some(rendered.svg);
+    }
     if re::get(r"(?i)<w:txbxContent\b").is_some_and(|re| re.is_match(&shape_xml)) {
         return None;
     }
@@ -1266,6 +1308,43 @@ pub fn render_standalone_word_shape_svg(
         },
         fill.defs.join(""),
     ))
+}
+
+fn render_shared_shape(
+    shape: &str,
+    properties: &str,
+    style: &str,
+    width: f64,
+    height: f64,
+    transform_text: bool,
+    context: &ParseContext<'_, impl std::borrow::Borrow<super::context::ParsedStyleSheet>>,
+) -> Option<rust_office_art::RenderedPicture> {
+    if width < 0.0 || height < 0.0 {
+        return None;
+    }
+    let mut rendered = super::picture::render_shape(properties, style, width, height, context)?;
+    rendered.svg = rendered.svg.replacen("<svg ", r#"<svg data-office-art="true" "#, 1);
+    let paragraphs = parse_text_box_paragraphs(shape, context);
+    if !paragraphs.is_empty() {
+        let text = render_bounded_text_box_svg(&paragraphs, width, height, parse_text_box_layout(shape).as_ref());
+        let transform = if transform_text {
+            let xml = crate::xml::direct_child_tag(properties, "a:xfrm").unwrap_or_default();
+            let angle = get_attribute(xml, "rot").and_then(|value| value.parse::<f64>().ok()).filter(|value| value.is_finite()).unwrap_or(0.0) / 60000.0;
+            let flip_x = if get_attribute(xml, "flipH").is_some_and(|value| matches!(value.as_str(), "1" | "true")) { -1 } else { 1 };
+            let flip_y = if get_attribute(xml, "flipV").is_some_and(|value| matches!(value.as_str(), "1" | "true")) { -1 } else { 1 };
+            format!("translate({} {}) rotate({angle}) scale({flip_x} {flip_y}) translate({} {})", width / 2.0, height / 2.0, -width / 2.0, -height / 2.0)
+        } else {
+            String::new()
+        };
+        let ending = rendered.svg.rfind("</svg>")?;
+        rendered.svg.insert_str(ending, &format!(r#"<g transform="{transform}">{text}</g>"#));
+    }
+    if crate::xml::extract_balanced_tag_slices(shape, "a:prstTxWarp").into_iter().any(|warp| {
+        get_attribute(warp, "prst").is_some_and(|preset| !matches!(preset.as_str(), "textNoShape" | "textPlain"))
+    }) {
+        context.push_warning("WordArt text deformation is preserved but not applied to text layout");
+    }
+    Some(rendered)
 }
 
 fn render_grouped_picture_svg_element(

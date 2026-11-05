@@ -829,9 +829,14 @@ fn never_exposes_untrusted_preset_colors_as_renderable_values() {
         .warnings
         .iter()
         .any(|warning| warning.feature.as_deref() == Some("preset-color")));
-    assert!(!serde_json::to_string(&document)
+    let mut rendered = serde_json::to_value(&document).unwrap();
+    let source = rendered["slides"][0]["nodes"][0]
+        .as_object_mut()
         .unwrap()
-        .contains("javascript"));
+        .remove("sourceXml")
+        .unwrap();
+    assert!(source.as_str().unwrap().contains("url(javascript:alert(1))"));
+    assert!(!serde_json::to_string(&rendered).unwrap().contains("javascript"));
 }
 
 fn visual_fidelity_pptx() -> Vec<u8> {

@@ -736,6 +736,9 @@ impl ShapeCollector<'_> {
                 opacity: None,
                 preserve_aspect_ratio: !covers_slide,
                 effects: None,
+                picture_svg: None,
+                paint_bounds: None,
+                source_xml: None,
             });
             return;
         }
@@ -745,6 +748,9 @@ impl ShapeCollector<'_> {
             .map(|body| paragraphs(body, self.font_family))
             .unwrap_or_default();
         self.nodes.push(SlideNode::Shape {
+            shape_svg: None,
+            paint_bounds: None,
+            source_xml: None,
             id,
             name: format!("Legacy shape {}", parts.spid),
             transform,
@@ -1037,6 +1043,9 @@ fn normalize_fallback_slide(
         .into_iter()
         .enumerate()
         .map(|(node_index, body)| SlideNode::Shape {
+            shape_svg: None,
+            paint_bounds: None,
+            source_xml: None,
             id: format!("legacy-{index}-{node_index}"),
             name: format!("Legacy text {}", node_index + 1),
             transform: Transform {

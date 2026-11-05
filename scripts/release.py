@@ -54,6 +54,13 @@ def packaged_contents(data):
 
 def release_plan():
     workspace = json.loads(cargo("metadata", "--locked", "--format-version=1", "--no-deps"))
+    versions = {package["name"]: package["version"] for package in workspace["packages"]}
+    if versions["rust-docx"] != versions["rust-docx-wasm"]:
+        sys.exit("rust-docx and rust-docx-wasm must use the same release version.")
+    bindings = next(package for package in workspace["packages"] if package["name"] == "rust-docx-wasm")
+    parser_dependency = next(dependency for dependency in bindings["dependencies"] if dependency["name"] == "rust-docx")
+    if parser_dependency["req"] != f"={versions['rust-docx']}":
+        sys.exit("rust-docx-wasm must pin the matching rust-docx release version.")
     cargo("package", "--workspace", "--locked", "--no-verify")
     artifacts = Path(workspace["target_directory"]) / "package"
     pending = []

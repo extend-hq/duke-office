@@ -109,6 +109,12 @@ pub enum SlideNode {
         transform: Transform,
         geometry: ShapeGeometry,
         #[serde(skip_serializing_if = "Option::is_none")]
+        shape_svg: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        paint_bounds: Option<rust_office_art::PaintBounds>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_xml: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
         fill: Option<FillStyle>,
         #[serde(skip_serializing_if = "Option::is_none")]
         line: Option<LineStyle>,
@@ -150,6 +156,12 @@ pub enum SlideNode {
         preserve_aspect_ratio: bool,
         #[serde(skip_serializing_if = "Option::is_none")]
         effects: Option<ImageEffects>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        picture_svg: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        paint_bounds: Option<rust_office_art::PaintBounds>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_xml: Option<String>,
     },
     Group {
         id: String,
@@ -508,6 +520,8 @@ pub struct PresentationTheme {
     pub major_fonts: BTreeMap<String, String>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub minor_fonts: BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub format_scheme_xml: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
