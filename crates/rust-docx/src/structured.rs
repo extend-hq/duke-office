@@ -66,7 +66,7 @@ pub struct DocumentWord {
     pub source_refs: Vec<SourceRef>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ParagraphInline {
     Text {
@@ -670,14 +670,24 @@ impl Extractor<'_> {
                     } else {
                         json!({"type":"key_value_details", "kind":"form_field", "field":field})
                     };
-                    children.push(self.block(
+                    let mut block = self.block(
                         child_id,
                         BlockType::KeyValue,
                         value,
                         details,
                         Vec::new(),
                         Some(id),
-                    ));
+                    );
+                    block.source_refs.push(SourceRef {
+                        document_id: self.document_id.clone(),
+                        node_id: id.to_owned(),
+                        part_name: self.part_name.clone(),
+                        story: self.story.clone(),
+                        start: Some(start),
+                        end: Some(text_offset),
+                        offset_encoding: "utf-16".into(),
+                    });
+                    children.push(block);
                 }
                 ParagraphChildNode::Image(image) => {
                     let child_id = indexed_path(&id, [("/child/", index)]);
@@ -868,7 +878,8 @@ impl Extractor<'_> {
             id.to_string(),
             BlockType::Table,
             row_text,
-            json!({"type":"table_details", "rowCount":table.rows.len(), "columnCount":column_count}),
+            json!({"type":"table_details", "rowCount":table.rows.len(), "columnCount":column_count,
+                "style":table.style, "rowStyles":table.rows.iter().map(|row| &row.style).collect::<Vec<_>>()}),
             children,
             parent,
         )

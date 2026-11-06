@@ -5,6 +5,7 @@ use std::sync::OnceLock;
 use crate::xml::{extract_direct_child_tag_ranges, get_attribute_ref};
 
 const PRESETS: &str = include_str!("geometry_data/presetShapeDefinitions.xml");
+const TEXT_PRESETS: &str = include_str!("geometry_data/presetTextWarpDefinitions.xml");
 const MAX_XML_BYTES: usize = 1024 * 1024;
 const MAX_GUIDES: usize = 1024;
 const MAX_PATHS: usize = 256;
@@ -461,4 +462,24 @@ pub(crate) fn geometry_paths(
             )
         })
         .collect()
+}
+
+pub(crate) fn text_warp_paths(xml: &str, width: f64, height: f64) -> Option<Vec<GeometryPath>> {
+    static INDEX: OnceLock<HashMap<String, &'static str>> = OnceLock::new();
+    if xml.len() > 16 * 1024 || [width, height].iter().any(|n| !n.is_finite() || *n <= 0.0 || *n > MAX_COORDINATE) {
+        return None;
+    }
+    let presets = INDEX.get_or_init(|| extract_direct_child_tag_ranges(TEXT_PRESETS).into_iter()
+        .map(|tag| (tag.tag_name, &TEXT_PRESETS[tag.start..tag.end])).collect());
+    let preset = presets.get(get_attribute_ref(xml, "prst")?)?;
+    let units = [65_536.0, 65_536.0];
+    let mut guides = Guides::new(units[0], units[1]);
+    guides.apply(child(preset, "avLst"))?;
+    guides.apply(child(xml, "avLst"))?;
+    guides.apply(child(preset, "gdLst"))?;
+    let paths = child(preset, "pathLst")?;
+    let mut remaining = MAX_COMMANDS;
+    extract_direct_child_tag_ranges(paths).into_iter().map(|tag|
+        path(&paths[tag.start..tag.end], &guides, width, height, units, &mut remaining)
+    ).collect()
 }

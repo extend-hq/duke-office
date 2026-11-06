@@ -1,0 +1,22 @@
+{
+  "input": {
+    "repo": "google/fonts",
+    "commit": "eb20e9cf19d97cf579fa3867d729d4222d6c59e1",
+    "path": "ofl/arimo",
+    "files": {
+      "Arimo-Bold.ttf": "6ee331e4367aaa9799e64bbdc79ab4710c2e060b2136f3033125b78060f7d42b",
+      "Arimo-BoldItalic.ttf": "64c53909850d95dd2e7c52f08c06a421579e13dbe9bb5e7c5ee9c93870cbc57f",
+      "Arimo-Italic.ttf": "14d99de34490db7f339281e06d83f7f6003039fb37d74df25b5ae459325afbf3",
+      "Arimo-Regular.ttf": "b35e6b7e217258f4c27eace103f3987c6fdb0cb1af08c3d43b68984e27f23fcd"
+    },
+    "processing": "FontTools 4.68.0 instantiateVariableFont at wght 400 and 700, updateFontNames=True, recalcTimestamp=False"
+  },
+  "processing": "Hinting instructions and device-metric tables removed; complete glyph repertoire and shaping retained.",
+  "generator": "scripts/build-art-fonts.py",
+  "files": {
+    "Arimo-Bold.ttf": "6805a1347bd1198477b7be8b0e79143de62e7d221e46e63193cc5e0f16384786",
+    "Arimo-BoldItalic.ttf": "3f5eb4df8377b9ea59e40b3dd5435d08cfa0dfa977cc83e18f17949469b6e777",
+    "Arimo-Italic.ttf": "3aff17c3acc20577458898cbcd2e350368f1b4cd2a5d42a9dee772b4e375b048",
+    "Arimo-Regular.ttf": "bd9c7304186539cf1438ccb84a778de61f8cf7040aad99a0ce72aa4204897b06"
+  }
+}

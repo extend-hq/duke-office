@@ -24,6 +24,8 @@ Use `prepare-pages.py --directory DIR --model MODEL.json` to produce fixed brows
 
 ## Shapes, connectors and manual fixtures
 
+`art-gallery.py` creates the 30-page expanded README comparison from the retained drawing source and selected atlas controls. It includes saved 3D models, SmartArt, WordArt, 3D shapes, icons and ink. Use `--record-reference` to seal a native PDF and its Cairo pages, then `--directory`, `--candidate`, `--model` and `--output` to build the galleries and measurement ledger. The [expanded comparison method](../../docs/office-art-comparisons.md) records the export route, remaining renderer gaps and print-origin limitation.
+
 Generate the 16-page native shape matrix, the broader manual atlas, or the saved SmartArt probes independently:
 
 ```sh

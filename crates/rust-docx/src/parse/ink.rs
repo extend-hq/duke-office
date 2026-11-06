@@ -153,6 +153,27 @@ pub(super) fn apply_cached_ink_metadata(
             layout_height_px: height,
         }));
     }
+    if let Some(rendered) =
+        ink.and_then(|ink| rust_office_art::render_ink(&ink.content, width, height))
+    {
+        image.src = Some(super::util::svg_data_uri(&rendered.svg));
+        image.content_type = Some("image/svg+xml".into());
+        image.data = None;
+        image.part_name = None;
+        image.crop = None;
+        image.css_filter = None;
+        image.css_opacity = None;
+        image.paint_bounds = rendered.paint_bounds.map(|bounds| {
+            Box::new(ImagePaintBounds {
+                x_px: bounds.x_px,
+                y_px: bounds.y_px,
+                width_px: bounds.width_px,
+                height_px: bounds.height_px,
+                layout_width_px: bounds.layout_width_px,
+                layout_height_px: bounds.layout_height_px,
+            })
+        });
+    }
     image.width_px = Some(width);
     image.height_px = Some(height);
     image.floating = anchor;

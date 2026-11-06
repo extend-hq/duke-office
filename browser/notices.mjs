@@ -18,7 +18,11 @@ export function thirdPartyNotices(root) {
   visit(metadata.packages.find(pkg => pkg.name === "rust-office-charts-wasm").id);
   const notices = metadata.packages.filter(pkg => reached.has(pkg.id)).sort((a, b) => a.name.localeCompare(b.name)).map(pkg => {
     const directory = dirname(pkg.manifest_path);
-    const extra = pkg.name === "rust-office-art" ? ["src/geometry_data/LICENSE.apache-poi", "src/geometry_data/NOTICE.apache-poi", "src/geometry_data/SOURCE.md"] : [];
+    const extra = pkg.name === "rust-office-art" ? [
+      "src/geometry_data/LICENSE.apache-poi", "src/geometry_data/NOTICE.apache-poi",
+      "src/geometry_data/LICENSE.ecma", "src/geometry_data/SOURCE.md",
+      ...["arimo", "carlito", "tinos", "cousine"].map(family => `src/fonts/${family}/LICENSE`),
+    ] : [];
     const discovered = readdirSync(directory, { withFileTypes: true })
       .filter(entry => entry.isFile() && /^(?:licen[cs]e|copying|copyright|notice|unlicense)(?:$|[._-]|s(?:$|[._-]))/i.test(entry.name))
       .map(entry => entry.name).sort();

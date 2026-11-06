@@ -1,0 +1,21 @@
+{
+  "input": {
+    "url": "https://commondatastorage.googleapis.com/chromeos-localmirror/distfiles/crosextrafonts-carlito-20130920.tar.gz",
+    "sha256": "4bd12b6cbc321c1cf16da76e2c585c925ce956a08067ae6f6c64eff6ccfdaf5a",
+    "files": {
+      "Carlito-Bold.ttf": "0f62ab34ad5d079a0a28fac01bcf7c7a724a4db4d6cb99cab9cabff382fbb80f",
+      "Carlito-BoldItalic.ttf": "380764b6898d7b73ceae6384b2958b196d2a0428962ef3adf138d27947228666",
+      "Carlito-Italic.ttf": "718a0663864d37a4868220a19b9668a5fe10a46197f6df367b4c2c30c04c026c",
+      "Carlito-Regular.ttf": "b4ff23ba370cc95a3c349336b73f9c28514a1371210f89832efc85c4b1ea7131"
+    },
+    "processing": "Original upstream TTF files"
+  },
+  "processing": "Hinting instructions and device-metric tables removed; complete glyph repertoire and shaping retained. Reserved font names renamed to OfficeArtSans.",
+  "generator": "scripts/build-art-fonts.py",
+  "files": {
+    "OfficeArtSans-Bold.ttf": "e0ce9d566b6dc81498746d1a809a61ee5b150d4bdbc599b8270ae79d37fdd976",
+    "OfficeArtSans-BoldItalic.ttf": "d3c88d98e07ec790f324b778d1d43d7f05a3ae2bcfd3816d3f64ad088670c82a",
+    "OfficeArtSans-Italic.ttf": "c5d14735929092e60d31faffe91c8986db360f46580b89b72dcedba9e2102c0b",
+    "OfficeArtSans-Regular.ttf": "715f139c0830caa2123c4e86e730293a248aefcdc3f77bf531f3c1704bc29530"
+  }
+}

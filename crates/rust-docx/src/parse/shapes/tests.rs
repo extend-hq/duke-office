@@ -208,7 +208,7 @@ mod textbox_fit_tests {
 
     fn paragraphs() -> Vec<ParsedTextBoxParagraph> {
         ["First line", "Middle line", "Final line"].into_iter().map(|text| ParsedTextBoxParagraph {
-            text: text.to_owned(), style: None, align: None, images: Vec::new(),
+            text: text.to_owned(), style: None, align: None, images: Vec::new(), text_fill: None,
         }).collect()
     }
 
@@ -232,7 +232,7 @@ mod textbox_fit_tests {
 
     fn layout(bottom: f64, anchor: &str) -> ParsedTextBoxLayout {
         ParsedTextBoxLayout {
-            auto_fit_no_wrap: false, wrap_text: false,
+            auto_fit_no_wrap: false, wrap_text: false, from_word_art: false, anchor_center: false,
             padding_left_px: Some(6.0), padding_top_px: Some(2.0),
             padding_right_px: Some(6.0), padding_bottom_px: Some(bottom),
             vertical_anchor: Some(anchor.to_owned()),
@@ -315,7 +315,7 @@ mod image_paint_bounds_tests {
 
     fn paragraph(paint_bounds: Option<Box<ImagePaintBounds>>) -> ParsedTextBoxParagraph {
         ParsedTextBoxParagraph {
-            text: String::new(), style: None, align: None,
+            text: String::new(), style: None, align: None, text_fill: None,
             images: vec![
                 ParsedTextBoxImage {
                     src: "data:image/svg+xml,%3Csvg%2F%3E".into(),
@@ -341,7 +341,7 @@ mod image_paint_bounds_tests {
     fn nested_paint_offsets_and_extents_scale_without_changing_logical_advance() {
         for width in [220.0, 70.0] {
             let layout = ParsedTextBoxLayout {
-                auto_fit_no_wrap: false, wrap_text: false,
+                auto_fit_no_wrap: false, wrap_text: false, from_word_art: false, anchor_center: false,
                 padding_left_px: Some(10.0), padding_top_px: Some(10.0),
                 padding_right_px: Some(10.0), padding_bottom_px: Some(10.0),
                 vertical_anchor: None,

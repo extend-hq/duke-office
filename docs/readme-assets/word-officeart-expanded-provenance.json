@@ -1,0 +1,1325 @@
+{
+  "date": "2026-11-06",
+  "pipeline": "Native rust-docx model using rust-office-art; generated SVGs and saved raster assets displayed by Chromium",
+  "documentSha256": "2e9ac79e6b5c9b60652be0b677b0643038016823e64633b972f4cf4072b1f51a",
+  "sourceSha256": "9c07c7465dedad28f301d42883f169d23224680919a7bf053409c915b679838f",
+  "modelSha256": "3e30a8ee42f004ecac12b95736d3b6980456ff297b3beeafd6f955caf6b464d2",
+  "nativeReference": {
+    "wordVersion": "16.106.1",
+    "wordBundleVersion": "16.106.26021521",
+    "capturedAt": "2026-11-06",
+    "documentSha256": "2e9ac79e6b5c9b60652be0b677b0643038016823e64633b972f4cf4072b1f51a",
+    "pdfSha256": "cb05fc5d3561f29f30dbd8e9f84994d997f72d6141771a05806fdccfbf463dcb",
+    "pageCount": 30,
+    "dpi": 96,
+    "exportMethod": "Microsoft Word UI Print > PDF > Save as PDF; Poppler Cairo at 96 dpi",
+    "captureNote": "The original DOCX was opened through Word UI. The print preview showed 30 pages; the exported PDF is 30 US Letter pages. No scale-to-fit was selected.",
+    "pages": [
+      {
+        "path": "word-cairo-pages/page-01.png",
+        "sha256": "19b75e306bc18c3b9fc31acb6b350d3d77cd5deffe690e27d6727a2ac91b00b2"
+      },
+      {
+        "path": "word-cairo-pages/page-02.png",
+        "sha256": "c64aaf4fa22b8be76e6205481fc002ced3fb3bcff0489df70ff76c91e2995e1e"
+      },
+      {
+        "path": "word-cairo-pages/page-03.png",
+        "sha256": "452150b5897af8747cb60979d4a649db0f32d706fb8a90ebbe1a89b773646dc1"
+      },
+      {
+        "path": "word-cairo-pages/page-04.png",
+        "sha256": "2d078fc8f07ef8b57f9c6d4bf39b0b5015cab8b55ed21418aff600ebae6c3d61"
+      },
+      {
+        "path": "word-cairo-pages/page-05.png",
+        "sha256": "f6f8337b1e89de5a9fdf7a5262253608d02c4a1fb748c418901791db713c1d12"
+      },
+      {
+        "path": "word-cairo-pages/page-06.png",
+        "sha256": "90f158525ca71861f31b27613c47dcdb132a4fcc362e729a2c5b46a93e489097"
+      },
+      {
+        "path": "word-cairo-pages/page-07.png",
+        "sha256": "2b1fa0765255d5cc540131744e9c373bf80bd2790e90bfad397074bff29d3e99"
+      },
+      {
+        "path": "word-cairo-pages/page-08.png",
+        "sha256": "c34737d7dc5d029f2761cfc6b25f1a5f877bd544f89dc6d643d0828d04616905"
+      },
+      {
+        "path": "word-cairo-pages/page-09.png",
+        "sha256": "cbf73d4e5dbab2f8e4f5bcd2a67429789365e151b0ca68e990055b6cec935133"
+      },
+      {
+        "path": "word-cairo-pages/page-10.png",
+        "sha256": "b2d2e1a54f04c2adb90f07b4df497d6f643cf081ec6505b440ad598fb5b833d6"
+      },
+      {
+        "path": "word-cairo-pages/page-11.png",
+        "sha256": "a0bcb4070a1fd4ecf8561b5995ac2f562babf32486bfa3d903548494b89a4af0"
+      },
+      {
+        "path": "word-cairo-pages/page-12.png",
+        "sha256": "ef40ab4aee1961dc470442be49d5d963228f3e1d0ca5686ba9b58fdb8f2dcc05"
+      },
+      {
+        "path": "word-cairo-pages/page-13.png",
+        "sha256": "bc34f678761167a54bca7abda2c24a86dcc7ef409fedc23ba47013b5e15f12b0"
+      },
+      {
+        "path": "word-cairo-pages/page-14.png",
+        "sha256": "cd290eb5a86603915b8e5edc65bca54d2c60de41d77e0a7e365193ac712c962d"
+      },
+      {
+        "path": "word-cairo-pages/page-15.png",
+        "sha256": "69b3012028cc63f711cc2e5e085ab4c96fdf01c5d3a9fe3d7730cc40b3e09edb"
+      },
+      {
+        "path": "word-cairo-pages/page-16.png",
+        "sha256": "2a5f4dde7e0ae3f250e11743809adb8a79aa04fb1b5113eca4437b8a059498cb"
+      },
+      {
+        "path": "word-cairo-pages/page-17.png",
+        "sha256": "41416af6841d746a6ff55772f811137081636d7e5d99651d736224589cf6a6e5"
+      },
+      {
+        "path": "word-cairo-pages/page-18.png",
+        "sha256": "d61bcb16888ae796b5cb5e2d965ee75844fc8efe238492daad820ba75afa3996"
+      },
+      {
+        "path": "word-cairo-pages/page-19.png",
+        "sha256": "006cdcd123f8a526c8aa9ea5459c9e72f472db470671b5e1735ff873c3f32b46"
+      },
+      {
+        "path": "word-cairo-pages/page-20.png",
+        "sha256": "8e33722821e8ee44e48888604feb99991cb1f1275da15a8632b6b335459ec633"
+      },
+      {
+        "path": "word-cairo-pages/page-21.png",
+        "sha256": "1439fb1f6a57a6fd6cbf0d15474e70b8fb4e25a6c440abad1e6f108ab5856953"
+      },
+      {
+        "path": "word-cairo-pages/page-22.png",
+        "sha256": "688d1594661de9f45995393870133a9e00df7ee24e1a9af89ad734093a9bff3d"
+      },
+      {
+        "path": "word-cairo-pages/page-23.png",
+        "sha256": "cc69a578d808994882887447bc3bd3f19dd7047bde2c252f4a3115cbea25bbec"
+      },
+      {
+        "path": "word-cairo-pages/page-24.png",
+        "sha256": "37288511668ce746f3c53c4cce7fcbe2603e991753a4806f03e97494368b6cb9"
+      },
+      {
+        "path": "word-cairo-pages/page-25.png",
+        "sha256": "c3749f0cc74545728b4c43bf290631ab72be9f48118a4e7b1db56a728289cf5e"
+      },
+      {
+        "path": "word-cairo-pages/page-26.png",
+        "sha256": "aa3cc257b824e4b5ab08e70d7388fe8ce2d255b926094d27ae818c3a340d510f"
+      },
+      {
+        "path": "word-cairo-pages/page-27.png",
+        "sha256": "d908066439f5a867877c10b6823e1b0fc7cf746ac463f4a3a6f9ed0b6d644674"
+      },
+      {
+        "path": "word-cairo-pages/page-28.png",
+        "sha256": "47cae68a75b821fe561b0530519cea6df175a7293e025642d4a21ca0070c62f9"
+      },
+      {
+        "path": "word-cairo-pages/page-29.png",
+        "sha256": "f10edcf7276d0663ef5f74e7891bf2641fb4be1c73552c8f7c3b8917ca97b012"
+      },
+      {
+        "path": "word-cairo-pages/page-30.png",
+        "sha256": "80db51fb1c5d3fa80d9149cdc31236f33ca9d781b1e2a757e03b9e07b357e714"
+      }
+    ]
+  },
+  "galleries": [
+    {
+      "path": "docs/readme-assets/word-officeart-expanded-overview.png",
+      "sha256": "da788099bc137a8e9095276821b0cebce149e7416eef2f518f3e4cfb4fb06758",
+      "pages": [
+        1,
+        4,
+        8,
+        12,
+        13,
+        14,
+        15,
+        17,
+        18,
+        20,
+        21,
+        25,
+        23,
+        27,
+        7,
+        30
+      ]
+    },
+    {
+      "path": "docs/readme-assets/word-officeart-expanded-models-and-smartart.png",
+      "sha256": "5c681df02fb32eeece40919fbef835a614628fc1b1a8eb8c2cf9bece91eae7b1",
+      "pages": [
+        4,
+        8,
+        12,
+        13,
+        14,
+        15,
+        17
+      ]
+    },
+    {
+      "path": "docs/readme-assets/word-officeart-expanded-wordart-and-3d.png",
+      "sha256": "72a48a1b2ec4679c542f3f7970945a18113069d30a280ad67281a0ff7972121a",
+      "pages": [
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29
+      ]
+    },
+    {
+      "path": "docs/readme-assets/word-officeart-expanded-icons-shapes-and-ink.png",
+      "sha256": "3a5cf4cd2a9fd65a989125291b269c37ec77fb036f76fc264df26972352e14c5",
+      "pages": [
+        1,
+        2,
+        3,
+        5,
+        6,
+        7,
+        9,
+        10,
+        11,
+        16,
+        30
+      ]
+    }
+  ],
+  "baselineModelSha256": "3ead6eafd8765b32151cc3089cf05152cf7f59c2467b853a70ba9ebb8669ec6d",
+  "generatorSha256": "a55462ce045958b68d947711a417ae1afc2a0aefe367bd2da0a871dcd98c66ce",
+  "manifestSha256": "ca9edfd7bab5db6ddcb7a9f723dc13163f74ef28d6bdc81139640929da984bd2",
+  "browserReceipt": "### Result\n{\"version\":\"157.0.8103.38\",\"devicePixelRatio\":1,\"fontStatus\":\"loaded\"}\n### Ran Playwright code\n```js\nawait (async (page) => ({ version: page.context().browser().version(), devicePixelRatio: await page.evaluate(() => devicePixelRatio), fontStatus: await page.evaluate(() => document.fonts.status) }))(page);\n```\n",
+  "gitRevision": "691c236bcd97a2bc812555f0ff5374842ca26fb6",
+  "workingTreeModified": true,
+  "sourceHashes": {
+    "Cargo.lock": "17372525aedf2f752a8fc758acb501bddada94ac597a34fa64f25b15f0fbb1cb",
+    "crates/rust-docx/Cargo.toml": "5511797e867b955776579783e56fd0c15fcafa8e431df01a09882644fe4f2fcc",
+    "crates/rust-docx/src/bundle.rs": "83e5c96b80b203b2d05af8431adb1e3c14537876b46b9d59759e993514606049",
+    "crates/rust-docx/src/chart.rs": "24ae50fa93de7187791756c47e4fea7c2bd5b7bde855f9fcf1d3e573cfa34dde",
+    "crates/rust-docx/src/doc/build.rs": "f58e3e41a7bba385c7f69a3bffa7f9412f75481295e4b74ec9875cd2e44023dc",
+    "crates/rust-docx/src/doc/cfb.rs": "cde4e3e3577223f3ed0b9b88c182acf4f2cb1838d87ae1ffa9d5bc4fcc9d0b2f",
+    "crates/rust-docx/src/doc/chp.rs": "61233d680055e6750ce3ddf5aaba64d61490322fb5a361356743eace0aa98370",
+    "crates/rust-docx/src/doc/comments.rs": "cdb63a93b447728a6a5233a63bcf7e0017dfa44c6e20e68317d0cd23ff6b96f2",
+    "crates/rust-docx/src/doc/fib.rs": "c7cdf05bac256f090dc91b3d0c392d7b0a80d27c4783ce4119943ca1a39d49b2",
+    "crates/rust-docx/src/doc/fields.rs": "a6ea72fff924b3c65b00825829136af09141d97e85baef89ca66fec0166d57e7",
+    "crates/rust-docx/src/doc/fkp.rs": "81792c33cbdd0dcbd1f886b59c70c8bc3cf8e6820f12609f5152721cab3bda08",
+    "crates/rust-docx/src/doc/fmt.rs": "02d2f9136291c8ef21fab4e55950db3b7908a8ae4831b22dd003476524cfc882",
+    "crates/rust-docx/src/doc/fonts.rs": "27f8c3087cc572827ecf82ab50ce202fee0669c5b3f3e0d908fb7ade838f84e2",
+    "crates/rust-docx/src/doc/images.rs": "35d5354d95696022889d6059ef418415accbdde727f0a755cd92f95c4c46ee10",
+    "crates/rust-docx/src/doc/lists.rs": "7013b2765b1b9543c9e74e75742c1d6f27d7374f6798af9a5603a39502ee554a",
+    "crates/rust-docx/src/doc/mod.rs": "ebadb87d5bb3d7d2f17e0c9f44cb3bb5def73ae43d1f3854fa8a0a5332147868",
+    "crates/rust-docx/src/doc/pap.rs": "6b367d9a07f79116603b5859866a6995a42a6b842af85970af5bad36a5961076",
+    "crates/rust-docx/src/doc/pieces.rs": "1476350b5d81c2a662099e1ba1b329b437a41ec63ff24df04748a8ff9dbbc194",
+    "crates/rust-docx/src/doc/revisions.rs": "58ec924d55e310e98154e209527f27d70faac59bfd9bc43a2db741972e53c23c",
+    "crates/rust-docx/src/doc/sep.rs": "dff5f322d568735576fca29a8bb148ffa0b97577340a168aa524a1ab90186a34",
+    "crates/rust-docx/src/doc/sprm.rs": "6f4de9b9de205de4283022ce774e6d68571cc492322c6837a8bc230b0599c8cb",
+    "crates/rust-docx/src/doc/stsh.rs": "ad80c825b5ca3685f4602f97b5e19ad52d045c8589ff93a1afc0ddf04f6af0f7",
+    "crates/rust-docx/src/doc/tap.rs": "ebc1989600b799dcdb9191f09b449469601afd29ffda87d6e9e0840b9013e725",
+    "crates/rust-docx/src/doc/textboxes.rs": "47e4370a16e4f21d857c78ba67bc250a016ba83fff37499edbf168c7f99e31e0",
+    "crates/rust-docx/src/emf.rs": "67440c6b02757e9df90ba333a55e85e1a9a042f26a14546fad021a9575bec06b",
+    "crates/rust-docx/src/export/styles.rs": "73443dcff32ff7cbf9792185d68f53e9aa39e7a7dbec9ec084a268f3c79752aa",
+    "crates/rust-docx/src/export.rs": "bc7d8852af7103b4c8a0a416809c542cc8c8dbadf86deb66071d1c4d0dee8afe",
+    "crates/rust-docx/src/lib.rs": "3437d8c819c9f116a2493368de70ec1cff3afbb1f03a98aa18e6dbba38a892f7",
+    "crates/rust-docx/src/model.rs": "7ad40479cdaa34374561ea88e24b5271f126d6727a2e08e2eb7fcc3993249e37",
+    "crates/rust-docx/src/package.rs": "6b8909071732d25ef5b0bd000ec35158e2288af7ac74836c55acb8db2ab584a5",
+    "crates/rust-docx/src/parse/body.rs": "050f5d29b2e2de518549eb96b3360fad0066252c3b7263f3f12c69cd78959b1f",
+    "crates/rust-docx/src/parse/build.rs": "080cffc5443cc0efc7aa98e860ee3c3485d18b1593f59f73fe32185c34b74b87",
+    "crates/rust-docx/src/parse/cache.rs": "2130287d26278fa9e0356ddb279991a0a0d7baf6e83604e8b3b37e1e0380bca6",
+    "crates/rust-docx/src/parse/colors.rs": "0c47b8c4054bd75dfedb50c65258daa600795c346697661679462fb60f198283",
+    "crates/rust-docx/src/parse/content_types.rs": "1fbdea832095a0cc205d2653c7cce24fa654ecdbf0d10ce89ab855be9aa97822",
+    "crates/rust-docx/src/parse/context.rs": "622b361f443cc2492eb3c2324100b72fb02610791c7cd6e0b6ab810cf4681ef2",
+    "crates/rust-docx/src/parse/document.rs": "839e35f9b357a58cf87f406d3cbc7208e10fee923f0b3c4cd2af65d10a0a3fd9",
+    "crates/rust-docx/src/parse/image_properties.rs": "1a1d5ed212adcb83f7e55430383cc2616963aafe4cc38958486f19e677b38323",
+    "crates/rust-docx/src/parse/images.rs": "cac646bc618b3fc6b06c1a9d64a320bf8a60a7b34d023710df98aefdd9263c38",
+    "crates/rust-docx/src/parse/ink.rs": "58a76316ea9dcceef30489b0f7c9614e15ae2a225de7532eedffcfa99f807bbb",
+    "crates/rust-docx/src/parse/math.rs": "8689e0044f6bda795bbc949774729fb1e19054028beee11bc7e09a66385e0c61",
+    "crates/rust-docx/src/parse/metadata.rs": "3f8ae93c940a5b63b4b775bdbb0f9a9999b7e5472c4475e0cf1ac1be2a0462bd",
+    "crates/rust-docx/src/parse/mod.rs": "0dd5162bccb16f783514d23f39b2ba80eb3775038a4dd3b98dc0d363386dddfc",
+    "crates/rust-docx/src/parse/model3d.rs": "97b9ca3d0e5c829d7c499fcec6dd83b491bbce6adc5364d3eb8981d756b26c6d",
+    "crates/rust-docx/src/parse/namespaces.rs": "6b40f8cc939e9a71612cdad75980a1729f88cf6614e9bf36a56617de74753fdc",
+    "crates/rust-docx/src/parse/numbering.rs": "8769b2b1ec9e43cf789c1f89bbad061a0629d6f655bff841380a288757341a3b",
+    "crates/rust-docx/src/parse/paragraph.rs": "86f7c2cd4e0cead012506cef64c696066dfd96d22723e24f46253429981a1277",
+    "crates/rust-docx/src/parse/picture.rs": "2ba78d2d1d82400efd58c5f93a2caf7d6e22af7c52ba416f58f5f6c5f78ac19d",
+    "crates/rust-docx/src/parse/re.rs": "f105b4aad0ffb58d5c0a544bbe6b1f860613b7699fefc516e6ba1605bfcecae4",
+    "crates/rust-docx/src/parse/relationships.rs": "255c0bcd16fd47cd8e4ab7789c2ae01aed1cd52562e532ed887704972f8de852",
+    "crates/rust-docx/src/parse/root_plan_parity.rs": "b94d1df2079f327f5acee5ccee19dec071d5fcdabfa83448baae385eb5d90728",
+    "crates/rust-docx/src/parse/scan.rs": "71b44f872efa99d36b04fe00b6816a26eef08e0ac76b14495bcc4fcbbaa1c08f",
+    "crates/rust-docx/src/parse/sections.rs": "ff3d243f822cdaa5480d72f4aed03e4f43dee0f507154e3aff0755fe431967b1",
+    "crates/rust-docx/src/parse/shapes/tests.rs": "d72d6da9846dc11b36784270e0b9235630791c4bf992b47679dc6a9484455aae",
+    "crates/rust-docx/src/parse/shapes.rs": "dad0d0ff10e8f0d259a929891018674837d73213931ef00487508a61598eb59c",
+    "crates/rust-docx/src/parse/smartart.rs": "e9696fe0dc335c438a0283de7de0ab9c956dfdfac115b56e55bfd36dc6ac3fe4",
+    "crates/rust-docx/src/parse/style.rs": "e03700f6e50edcefa329075b52ecaabf17ce48e455bdea069ebe070623440fba",
+    "crates/rust-docx/src/parse/styles.rs": "2213e10386a520b31c28e860cf6303ed4fa0e597aaaed1342d65d8214cbf2393",
+    "crates/rust-docx/src/parse/symbols.rs": "6be5c6c8812c45b313f5b3a6e1c0e4aa1cfba12c33228681050f62efdace2091",
+    "crates/rust-docx/src/parse/table.rs": "8df92bfede7d98650f14ca8746b8e47754968bca8ef9e53950ecc94e901c00a9",
+    "crates/rust-docx/src/parse/text_effects.rs": "5dcdf341e0b9909a28ed112e952f8465e087989233c86f48c5220c0b0176dc2f",
+    "crates/rust-docx/src/parse/util.rs": "03ac46611708b57cfe7dd54607984b9dbedd8f7aeed9f11990ea8041cb31c118",
+    "crates/rust-docx/src/parse/vml_picture.rs": "56148f6da7101470840bf6dbae6fcdcaf69bd161fcd009c442348b13ccaeff6c",
+    "crates/rust-docx/src/review.rs": "dbd980d19c82e0390a803020a1a62925abef79b0d5bcdb5fe3a9c0699000556d",
+    "crates/rust-docx/src/revision_inlines.rs": "7b09ab809bf3fc03aa8146688b510813700a0ab785050a68cb21f7473c5c0928",
+    "crates/rust-docx/src/revisions.rs": "28f7af1208c2463b0a219da4e35ad1d3db4c026e09e4df048653308faa2001e3",
+    "crates/rust-docx/src/serialize/tests.rs": "92808e9c9eb8827a26b30203197d9db7fe50128c24257bd5f834754132abb39f",
+    "crates/rust-docx/src/serialize.rs": "7d79ae57f794ab44a6e3619a3af98eeadc7739cd46876c621eb7c8e22eeb8d8b",
+    "crates/rust-docx/src/source_graph.rs": "d3a10618eb6a714566bae06987ea00363ba21f6bba0bc414503729e0bb4900c6",
+    "crates/rust-docx/src/structured/list_labels.rs": "2b1c5f33281632bda987e73fc0f67110c70f748a27b706ecde71fd5ff4ae5499",
+    "crates/rust-docx/src/structured.rs": "3d6a2ebf68441afec2ea5e8be09cc2a43430fab716ec20ad801a688e062b4d8a",
+    "crates/rust-docx/src/table_grid.rs": "86350669de707c7380c552b98f8b5e62033ea1d15709a6c4a7f1e6b1251d00fd",
+    "crates/rust-docx/src/wmf.rs": "02b24dc5e936ce18f199ff32528a90571c5f50bfd9e23b0bb32ea6adcb94def1",
+    "crates/rust-docx/src/xml.rs": "ab0a896242dc570211f3884b364142aa0762fda886d48fd2244da9651e55bc24",
+    "crates/rust-docx/src/xml_index.rs": "638866fe0e50e4c4a27b181666658371ab305bf373876662512abf0e82da309f",
+    "crates/rust-docx/src/zip.rs": "9ec45ddb7c7ebc49db7b8646797713b5c664b6fdd06018a57cb861165c3179d7",
+    "crates/rust-office-art/Cargo.toml": "d215207e1d8cf4619d5d7a3219a7c92d70cfa910822155a1fc9e961c611e7ac6",
+    "crates/rust-office-art/src/effects.rs": "f3f8fc38dca9d3bd6edc7742988594e2e3cdff6c05fd6dc1eb03571fd2ea8cf5",
+    "crates/rust-office-art/src/fonts/README.md": "a45a97a4b0d94509a32d9fdf7f6a68105d53df1408c0380f01a4dd0f1cd8b46d",
+    "crates/rust-office-art/src/fonts/arimo/Arimo-Bold.ttf": "6805a1347bd1198477b7be8b0e79143de62e7d221e46e63193cc5e0f16384786",
+    "crates/rust-office-art/src/fonts/arimo/Arimo-BoldItalic.ttf": "3f5eb4df8377b9ea59e40b3dd5435d08cfa0dfa977cc83e18f17949469b6e777",
+    "crates/rust-office-art/src/fonts/arimo/Arimo-Italic.ttf": "3aff17c3acc20577458898cbcd2e350368f1b4cd2a5d42a9dee772b4e375b048",
+    "crates/rust-office-art/src/fonts/arimo/Arimo-Regular.ttf": "bd9c7304186539cf1438ccb84a778de61f8cf7040aad99a0ce72aa4204897b06",
+    "crates/rust-office-art/src/fonts/arimo/LICENSE": "11cce536cd2f3864d767003af5dcd739e2e15818cf2279b6175edeadd3960992",
+    "crates/rust-office-art/src/fonts/arimo/source.json": "95e012009e377da6c9adff22c0cd08719fcc5f5a4a1435e49c00b060808057c0",
+    "crates/rust-office-art/src/fonts/carlito/LICENSE": "bbcf8ce9c8acc91355ab5d263ec9e37d498de2222336e7d42e589f791afe56c4",
+    "crates/rust-office-art/src/fonts/carlito/OfficeArtSans-Bold.ttf": "e0ce9d566b6dc81498746d1a809a61ee5b150d4bdbc599b8270ae79d37fdd976",
+    "crates/rust-office-art/src/fonts/carlito/OfficeArtSans-BoldItalic.ttf": "d3c88d98e07ec790f324b778d1d43d7f05a3ae2bcfd3816d3f64ad088670c82a",
+    "crates/rust-office-art/src/fonts/carlito/OfficeArtSans-Italic.ttf": "c5d14735929092e60d31faffe91c8986db360f46580b89b72dcedba9e2102c0b",
+    "crates/rust-office-art/src/fonts/carlito/OfficeArtSans-Regular.ttf": "715f139c0830caa2123c4e86e730293a248aefcdc3f77bf531f3c1704bc29530",
+    "crates/rust-office-art/src/fonts/carlito/source.json": "d5e6f0a664f69cc944e14a114d36c670501c5c6543f9efd084a7a9c5f5363b3e",
+    "crates/rust-office-art/src/fonts/cousine/Cousine-Bold.ttf": "a66e4d6c12afb3fa3d7aa09b0dcb90e9c87f0324ee2b57ef86583b095855049b",
+    "crates/rust-office-art/src/fonts/cousine/Cousine-BoldItalic.ttf": "1b05d6a2d0a2c6ad7890d2cd1b25446ea28945f0c840c256c3c1e4e6e6207ce7",
+    "crates/rust-office-art/src/fonts/cousine/Cousine-Italic.ttf": "ad56e65288b217da4314c16b7fd067a3c10e4c7a437aab87e7e2d733c5eca772",
+    "crates/rust-office-art/src/fonts/cousine/Cousine-Regular.ttf": "7459f0f8e36ad4cc93a318ed73290ced76b04c591497b69c5455d6c3c6814d06",
+    "crates/rust-office-art/src/fonts/cousine/LICENSE": "b81c4d4dc0a9f72c9155e78187316e016e2012a8102468804173dc61468b906d",
+    "crates/rust-office-art/src/fonts/cousine/source.json": "0f1a0e246f0b691ea6fe95cd9cf63f5d8409cae5fc19f541de05edcfe93b9c3e",
+    "crates/rust-office-art/src/fonts/tinos/LICENSE": "cb3382d4643e8b02c12e322c220a3c76a5020d667e4fd4e7c75e744cca6caa6b",
+    "crates/rust-office-art/src/fonts/tinos/Tinos-Bold.ttf": "30f37d3ede793207c4bec4263739b52f09d0978ad00410ca4bcfa8a23a58d46b",
+    "crates/rust-office-art/src/fonts/tinos/Tinos-BoldItalic.ttf": "c4e75273500a1e34d35d9a4464cad28cf889af9222ed478c63e323b40f860a69",
+    "crates/rust-office-art/src/fonts/tinos/Tinos-Italic.ttf": "8dfa94b8c09bd0fd589e24a114cda876cbaa94b27d40a14d1bdea6702d653033",
+    "crates/rust-office-art/src/fonts/tinos/Tinos-Regular.ttf": "58b6e5af97bfc85cb0f474a366e1dc996da3f8a841d3b3c35aaa050242b9d94e",
+    "crates/rust-office-art/src/fonts/tinos/source.json": "2b98cfb8c1624d48dd2c29a3c0f14140cd97f2a8d43661d43c45043c9b75347f",
+    "crates/rust-office-art/src/geometry.rs": "11624d51a3d194d58af04e7faeae9989ac0d22466c300bafa4b6217e884e4497",
+    "crates/rust-office-art/src/geometry_data/LICENSE.apache-poi": "6e7c918e5a49f677c1b85a9eb2d035cd85c217fc42af6b4a336964a434001a9c",
+    "crates/rust-office-art/src/geometry_data/LICENSE.ecma": "6d254c2b6f59f27e184eaa378db404e6cacf207520aa36a50cb7d92ccca5579a",
+    "crates/rust-office-art/src/geometry_data/NOTICE.apache-poi": "8e41ec916a59981a28397e2b46d7fb851eea02f7d179d75f030eb248916a4a09",
+    "crates/rust-office-art/src/geometry_data/SOURCE.md": "f3bc8b91bbef3b86c3363e6ceb360672a7ba31a4fdb9c3ab07a8acdaefbd5baf",
+    "crates/rust-office-art/src/geometry_data/presetShapeDefinitions.xml": "4a762444d8d85876881c02a5b1dedf6f73006fcd8acb7b4e393435615b37c780",
+    "crates/rust-office-art/src/geometry_data/presetTextWarpDefinitions.xml": "89640bd4aeedfa2c578d1d1acc50d569865ebdef315fd4b468087c25e36acada",
+    "crates/rust-office-art/src/ink.rs": "6c284baa65e89ebc0e53cc69232813be710158a4046e8307e026deb02ddb1650",
+    "crates/rust-office-art/src/lib.rs": "d41762af9f4e3b62f4757789928d6dccd0db9f262551945b23dcb0936a5fc158",
+    "crates/rust-office-art/src/model3d.rs": "5247921eb01616b1a9bdc33934987ffb512975147a3343504a79cff9a5372f1e",
+    "crates/rust-office-art/src/pattern_data.rs": "e345e23f6f7f0b959620f70b38c3e729b49315e7eaea8c9c55cc724cfe01965a",
+    "crates/rust-office-art/src/raster.rs": "35d95840113ce977947a8026b47229d7b54eb5be890e2d453cccface2f32b45a",
+    "crates/rust-office-art/src/scene3d.rs": "eebcc18e77df4742098786de476c67468ff5aefea7d4f4fefbcf9972b2eb068d",
+    "crates/rust-office-art/src/scene3d_data.rs": "617f067d245818747d9b7d98de381bce1e6bb4c7a70b3caea57f4b4329b2a650",
+    "crates/rust-office-art/src/shapes.rs": "82480d5afa706ed71ce0797839a742288d0fd29d89979a3c4e2a47bf32fe12c7",
+    "crates/rust-office-art/src/smartart.rs": "06939c3c6eb0505e7d49bdb80fa6e6dcd7e7357da448b369c369c0e620968d41",
+    "crates/rust-office-art/src/text.rs": "c662bd7bc2c38fc0872eaf0f577725b88d192d92dab2ba419d890dd48c43f992",
+    "crates/rust-office-art/src/xml.rs": "d616a9491e12a41030b322f522d674c01ab7ed784b129d73051e04697c27fd30"
+  },
+  "measurement": "RGB within 16 levels over the union of visible ink on full 816 \u00d7 1056 pages; no per-image alignment",
+  "candidatePageSizePx": [
+    816,
+    1056
+  ],
+  "caseCount": 30,
+  "cases": [
+    {
+      "id": "art-01",
+      "title": "Alterations & Tailoring outline",
+      "family": "SVG icons",
+      "mode": "Embedded vector artwork",
+      "page": 1,
+      "framePx": {
+        "x": 360.0,
+        "y": 480.0,
+        "width": 96.0,
+        "height": 96.0
+      },
+      "cropPx": [
+        324,
+        444,
+        492,
+        612
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-01.png",
+      "referenceSha256": "19b75e306bc18c3b9fc31acb6b350d3d77cd5deffe690e27d6727a2ac91b00b2",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-01.png",
+      "candidateSha256": "144290e6f8cfc036ece73da466d5fdfe0e2eb494702cbfe8cc5ff643f9db7fb2",
+      "meanAbsoluteChannelError": 0.37249563651218065,
+      "maximumChannelError": 255,
+      "inkIntersectionOverUnion": 0.3561880120741699,
+      "colorAgreementWithin16OnInkUnion": 0.11384217335058215,
+      "referenceInkPixels": 1636,
+      "candidateInkPixels": 1509,
+      "inkUnionPixels": 2319,
+      "beforeColorAgreement": 0.11384217335058215,
+      "beforeSha256": "144290e6f8cfc036ece73da466d5fdfe0e2eb494702cbfe8cc5ff643f9db7fb2"
+    },
+    {
+      "id": "art-02",
+      "title": "Anemone and clownfish outline",
+      "family": "SVG icons",
+      "mode": "Embedded vector artwork",
+      "page": 2,
+      "framePx": {
+        "x": 360.0,
+        "y": 480.0,
+        "width": 96.0,
+        "height": 96.0
+      },
+      "cropPx": [
+        324,
+        444,
+        492,
+        612
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-02.png",
+      "referenceSha256": "c64aaf4fa22b8be76e6205481fc002ced3fb3bcff0489df70ff76c91e2995e1e",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-02.png",
+      "candidateSha256": "ec2a7f4f425cc77dcb5394cf2497a0c78f0e0ac6aefec6dce4e0aeee4f99fa24",
+      "meanAbsoluteChannelError": 0.5583860201277481,
+      "maximumChannelError": 255,
+      "inkIntersectionOverUnion": 0.4339174339174339,
+      "colorAgreementWithin16OnInkUnion": 0.0792990792990793,
+      "referenceInkPixels": 2531,
+      "candidateInkPixels": 2297,
+      "inkUnionPixels": 3367,
+      "beforeColorAgreement": 0.0792990792990793,
+      "beforeSha256": "ec2a7f4f425cc77dcb5394cf2497a0c78f0e0ac6aefec6dce4e0aeee4f99fa24"
+    },
+    {
+      "id": "art-03",
+      "title": "Anger Symbol with solid fill",
+      "family": "SVG icons",
+      "mode": "Embedded vector artwork",
+      "page": 3,
+      "framePx": {
+        "x": 360.0,
+        "y": 480.0,
+        "width": 96.0,
+        "height": 96.0
+      },
+      "cropPx": [
+        324,
+        444,
+        492,
+        612
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-03.png",
+      "referenceSha256": "452150b5897af8747cb60979d4a649db0f32d706fb8a90ebbe1a89b773646dc1",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-03.png",
+      "candidateSha256": "b60b4575dd99e7a08a582563778903f0a52a5bdb211d4ab493fe535d4351a6c6",
+      "meanAbsoluteChannelError": 0.136059584818776,
+      "maximumChannelError": 255,
+      "inkIntersectionOverUnion": 0.7486828240252897,
+      "colorAgreementWithin16OnInkUnion": 0.5742887249736565,
+      "referenceInkPixels": 1687,
+      "candidateInkPixels": 1632,
+      "inkUnionPixels": 1898,
+      "beforeColorAgreement": 0.5742887249736565,
+      "beforeSha256": "b60b4575dd99e7a08a582563778903f0a52a5bdb211d4ab493fe535d4351a6c6"
+    },
+    {
+      "id": "art-04",
+      "title": "Ring Emoji",
+      "family": "3D models",
+      "mode": "Saved Office raster preview",
+      "page": 4,
+      "framePx": {
+        "x": 314.6666666666667,
+        "y": 394.66666666666663,
+        "width": 186.66666666666666,
+        "height": 266.6666666666667
+      },
+      "cropPx": [
+        278,
+        358,
+        538,
+        698
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-04.png",
+      "referenceSha256": "2d078fc8f07ef8b57f9c6d4bf39b0b5015cab8b55ed21418aff600ebae6c3d61",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-04.png",
+      "candidateSha256": "b49a6e761eef84c90fe83ca0c3791b2a1855a9b90ca5cf88f63d50d67518988d",
+      "meanAbsoluteChannelError": 0.5015570069568231,
+      "maximumChannelError": 227,
+      "inkIntersectionOverUnion": 0.8617194662320464,
+      "colorAgreementWithin16OnInkUnion": 0.5498115513904451,
+      "referenceInkPixels": 18534,
+      "candidateInkPixels": 18019,
+      "inkUnionPixels": 19634,
+      "beforeColorAgreement": 0.5498115513904451,
+      "beforeSha256": "b49a6e761eef84c90fe83ca0c3791b2a1855a9b90ca5cf88f63d50d67518988d"
+    },
+    {
+      "id": "art-05",
+      "title": "Ink \u00b7 pencil",
+      "family": "Ink",
+      "mode": "InkML brush geometry and pressure",
+      "page": 5,
+      "framePx": {
+        "x": 128.3527559055118,
+        "y": 351.911811023622,
+        "width": 559.2944881889764,
+        "height": 352.1763779527559
+      },
+      "cropPx": [
+        92,
+        315,
+        724,
+        741
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-05.png",
+      "referenceSha256": "f6f8337b1e89de5a9fdf7a5262253608d02c4a1fb748c418901791db713c1d12",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-05.png",
+      "candidateSha256": "0b457da6e977f821f61430fa0858fce4c3c430f526a3dfc58f77180fa01a1829",
+      "meanAbsoluteChannelError": 0.23538463680926916,
+      "maximumChannelError": 74,
+      "inkIntersectionOverUnion": 0.27303354328401935,
+      "colorAgreementWithin16OnInkUnion": 0.20960890581514574,
+      "referenceInkPixels": 4567,
+      "candidateInkPixels": 4124,
+      "inkUnionPixels": 6827,
+      "limitation": "InkML brush geometry and pressure",
+      "beforeColorAgreement": 0.2112479665349756,
+      "beforeSha256": "13a028d909ae2be9764306449708a5b3c16225817fd06fa6c4c15f97b01ed75e"
+    },
+    {
+      "id": "art-06",
+      "title": "Ink \u00b7 highlighter",
+      "family": "Ink",
+      "mode": "InkML brush geometry and pressure",
+      "page": 6,
+      "framePx": {
+        "x": 243.49606299212599,
+        "y": 258.7464566929134,
+        "width": 329.00787401574803,
+        "height": 538.5070866141732
+      },
+      "cropPx": [
+        207,
+        222,
+        609,
+        834
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-06.png",
+      "referenceSha256": "90f158525ca71861f31b27613c47dcdb132a4fcc362e729a2c5b46a93e489097",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-06.png",
+      "candidateSha256": "4150bcb9e2ab15fecac608d0660069dd2728a785f82038aba3aa2a5d41f5c9c5",
+      "meanAbsoluteChannelError": 0.12719721727074668,
+      "maximumChannelError": 128,
+      "inkIntersectionOverUnion": 0.906631007629985,
+      "colorAgreementWithin16OnInkUnion": 0.853693070085739,
+      "referenceInkPixels": 24361,
+      "candidateInkPixels": 24117,
+      "inkUnionPixels": 25426,
+      "limitation": "InkML brush geometry and pressure",
+      "beforeColorAgreement": 0.684781405644715,
+      "beforeSha256": "c2abd7d1271daeec9f590b77f780462e3d385f727a7296a1470ab4fe204bc48d"
+    },
+    {
+      "id": "art-07",
+      "title": "Ink \u00b7 pen",
+      "family": "Ink",
+      "mode": "InkML brush geometry and pressure",
+      "page": 7,
+      "framePx": {
+        "x": 250.9984251968504,
+        "y": 395.35748031496064,
+        "width": 314.0031496062992,
+        "height": 265.2850393700787
+      },
+      "cropPx": [
+        214,
+        359,
+        602,
+        697
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-07.png",
+      "referenceSha256": "2b1fa0765255d5cc540131744e9c373bf80bd2790e90bfad397074bff29d3e99",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-07.png",
+      "candidateSha256": "8324a2c5de6b1f5351fe49f16c2075bed37ab8dd024818c56006274691319b9b",
+      "meanAbsoluteChannelError": 0.4018571127946128,
+      "maximumChannelError": 237,
+      "inkIntersectionOverUnion": 0.11026434865444153,
+      "colorAgreementWithin16OnInkUnion": 0.039056918313884255,
+      "referenceInkPixels": 2522,
+      "candidateInkPixels": 2140,
+      "inkUnionPixels": 4199,
+      "limitation": "InkML brush geometry and pressure",
+      "beforeColorAgreement": 0.0961626662589818,
+      "beforeSha256": "c4224c162783bd77b334fec9917696fe93b560eac0e2746535c563fa3316e24f"
+    },
+    {
+      "id": "art-08",
+      "title": "Nauseated Face Emoji",
+      "family": "3D models",
+      "mode": "Saved Office raster preview",
+      "page": 8,
+      "framePx": {
+        "x": 302.6666666666667,
+        "y": 429.3333333333333,
+        "width": 210.66666666666666,
+        "height": 197.33333333333334
+      },
+      "cropPx": [
+        266,
+        393,
+        550,
+        663
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-08.png",
+      "referenceSha256": "c34737d7dc5d029f2761cfc6b25f1a5f877bd544f89dc6d643d0828d04616905",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-08.png",
+      "candidateSha256": "a4a76c2e0397e476b6b3f4ecea08d0f80509aacffb3b1739acc675a60777d9ba",
+      "meanAbsoluteChannelError": 0.3925108158793821,
+      "maximumChannelError": 226,
+      "inkIntersectionOverUnion": 0.951114922813036,
+      "colorAgreementWithin16OnInkUnion": 0.7984205260148657,
+      "referenceInkPixels": 27385,
+      "candidateInkPixels": 27215,
+      "inkUnionPixels": 27984,
+      "beforeColorAgreement": 0.7984205260148657,
+      "beforeSha256": "a4a76c2e0397e476b6b3f4ecea08d0f80509aacffb3b1739acc675a60777d9ba"
+    },
+    {
+      "id": "art-09",
+      "title": "Alarm Ringing with solid fill",
+      "family": "SVG icons",
+      "mode": "Embedded vector artwork",
+      "page": 9,
+      "framePx": {
+        "x": 360.0,
+        "y": 480.0,
+        "width": 96.0,
+        "height": 96.0
+      },
+      "cropPx": [
+        324,
+        444,
+        492,
+        612
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-09.png",
+      "referenceSha256": "cbf73d4e5dbab2f8e4f5bcd2a67429789365e151b0ca68e990055b6cec935133",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-09.png",
+      "candidateSha256": "415e29b744f2f564126e721c3b0a7f32de0032659106476d163559938e53d4e5",
+      "meanAbsoluteChannelError": 0.26795528817587644,
+      "maximumChannelError": 255,
+      "inkIntersectionOverUnion": 0.6572753209700428,
+      "colorAgreementWithin16OnInkUnion": 0.4614835948644793,
+      "referenceInkPixels": 2403,
+      "candidateInkPixels": 2244,
+      "inkUnionPixels": 2804,
+      "beforeColorAgreement": 0.4614835948644793,
+      "beforeSha256": "415e29b744f2f564126e721c3b0a7f32de0032659106476d163559938e53d4e5"
+    },
+    {
+      "id": "art-10",
+      "title": "12-Point Star 12",
+      "family": "Shapes",
+      "mode": "DrawingML geometry and paint",
+      "page": 10,
+      "framePx": {
+        "x": 181.2765879265092,
+        "y": 122.5532283464567,
+        "width": 453.4468241469816,
+        "height": 810.8935433070866
+      },
+      "cropPx": [
+        145,
+        86,
+        671,
+        970
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-10.png",
+      "referenceSha256": "b2d2e1a54f04c2adb90f07b4df497d6f643cf081ec6505b440ad598fb5b833d6",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-10.png",
+      "candidateSha256": "322ab72cb5aca80a59f2a47d50dbc2ce229b6e2585a43bcb0ba3411327b1a373",
+      "meanAbsoluteChannelError": 0.9626794136215092,
+      "maximumChannelError": 251,
+      "inkIntersectionOverUnion": 0.9842287449300148,
+      "colorAgreementWithin16OnInkUnion": 0.9604598310843252,
+      "referenceInkPixels": 217122,
+      "candidateInkPixels": 216807,
+      "inkUnionPixels": 218689,
+      "beforeColorAgreement": 0.9604598310843252,
+      "beforeSha256": "322ab72cb5aca80a59f2a47d50dbc2ce229b6e2585a43bcb0ba3411327b1a373"
+    },
+    {
+      "id": "art-11",
+      "title": "Cloud 11",
+      "family": "Shapes",
+      "mode": "DrawingML geometry and paint",
+      "page": 11,
+      "framePx": {
+        "x": 366.63826771653544,
+        "y": 513.1914960629921,
+        "width": 82.72346456692914,
+        "height": 29.617007874015748
+      },
+      "cropPx": [
+        330,
+        477,
+        486,
+        579
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-11.png",
+      "referenceSha256": "a0bcb4070a1fd4ecf8561b5995ac2f562babf32486bfa3d903548494b89a4af0",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-11.png",
+      "candidateSha256": "128ce0a497222e27296ed373d7b4272386d1dc03e17a9df30ce03d2f69bc279a",
+      "meanAbsoluteChannelError": 0.07595795578332343,
+      "maximumChannelError": 251,
+      "inkIntersectionOverUnion": 0.8793418647166362,
+      "colorAgreementWithin16OnInkUnion": 0.6841864716636198,
+      "referenceInkPixels": 2066,
+      "candidateInkPixels": 2046,
+      "inkUnionPixels": 2188,
+      "beforeColorAgreement": 0.6841864716636198,
+      "beforeSha256": "128ce0a497222e27296ed373d7b4272386d1dc03e17a9df30ce03d2f69bc279a"
+    },
+    {
+      "id": "art-12",
+      "title": "Hot Face Emoji",
+      "family": "3D models",
+      "mode": "Saved Office raster preview",
+      "page": 12,
+      "framePx": {
+        "x": 312.0,
+        "y": 433.3333333333333,
+        "width": 192.0,
+        "height": 189.33333333333334
+      },
+      "cropPx": [
+        276,
+        397,
+        540,
+        659
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-12.png",
+      "referenceSha256": "ef40ab4aee1961dc470442be49d5d963228f3e1d0ca5686ba9b58fdb8f2dcc05",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-12.png",
+      "candidateSha256": "dfe58e8cd36ffe4c5321c5af52637ecd5f08be8310102d58617d962d98b0771e",
+      "meanAbsoluteChannelError": 0.4130586657011289,
+      "maximumChannelError": 219,
+      "inkIntersectionOverUnion": 0.9532603108070703,
+      "colorAgreementWithin16OnInkUnion": 0.745541539799913,
+      "referenceInkPixels": 24731,
+      "candidateInkPixels": 24665,
+      "inkUnionPixels": 25289,
+      "beforeColorAgreement": 0.745541539799913,
+      "beforeSha256": "dfe58e8cd36ffe4c5321c5af52637ecd5f08be8310102d58617d962d98b0771e"
+    },
+    {
+      "id": "art-13",
+      "title": "Dizzy Face Emoji",
+      "family": "3D models",
+      "mode": "Saved Office raster preview",
+      "page": 13,
+      "framePx": {
+        "x": 310.6666666666667,
+        "y": 430.6666666666667,
+        "width": 194.66666666666666,
+        "height": 194.66666666666666
+      },
+      "cropPx": [
+        274,
+        394,
+        542,
+        662
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-13.png",
+      "referenceSha256": "bc34f678761167a54bca7abda2c24a86dcc7ef409fedc23ba47013b5e15f12b0",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-13.png",
+      "candidateSha256": "e8dbbe5e07738c1d26a3f52f8701392fbd9454e533e353856832b9207da210ad",
+      "meanAbsoluteChannelError": 0.45747185395622897,
+      "maximumChannelError": 231,
+      "inkIntersectionOverUnion": 0.9529778239264258,
+      "colorAgreementWithin16OnInkUnion": 0.7387080026700289,
+      "referenceInkPixels": 26517,
+      "candidateInkPixels": 26147,
+      "inkUnionPixels": 26966,
+      "beforeColorAgreement": 0.7387080026700289,
+      "beforeSha256": "e8dbbe5e07738c1d26a3f52f8701392fbd9454e533e353856832b9207da210ad"
+    },
+    {
+      "id": "art-14",
+      "title": "Smiling Face With Sunglasses Emoji",
+      "family": "3D models",
+      "mode": "Saved Office raster preview",
+      "page": 14,
+      "framePx": {
+        "x": 310.6666666666667,
+        "y": 434.6666666666667,
+        "width": 194.66666666666666,
+        "height": 186.66666666666666
+      },
+      "cropPx": [
+        274,
+        398,
+        542,
+        658
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-14.png",
+      "referenceSha256": "cd290eb5a86603915b8e5edc65bca54d2c60de41d77e0a7e365193ac712c962d",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-14.png",
+      "candidateSha256": "dc8b429216261bc7bab8d62079a45a5ea62a32d9692c596bb6ca0cd1e61fc9d7",
+      "meanAbsoluteChannelError": 0.4762495512725292,
+      "maximumChannelError": 241,
+      "inkIntersectionOverUnion": 0.947841726618705,
+      "colorAgreementWithin16OnInkUnion": 0.7646230841413826,
+      "referenceInkPixels": 25091,
+      "candidateInkPixels": 24727,
+      "inkUnionPixels": 25576,
+      "beforeColorAgreement": 0.7646230841413826,
+      "beforeSha256": "dc8b429216261bc7bab8d62079a45a5ea62a32d9692c596bb6ca0cd1e61fc9d7"
+    },
+    {
+      "id": "art-15",
+      "title": "SmartArt \u00b7 cycle matrix",
+      "family": "SmartArt",
+      "mode": "Saved drawing geometry",
+      "page": 15,
+      "framePx": {
+        "x": 120.0,
+        "y": 360.0,
+        "width": 576.0,
+        "height": 336.0
+      },
+      "cropPx": [
+        84,
+        324,
+        816,
+        832
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-15.png",
+      "referenceSha256": "69b3012028cc63f711cc2e5e085ab4c96fdf01c5d3a9fe3d7730cc40b3e09edb",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-15.png",
+      "candidateSha256": "e0003e185447e1fbdc13b30e7fed7bd95cfd09ac56e1d94520c007c32ba036af",
+      "meanAbsoluteChannelError": 1.2267346411418103,
+      "maximumChannelError": 234,
+      "inkIntersectionOverUnion": 0.9026716769211711,
+      "colorAgreementWithin16OnInkUnion": 0.8652874702344083,
+      "referenceInkPixels": 69308,
+      "candidateInkPixels": 68923,
+      "inkUnionPixels": 72651,
+      "beforeColorAgreement": 0.8652874702344083,
+      "beforeSha256": "e0003e185447e1fbdc13b30e7fed7bd95cfd09ac56e1d94520c007c32ba036af"
+    },
+    {
+      "id": "art-16",
+      "title": "3d Glasses outline",
+      "family": "SVG icons",
+      "mode": "Embedded vector artwork",
+      "page": 16,
+      "framePx": {
+        "x": 360.0,
+        "y": 480.0,
+        "width": 96.0,
+        "height": 96.0
+      },
+      "cropPx": [
+        324,
+        444,
+        492,
+        612
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-16.png",
+      "referenceSha256": "2a5f4dde7e0ae3f250e11743809adb8a79aa04fb1b5113eca4437b8a059498cb",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-16.png",
+      "candidateSha256": "371a13e852b2f393fa521d5fc23a43a1d9819d6176dd13d17f5bf90c1218f2a9",
+      "meanAbsoluteChannelError": 0.31393322006833035,
+      "maximumChannelError": 255,
+      "inkIntersectionOverUnion": 0.42006437768240346,
+      "colorAgreementWithin16OnInkUnion": 0.09549356223175966,
+      "referenceInkPixels": 1403,
+      "candidateInkPixels": 1244,
+      "inkUnionPixels": 1864,
+      "beforeColorAgreement": 0.09549356223175966,
+      "beforeSha256": "371a13e852b2f393fa521d5fc23a43a1d9819d6176dd13d17f5bf90c1218f2a9"
+    },
+    {
+      "id": "art-17",
+      "title": "SmartArt \u00b7 funnel",
+      "family": "SmartArt",
+      "mode": "Saved drawing geometry",
+      "page": 17,
+      "framePx": {
+        "x": 120.0,
+        "y": 360.0,
+        "width": 576.0,
+        "height": 336.0
+      },
+      "cropPx": [
+        84,
+        324,
+        732,
+        732
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-17.png",
+      "referenceSha256": "41416af6841d746a6ff55772f811137081636d7e5d99651d736224589cf6a6e5",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-17.png",
+      "candidateSha256": "739e6a8e46fb162ee3e64cc017672cd3128813f921dc9d289d9dd8376ca477f6",
+      "meanAbsoluteChannelError": 0.5183603034016637,
+      "maximumChannelError": 234,
+      "inkIntersectionOverUnion": 0.8938638174788229,
+      "colorAgreementWithin16OnInkUnion": 0.8271302499926212,
+      "referenceInkPixels": 32484,
+      "candidateInkPixels": 31682,
+      "inkUnionPixels": 33881,
+      "beforeColorAgreement": 0.8271302499926212,
+      "beforeSha256": "739e6a8e46fb162ee3e64cc017672cd3128813f921dc9d289d9dd8376ca477f6"
+    },
+    {
+      "id": "art-18",
+      "title": "WordArt \u00b7 outline and shadow",
+      "family": "WordArt",
+      "mode": "Shaped glyph outlines; substitute font metrics",
+      "page": 18,
+      "framePx": {
+        "x": 120.0,
+        "y": 360.0,
+        "width": 576.0,
+        "height": 336.0
+      },
+      "cropPx": [
+        84,
+        324,
+        732,
+        732
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-18.png",
+      "referenceSha256": "d61bcb16888ae796b5cb5e2d965ee75844fc8efe238492daad820ba75afa3996",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-18.png",
+      "candidateSha256": "4828ddda09dfd4e18d81c5eb2535051d7b331c1e23b3b6b2a907605027430c2e",
+      "meanAbsoluteChannelError": 0.6890187103881957,
+      "maximumChannelError": 212,
+      "inkIntersectionOverUnion": 0.34799532892175944,
+      "colorAgreementWithin16OnInkUnion": 0.11937199948099131,
+      "referenceInkPixels": 4967,
+      "candidateInkPixels": 5422,
+      "inkUnionPixels": 7707,
+      "limitation": "Shaped glyph outlines; substitute font metrics",
+      "beforeColorAgreement": 0.08070768313288937,
+      "beforeSha256": "38ed8bea84e262aa015d0cb59fa03f38c207255b28d8c13c1eea5f462490eb9e"
+    },
+    {
+      "id": "wordart/textNoShape",
+      "title": "WordArt \u00b7 plain text",
+      "family": "WordArt",
+      "mode": "Shaped glyph outlines; substitute font metrics",
+      "page": 19,
+      "framePx": {
+        "x": 288.0,
+        "y": 456.0,
+        "width": 240.0,
+        "height": 144.0
+      },
+      "cropPx": [
+        252,
+        420,
+        564,
+        636
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-19.png",
+      "referenceSha256": "006cdcd123f8a526c8aa9ea5459c9e72f472db470671b5e1735ff873c3f32b46",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-19.png",
+      "candidateSha256": "06685d0caf47b5a4dbcc717edf8879bada8506d6904aa2696690d24ca0ed4183",
+      "meanAbsoluteChannelError": 0.14749130397108337,
+      "maximumChannelError": 222,
+      "inkIntersectionOverUnion": 0.6611132146914047,
+      "colorAgreementWithin16OnInkUnion": 0.4282468761832639,
+      "referenceInkPixels": 2320,
+      "candidateInkPixels": 2067,
+      "inkUnionPixels": 2641,
+      "limitation": "Shaped glyph outlines; substitute font metrics",
+      "beforeColorAgreement": 0.08734359961501444,
+      "beforeSha256": "059a34f74801a010569475f1a6a4e86f21696b65057938fe1d51da5f237433d6"
+    },
+    {
+      "id": "wordart/solid-fill",
+      "title": "WordArt \u00b7 solid fill",
+      "family": "WordArt",
+      "mode": "Shaped glyph outlines; substitute font metrics",
+      "page": 20,
+      "framePx": {
+        "x": 288.0,
+        "y": 456.0,
+        "width": 240.0,
+        "height": 144.0
+      },
+      "cropPx": [
+        252,
+        420,
+        564,
+        636
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-20.png",
+      "referenceSha256": "8e33722821e8ee44e48888604feb99991cb1f1275da15a8632b6b335459ec633",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-20.png",
+      "candidateSha256": "695f4ae66424f5cd230915a7d933080986e354d1494840b24d567dcbee9fa147",
+      "meanAbsoluteChannelError": 0.12876544241433946,
+      "maximumChannelError": 200,
+      "inkIntersectionOverUnion": 0.662742119255602,
+      "colorAgreementWithin16OnInkUnion": 0.4394227117356627,
+      "referenceInkPixels": 2311,
+      "candidateInkPixels": 2067,
+      "inkUnionPixels": 2633,
+      "limitation": "Shaped glyph outlines; substitute font metrics",
+      "beforeColorAgreement": 0.02914960250542038,
+      "beforeSha256": "059a34f74801a010569475f1a6a4e86f21696b65057938fe1d51da5f237433d6"
+    },
+    {
+      "id": "wordart/outline-only",
+      "title": "WordArt \u00b7 outline only",
+      "family": "WordArt",
+      "mode": "Shaped glyph outlines; substitute font metrics",
+      "page": 21,
+      "framePx": {
+        "x": 288.0,
+        "y": 456.0,
+        "width": 240.0,
+        "height": 144.0
+      },
+      "cropPx": [
+        252,
+        420,
+        564,
+        636
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-21.png",
+      "referenceSha256": "1439fb1f6a57a6fd6cbf0d15474e70b8fb4e25a6c440abad1e6f108ab5856953",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-21.png",
+      "candidateSha256": "f543dea241668d2886e26004ba9eb28837af67e8f305105b155d2891fc66cbb8",
+      "meanAbsoluteChannelError": 0.38117889990592196,
+      "maximumChannelError": 232,
+      "inkIntersectionOverUnion": 0.49099099099099097,
+      "colorAgreementWithin16OnInkUnion": 0.10682110682110682,
+      "referenceInkPixels": 2406,
+      "candidateInkPixels": 2228,
+      "inkUnionPixels": 3108,
+      "limitation": "Shaped glyph outlines; substitute font metrics",
+      "beforeColorAgreement": 0.04613440067410996,
+      "beforeSha256": "8ec6d54dffb9f11561d385c784e81f1a9098e0bcac59e86938d90533cfa3122a"
+    },
+    {
+      "id": "wordart/shadow",
+      "title": "WordArt \u00b7 shadow",
+      "family": "WordArt",
+      "mode": "Shaped glyph outlines; substitute font metrics",
+      "page": 22,
+      "framePx": {
+        "x": 288.0,
+        "y": 456.0,
+        "width": 240.0,
+        "height": 144.0
+      },
+      "cropPx": [
+        252,
+        420,
+        564,
+        636
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-22.png",
+      "referenceSha256": "688d1594661de9f45995393870133a9e00df7ee24e1a9af89ad734093a9bff3d",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-22.png",
+      "candidateSha256": "f4ea2c4b895ab224ae66ab77d7ea31497455a284f14c49e59e94b49b8ed38017",
+      "meanAbsoluteChannelError": 0.2698952608189741,
+      "maximumChannelError": 223,
+      "inkIntersectionOverUnion": 0.50199203187251,
+      "colorAgreementWithin16OnInkUnion": 0.26482306069838296,
+      "referenceInkPixels": 2331,
+      "candidateInkPixels": 4078,
+      "inkUnionPixels": 4267,
+      "limitation": "Shaped glyph outlines; substitute font metrics",
+      "beforeColorAgreement": 0.07061172626611001,
+      "beforeSha256": "9b24446ea29973a27ee7f9eb5e0bef768459d31f69633b7993b28a15f886caae"
+    },
+    {
+      "id": "wordart/textWave1",
+      "title": "WordArt \u00b7 wave deformation",
+      "family": "WordArt",
+      "mode": "Glyph outlines mapped through preset warp geometry",
+      "page": 23,
+      "framePx": {
+        "x": 288.0,
+        "y": 456.0,
+        "width": 240.0,
+        "height": 144.0
+      },
+      "cropPx": [
+        252,
+        420,
+        564,
+        636
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-23.png",
+      "referenceSha256": "cc69a578d808994882887447bc3bd3f19dd7047bde2c252f4a3115cbea25bbec",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-23.png",
+      "candidateSha256": "14ca55e3c9422c3506d106c5a48b1c23b876e7b7ed83aeb25e440ec678480ec7",
+      "meanAbsoluteChannelError": 0.4680579539265201,
+      "maximumChannelError": 222,
+      "inkIntersectionOverUnion": 0.70685332218972,
+      "colorAgreementWithin16OnInkUnion": 0.518909318846636,
+      "referenceInkPixels": 8452,
+      "candidateInkPixels": 7886,
+      "inkUnionPixels": 9572,
+      "limitation": "Shaped glyph outlines; substitute font metrics",
+      "beforeColorAgreement": 0.07994245787094123,
+      "beforeSha256": "059a34f74801a010569475f1a6a4e86f21696b65057938fe1d51da5f237433d6"
+    },
+    {
+      "id": "wordart/textArchUp",
+      "title": "WordArt \u00b7 arch deformation",
+      "family": "WordArt",
+      "mode": "Glyph outlines mapped through preset warp geometry",
+      "page": 24,
+      "framePx": {
+        "x": 288.0,
+        "y": 456.0,
+        "width": 240.0,
+        "height": 144.0
+      },
+      "cropPx": [
+        252,
+        420,
+        564,
+        636
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-24.png",
+      "referenceSha256": "37288511668ce746f3c53c4cce7fcbe2603e991753a4806f03e97494368b6cb9",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-24.png",
+      "candidateSha256": "30f72c9f553940f3d48822bfc30c3b6e08dfab8a07d1ae098f4f14d50f41b14c",
+      "meanAbsoluteChannelError": 0.14844949185482273,
+      "maximumChannelError": 222,
+      "inkIntersectionOverUnion": 0.48114285714285715,
+      "colorAgreementWithin16OnInkUnion": 0.24914285714285714,
+      "referenceInkPixels": 1374,
+      "candidateInkPixels": 1218,
+      "inkUnionPixels": 1750,
+      "limitation": "Shaped glyph outlines; substitute font metrics",
+      "beforeColorAgreement": 0.026329787234042553,
+      "beforeSha256": "059a34f74801a010569475f1a6a4e86f21696b65057938fe1d51da5f237433d6"
+    },
+    {
+      "id": "wordart/linear-gradient",
+      "title": "WordArt \u00b7 gradient fill",
+      "family": "WordArt",
+      "mode": "Shaped glyph outlines; substitute font metrics",
+      "page": 25,
+      "framePx": {
+        "x": 288.0,
+        "y": 456.0,
+        "width": 240.0,
+        "height": 144.0
+      },
+      "cropPx": [
+        252,
+        420,
+        564,
+        636
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-25.png",
+      "referenceSha256": "c3749f0cc74545728b4c43bf290631ab72be9f48118a4e7b1db56a728289cf5e",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-25.png",
+      "candidateSha256": "f7e0f592fc37e7ac4199854a3f451f22547e3351935652878ddc52e0f24dbacf",
+      "meanAbsoluteChannelError": 0.13339584571202218,
+      "maximumChannelError": 211,
+      "inkIntersectionOverUnion": 0.6595501334349981,
+      "colorAgreementWithin16OnInkUnion": 0.36637438048036597,
+      "referenceInkPixels": 2286,
+      "candidateInkPixels": 2067,
+      "inkUnionPixels": 2623,
+      "limitation": "Shaped glyph outlines; substitute font metrics",
+      "beforeColorAgreement": 0.02084848484848485,
+      "beforeSha256": "059a34f74801a010569475f1a6a4e86f21696b65057938fe1d51da5f237433d6"
+    },
+    {
+      "id": "wordart/extrusion",
+      "title": "WordArt \u00b7 3D text",
+      "family": "WordArt",
+      "mode": "Glyph outlines with projected extrusion and lighting",
+      "page": 26,
+      "framePx": {
+        "x": 288.0,
+        "y": 456.0,
+        "width": 240.0,
+        "height": 144.0
+      },
+      "cropPx": [
+        252,
+        420,
+        564,
+        636
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-26.png",
+      "referenceSha256": "aa3cc257b824e4b5ab08e70d7388fe8ce2d255b926094d27ae818c3a340d510f",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-26.png",
+      "candidateSha256": "f8c78360014a6215c718b9097e60b7163b95a1e762485f5151a5e7dae0f2366c",
+      "meanAbsoluteChannelError": 0.1948947192513369,
+      "maximumChannelError": 239,
+      "inkIntersectionOverUnion": 0.6944944224541202,
+      "colorAgreementWithin16OnInkUnion": 0.08168405901403382,
+      "referenceInkPixels": 2379,
+      "candidateInkPixels": 2330,
+      "inkUnionPixels": 2779,
+      "limitation": "Shaped glyph outlines; substitute font metrics",
+      "beforeColorAgreement": 0.03605539637058262,
+      "beforeSha256": "059a34f74801a010569475f1a6a4e86f21696b65057938fe1d51da5f237433d6"
+    },
+    {
+      "id": "three-d/camera-isometricTopUp",
+      "title": "3D shape \u00b7 isometric extrusion",
+      "family": "3D shapes",
+      "mode": "Projected geometry, extrusion and material lighting",
+      "page": 27,
+      "framePx": {
+        "x": 288.0,
+        "y": 456.0,
+        "width": 240.0,
+        "height": 144.0
+      },
+      "cropPx": [
+        252,
+        420,
+        564,
+        636
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-27.png",
+      "referenceSha256": "d908066439f5a867877c10b6823e1b0fc7cf746ac463f4a3a6f9ed0b6d644674",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-27.png",
+      "candidateSha256": "33fae76865bffbab29bcd48a1fe2c471430a09354d1f507b1b2dcaabe6e52bd7",
+      "meanAbsoluteChannelError": 1.0524643648494751,
+      "maximumChannelError": 246,
+      "inkIntersectionOverUnion": 0.8594379035320927,
+      "colorAgreementWithin16OnInkUnion": 0.6516141283706798,
+      "referenceInkPixels": 24878,
+      "candidateInkPixels": 24081,
+      "inkUnionPixels": 26330,
+      "limitation": "Projected geometry, extrusion and material lighting",
+      "beforeColorAgreement": 0.49495752260893394,
+      "beforeSha256": "6324f28c18da51e85067842ecea3b6a21a182234758439f15f78d03779e0759c"
+    },
+    {
+      "id": "three-d/material-metal",
+      "title": "3D shape \u00b7 metallic material",
+      "family": "3D shapes",
+      "mode": "Projected geometry, extrusion and material lighting",
+      "page": 28,
+      "framePx": {
+        "x": 288.0,
+        "y": 456.0,
+        "width": 240.0,
+        "height": 144.0
+      },
+      "cropPx": [
+        252,
+        420,
+        564,
+        636
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-28.png",
+      "referenceSha256": "47cae68a75b821fe561b0530519cea6df175a7293e025642d4a21ca0070c62f9",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-28.png",
+      "candidateSha256": "d9cebe65ca461faa6effc1a8c9d94e739f9eb7e4d5339591093c963148f5b1e1",
+      "meanAbsoluteChannelError": 0.4962805908348188,
+      "maximumChannelError": 244,
+      "inkIntersectionOverUnion": 0.9649301914905358,
+      "colorAgreementWithin16OnInkUnion": 0.8529330610893439,
+      "referenceInkPixels": 35889,
+      "candidateInkPixels": 35324,
+      "inkUnionPixels": 36242,
+      "limitation": "Projected geometry, extrusion and material lighting",
+      "beforeColorAgreement": 0.877316223242436,
+      "beforeSha256": "df3bf26ec5caa87f4371c9826fd8ab61e580b47770834050116a70f5fac049a2"
+    },
+    {
+      "id": "three-d/bevel-circle",
+      "title": "3D shape \u00b7 rounded bevel",
+      "family": "3D shapes",
+      "mode": "Projected geometry, extrusion and material lighting",
+      "page": 29,
+      "framePx": {
+        "x": 288.0,
+        "y": 456.0,
+        "width": 240.0,
+        "height": 144.0
+      },
+      "cropPx": [
+        252,
+        420,
+        564,
+        636
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-29.png",
+      "referenceSha256": "f10edcf7276d0663ef5f74e7891bf2641fb4be1c73552c8f7c3b8917ca97b012",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-29.png",
+      "candidateSha256": "6e0f074c0eba7618f8075b7052f896eb23582d6fba4d85601c68ef5d747a818a",
+      "meanAbsoluteChannelError": 0.39473549836601307,
+      "maximumChannelError": 247,
+      "inkIntersectionOverUnion": 0.9705590199216378,
+      "colorAgreementWithin16OnInkUnion": 0.8764968820705259,
+      "referenceInkPixels": 35889,
+      "candidateInkPixels": 35528,
+      "inkUnionPixels": 36242,
+      "limitation": "Projected geometry, extrusion and material lighting",
+      "beforeColorAgreement": 0.8801371757287461,
+      "beforeSha256": "95edc696b00a072d00c16027ae01311c0dea39e7aa49de307c82dcfd1aaf60de"
+    },
+    {
+      "id": "artistic/artisticPencilSketch",
+      "title": "Artistic effect \u00b7 saved cache control",
+      "family": "Artistic effects",
+      "mode": "Unchanged cache; regeneration is unmeasured",
+      "page": 30,
+      "framePx": {
+        "x": 288.0,
+        "y": 456.0,
+        "width": 240.0,
+        "height": 144.0
+      },
+      "cropPx": [
+        252,
+        420,
+        564,
+        636
+      ],
+      "referencePath": "output/playwright/office-art-gallery-20261106-v2/word-cairo-pages/page-30.png",
+      "referenceSha256": "80db51fb1c5d3fa80d9149cdc31236f33ca9d781b1e2a757e03b9e07b357e714",
+      "candidatePath": "output/playwright/office-art-gallery-20261106-v2/parser-after/page-30.png",
+      "candidateSha256": "f628b0af1fe3c7be0c54a8d18d555766f6a6d1e5962c9a8a098bd5c40770aeae",
+      "meanAbsoluteChannelError": 0.4050167731233908,
+      "maximumChannelError": 255,
+      "inkIntersectionOverUnion": 0.9586145238507239,
+      "colorAgreementWithin16OnInkUnion": 0.8685181980734844,
+      "referenceInkPixels": 34171,
+      "candidateInkPixels": 33742,
+      "inkUnionPixels": 34674,
+      "limitation": "Unchanged cache; regeneration is unmeasured",
+      "beforeColorAgreement": 0.8685181980734844,
+      "beforeSha256": "f628b0af1fe3c7be0c54a8d18d555766f6a6d1e5962c9a8a098bd5c40770aeae"
+    }
+  ]
+}
