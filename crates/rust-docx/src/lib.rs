@@ -1,13 +1,16 @@
 //! Native and WebAssembly-compatible Word document parsing, modeling, and serialization.
 
+pub mod bundle;
 pub mod chart;
 pub mod doc;
 pub mod emf;
+pub mod export;
 pub mod model;
 pub mod package;
 pub mod parse;
-pub mod revisions;
 pub mod review;
+pub mod revision_inlines;
+pub mod revisions;
 pub mod serialize;
 pub mod source_graph;
 pub mod structured;
@@ -17,6 +20,14 @@ pub mod xml;
 mod xml_index;
 pub mod zip;
 
+pub use bundle::{
+    extract_document_assets, extract_document_bundle, parse_document_bundle, DocumentBundle,
+    ExtractDocumentBundleOptions,
+};
+pub use export::{
+    export_document, ContentOverride, ExportOptions, ExportRequest, ExportedDocument, TableFormat,
+};
+pub use revision_inlines::{revision_inlines, InlineChange, RevisionInline};
 pub use chart::{extract_chart_data, ChartCategory, ChartData, ChartPoint, ChartSeries};
 pub use doc::{is_doc_format, parse_doc};
 pub use model::*;

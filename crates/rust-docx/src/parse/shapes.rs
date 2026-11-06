@@ -14,6 +14,7 @@ pub struct ParsedTextBoxParagraph {
     pub style: Option<crate::model::TextStyle>,
     pub align: Option<ParagraphAlignment>,
     pub images: Vec<ParsedTextBoxImage>,
+    pub text_fill: Option<(String, super::context::ThemeColorMap)>,
 }
 
 #[derive(Clone, Debug)]
@@ -28,6 +29,8 @@ pub struct ParsedTextBoxImage {
 pub struct ParsedTextBoxLayout {
     pub auto_fit_no_wrap: bool,
     pub wrap_text: bool,
+    pub from_word_art: bool,
+    pub anchor_center: bool,
     pub padding_left_px: Option<f64>,
     pub padding_top_px: Option<f64>,
     pub padding_right_px: Option<f64>,
@@ -56,6 +59,7 @@ pub fn parse_text_box_paragraphs(
     let mut has_visible_text = false;
     for paragraph_xml in paragraphs {
         let paragraph_text = super::paragraph::parse_run_text(&paragraph_xml);
+        let paragraph_text = paragraph_text.strip_suffix('\n').unwrap_or(&paragraph_text).to_owned();
         let images = super::images::parse_run_images(&paragraph_xml, context)
             .into_iter()
             .filter_map(|image| {
@@ -114,6 +118,15 @@ pub fn parse_text_box_paragraphs(
             style,
             align,
             images,
+            text_fill: crate::xml::extract_balanced_tag_slices(&run_properties_xml, "w14:textFill")
+                .into_iter().next().filter(|xml| xml.len() <= 16 * 1024)
+                .and_then(|xml| crate::xml::extract_direct_child_tag_ranges(xml).into_iter().next()
+                    .map(|range| xml[range.start..range.end].to_string()))
+                .and_then(|xml| {
+                    let normalized = xml.replace("w14:", "a:");
+                    Some((re::get(r"(\s)a:")?.replace_all(&normalized, "$1").into_owned(),
+                          context.styles().theme_colors.clone()))
+                }),
         });
     }
     if has_visible_text {
@@ -141,6 +154,8 @@ pub fn parse_text_box_layout(run_xml: &str) -> Option<ParsedTextBoxLayout> {
             auto_fit_no_wrap: get_attribute(&body_pr_xml, "wrap").as_deref() == Some("none")
                 && body_pr_xml.contains("<a:spAutoFit"),
             wrap_text: matches!(get_attribute(&body_pr_xml, "wrap").as_deref(), None | Some("square")),
+            from_word_art: matches!(get_attribute(&body_pr_xml, "fromWordArt").as_deref(), Some("1" | "true")),
+            anchor_center: matches!(get_attribute(&body_pr_xml, "anchorCtr").as_deref(), Some("1" | "true")),
             padding_left_px: emu_to_pixels(get_attribute(&body_pr_xml, "lIns").as_deref()),
             padding_top_px: emu_to_pixels(get_attribute(&body_pr_xml, "tIns").as_deref()),
             padding_right_px: emu_to_pixels(get_attribute(&body_pr_xml, "rIns").as_deref()),
@@ -156,6 +171,8 @@ pub fn parse_text_box_layout(run_xml: &str) -> Option<ParsedTextBoxLayout> {
     Some(ParsedTextBoxLayout {
         auto_fit_no_wrap: false,
         wrap_text: false,
+        from_word_art: false,
+        anchor_center: false,
         padding_left_px: super::images::css_length_to_pixels(values.next()),
         padding_top_px: super::images::css_length_to_pixels(values.next()),
         padding_right_px: super::images::css_length_to_pixels(values.next()),
@@ -182,7 +199,7 @@ pub(crate) fn render_bounded_text_box_svg(
     render_text_box_svg_impl(paragraphs, Some(width_px), Some(height_px), layout, true)
 }
 
-fn text_box_line_slices(text: &str, wrap_width: Option<f64>, font_size_px: f64) -> Vec<&str> {
+fn text_box_line_slices<'a>(text: &'a str, wrap_width: Option<f64>, font_size_px: f64, style: Option<&crate::model::TextStyle>) -> Vec<&'a str> {
     let mut lines = Vec::new();
     let break_space = |ch: char| ch.is_whitespace() && !matches!(ch, '\u{a0}' | '\u{202f}');
     for explicit_line in text.split('\n') {
@@ -194,6 +211,8 @@ fn text_box_line_slices(text: &str, wrap_width: Option<f64>, font_size_px: f64) 
             lines.push(explicit_line);
             continue;
         };
+        let advances = rust_office_art::text::cluster_advances(explicit_line, art_font(style, font_size_px))
+            .map(|values| values.into_iter().collect::<std::collections::HashMap<_, _>>());
         let mut start = 0;
         loop {
             if lines.len() >= 4096 {
@@ -205,8 +224,10 @@ fn text_box_line_slices(text: &str, wrap_width: Option<f64>, font_size_px: f64) 
             let mut split = None;
             for (offset, ch) in remaining.char_indices() {
                 let mut encoded = [0; 4];
-                let advance = estimate_text_width_px(ch.encode_utf8(&mut encoded), font_size_px);
-                if offset > 0 && width + advance > wrap_width {
+                let advance = advances.as_ref().map(|values| values.get(&(start + offset)).copied().unwrap_or(0.0))
+                    .unwrap_or_else(|| estimate_text_width_px(ch.encode_utf8(&mut encoded), font_size_px));
+                let cluster_boundary = advances.as_ref().is_none_or(|values| values.contains_key(&(start + offset)));
+                if offset > 0 && cluster_boundary && width + advance > wrap_width {
                     split = Some(last_break.unwrap_or(offset));
                     break;
                 }
@@ -238,6 +259,16 @@ struct TextBoxRenderLine<'a> {
     style: &'a Option<crate::model::TextStyle>,
     align: Option<ParagraphAlignment>,
     images: &'a [ParsedTextBoxImage],
+    text_fill: &'a Option<(String, super::context::ThemeColorMap)>,
+}
+
+struct TextFillContext<'a>(&'a super::context::ThemeColorMap);
+
+impl rust_office_art::PictureContext for TextFillContext<'_> {
+    fn resolve_color(&self, xml: &str) -> Option<rust_office_art::ResolvedColor> {
+        let color = super::colors::resolve_drawing_color_from_xml(Some(xml), self.0)?;
+        Some(rust_office_art::ResolvedColor { color: color.color, opacity: color.opacity })
+    }
 }
 
 fn render_text_box_svg_impl(
@@ -268,12 +299,13 @@ fn render_text_box_svg_impl(
         let font_size_px = (paragraph.style.as_ref().and_then(|style| style.font_size_pt)
             .unwrap_or(12.0) * 96.0 / 72.0).round().max(10.0);
         let text_lines = if bounded && paragraph.images.is_empty() {
-            text_box_line_slices(&paragraph.text, wrap_text.then_some(available_text_width), font_size_px)
+            text_box_line_slices(&paragraph.text, wrap_text.then_some(available_text_width), font_size_px, paragraph.style.as_ref())
         } else {
             vec![paragraph.text.as_str()]
         };
         text_lines.into_iter().enumerate().map(move |(index, text)| TextBoxRenderLine {
             text, style: &paragraph.style, align: paragraph.align,
+            text_fill: &paragraph.text_fill,
             images: if index == 0 { &paragraph.images } else { &[] },
         })
     }).collect();
@@ -313,13 +345,15 @@ fn render_text_box_svg_impl(
         .unwrap_or(top_inset))
     .round() as i64)
         .max(if bounded { 0 } else { 8 }) as f64;
-    let auto_fit_no_wrap = layout.is_some_and(|layout| layout.auto_fit_no_wrap)
+    let word_art = layout.is_some_and(|layout| layout.from_word_art);
+    let auto_fit_no_wrap = layout.is_some_and(|layout| layout.auto_fit_no_wrap || (layout.from_word_art && !layout.wrap_text))
         && paragraphs.iter().all(|paragraph| paragraph.images.is_empty());
     let intrinsic_text_width = if auto_fit_no_wrap {
         paragraphs.iter().map(|paragraph| {
             let font_size_px = (paragraph.style.as_ref().and_then(|style| style.font_size_pt)
-                .unwrap_or(12.0) * 96.0 / 72.0).round().max(10.0);
-            estimate_text_width_px(&paragraph.text, font_size_px)
+                .unwrap_or(12.0) * 96.0 / 72.0).max(10.0);
+            let font_size_px = if word_art { font_size_px } else { font_size_px.round() };
+            measured_text_width_px(paragraph.text, font_size_px, paragraph.style.as_ref())
         }).fold(0.0_f64, f64::max)
     } else {
         0.0
@@ -381,8 +415,9 @@ fn render_text_box_svg_impl(
             .as_ref()
             .and_then(|s| s.font_size_pt)
             .unwrap_or(12.0);
-        let font_size_px = ((font_size_pt * 96.0) / 72.0).round().max(10.0);
-        let estimated_text_width = estimate_text_width_px(&paragraph.text, font_size_px);
+        let font_size_px = (font_size_pt * 96.0) / 72.0;
+        let font_size_px = if word_art { font_size_px } else { font_size_px.round() }.max(10.0);
+        let estimated_text_width = measured_text_width_px(paragraph.text, font_size_px, paragraph.style.as_ref());
         let overflow_ratio = if estimated_text_width > 0.0 {
             max_text_width / estimated_text_width
         } else {
@@ -392,9 +427,8 @@ fn render_text_box_svg_impl(
             font_size_px * overflow_ratio
         } else {
             font_size_px
-        } * vertical_scale)
-            .round()
-            .max(6.0);
+        } * vertical_scale).max(6.0);
+        let fitted_font_size_px = if word_art { fitted_font_size_px } else { fitted_font_size_px.round() };
         let text_length_attr = if estimated_text_width > max_text_width + 1.0 {
             format!(
                 r#" textLength="{}" lengthAdjust="spacingAndGlyphs""#,
@@ -421,7 +455,12 @@ fn render_text_box_svg_impl(
         let text_align = paragraph.align.unwrap_or(ParagraphAlignment::Left);
         let (anchor, x) = if auto_fit_no_wrap {
             let remaining_width = (intrinsic_text_width - estimated_text_width).max(0.0);
-            ("start", horizontal_inset + match text_align {
+            let center_offset = if layout.is_some_and(|layout| layout.anchor_center) {
+                (available_text_width - intrinsic_text_width) / 2.0
+            } else {
+                0.0
+            };
+            ("start", horizontal_inset + center_offset + match text_align {
                 ParagraphAlignment::Center => remaining_width / 2.0,
                 ParagraphAlignment::Right => remaining_width,
                 _ => 0.0,
@@ -455,6 +494,15 @@ fn render_text_box_svg_impl(
         .join(" ");
         if !paragraph.text.is_empty() {
             let mut text_defs = String::new();
+            let text_fill = paragraph.text_fill.as_ref().and_then(|(xml, theme)|
+                rust_office_art::render_text_fill(xml, &format!("text-fill-{paragraph_index}"), &TextFillContext(theme)));
+            let fill_attributes = if let Some(fill) = text_fill {
+                text_defs.push_str(&fill.definitions);
+                fill.attributes
+            } else {
+                format!(r#"fill="{}""#, escape_xml_text(paragraph.style.as_ref()
+                    .and_then(|style| style.color.as_deref()).unwrap_or("#111111")))
+            };
             let effect_attributes = super::text_effects::svg_attributes(
                 paragraph.style.as_ref(), &format!("text-effect-{paragraph_index}"),
                 safe_width, safe_height, &mut text_defs,
@@ -462,9 +510,13 @@ fn render_text_box_svg_impl(
             if !text_defs.is_empty() {
                 lines.push(format!("<defs>{text_defs}</defs>"));
             }
+            let (text_y, baseline_attribute) = if word_art {
+                (cursor_y - line_height / 2.0, r#" dominant-baseline="central""#)
+            } else {
+                (cursor_y, "")
+            };
             lines.push(format!(
-                r#"<text xml:space="preserve" x="{x:.0}" y="{cursor_y:.0}" text-anchor="{anchor}" font-size="{fitted_font_size_px:.0}" fill="{}" font-family="{}" font-weight="{}" font-style="{}"{}{}{effect_attributes}>{}</text>"#,
-                paragraph.style.as_ref().and_then(|s| s.color.clone()).unwrap_or_else(|| "#111111".to_string()),
+                r#"<text xml:space="preserve" x="{x:.0}" y="{text_y:.0}"{baseline_attribute} text-anchor="{anchor}" font-size="{fitted_font_size_px}" {fill_attributes} font-family="{}" font-weight="{}" font-style="{}"{}{}{effect_attributes}>{}</text>"#,
                 escape_xml_text(&resolve_svg_font_family(paragraph.style.as_ref().and_then(|s| s.font_family.as_deref()))),
                 if paragraph.style.as_ref().and_then(|s| s.bold).unwrap_or(false) { "700" } else { "400" },
                 if paragraph.style.as_ref().and_then(|s| s.italic).unwrap_or(false) { "italic" } else { "normal" },
@@ -1111,16 +1163,7 @@ pub fn render_standalone_word_shape_svg(
                     let local = DrawingAffine::frame(off_x_px, off_y_px, shared_width, shared_height, &transform_xml)?;
                     include_group_paint(&mut paint_canvas, matrix.compose(local), [bx, by, bx + bw, by + bh])?;
                 }
-                let mut svg = rendered.svg;
-                let ids = re::get_unchecked(r#"\bid="([^"]+)""#).captures_iter(&svg)
-                    .filter_map(|value| value.get(1).map(|value| value.as_str().to_string()))
-                    .collect::<Vec<_>>();
-                for id in ids {
-                    let scoped = format!("office-art-{shape_index}-{id}");
-                    svg = svg.replace(&format!(r#"id="{id}""#), &format!(r#"id="{scoped}""#))
-                        .replace(&format!("url(#{id})"), &format!("url(#{scoped})"))
-                        .replace(&format!(r##"href="#{id}""##), &format!(r##"href="#{scoped}""##));
-                }
+                let mut svg = scope_shape_svg_ids(rendered.svg, &format!("office-art-{shape_index}"));
                 svg = svg.replacen("<svg ", &format!(r#"<svg x="{bx}" y="{by}" "#), 1);
                 let shared_transform = svg_grouped_shape_transform(off_x_px, off_y_px, shared_width, shared_height, &transform_xml);
                 elements.push(drawing.wrap(format!(r#"<g{shared_transform}>{svg}</g>"#)));
@@ -1443,7 +1486,20 @@ fn render_shared_shape(
     if width < 0.0 || height < 0.0 {
         return None;
     }
-    let mut rendered = super::picture::render_shape(properties, style, width, height, context)?;
+    let mut rendered = super::picture::render_shape(properties, style, width, height, context)
+        .or_else(|| {
+            let ranges = crate::xml::extract_direct_child_tag_ranges(properties);
+            if !ranges.iter().any(|range| matches!(range.tag_name.as_str(), "a:scene3d" | "a:sp3d")) {
+                return None;
+            }
+            let mut planar = properties.to_string();
+            for range in ranges.iter().rev().filter(|range| matches!(range.tag_name.as_str(), "a:scene3d" | "a:sp3d")) {
+                planar.replace_range(range.start..range.end, "");
+            }
+            let rendered = super::picture::render_shape(&planar, style, width, height, context)?;
+            context.push_warning("3D shape lighting and extrusion are not rendered; the original planar geometry and paint are retained");
+            Some(rendered)
+        })?;
     rendered.svg = rendered.svg.replacen("<svg ", r#"<svg data-office-art="true" "#, 1);
     let paragraphs = parse_text_box_paragraphs(shape, context);
     if !paragraphs.is_empty() {
@@ -1460,8 +1516,15 @@ fn render_shared_shape(
         let (text_width, text_height, local_transform) = text_frame
             .unwrap_or((width, height, DrawingAffine([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])));
         let transform = shape_transform.compose(local_transform);
-        let text = render_bounded_text_box_svg(&paragraphs, text_width, text_height,
-            parse_text_box_layout(shape).as_ref());
+        let layout = parse_text_box_layout(shape);
+        let text = render_word_art_text(shape, &paragraphs, text_width, text_height, layout.as_ref(), context)
+            .unwrap_or_else(|| {
+                if crate::xml::extract_balanced_tag_slices(shape, "a:prstTxWarp").into_iter().any(|warp|
+                    get_attribute(warp, "prst").is_some_and(|preset| preset != "textNoShape")) {
+                    context.push_warning("WordArt deformation could not be applied to this text run; text is retained without deformation");
+                }
+                render_bounded_text_box_svg(&paragraphs, text_width, text_height, layout.as_ref())
+            });
         if text_frame.is_some() {
             let old = rendered.paint_bounds.as_ref();
             let mut bounds = old.map_or([0.0, 0.0, width, height], |bounds|
@@ -1484,12 +1547,154 @@ fn render_shared_shape(
         let ending = rendered.svg.rfind("</svg>")?;
         rendered.svg.insert_str(ending, &format!(r#"<g transform="{}">{text}</g>"#, transform.markup()));
     }
-    if crate::xml::extract_balanced_tag_slices(shape, "a:prstTxWarp").into_iter().any(|warp| {
-        get_attribute(warp, "prst").is_some_and(|preset| !matches!(preset.as_str(), "textNoShape" | "textPlain"))
-    }) {
-        context.push_warning("WordArt text deformation is preserved but not applied to text layout");
-    }
     Some(rendered)
+}
+
+fn scope_shape_svg_ids(mut svg: String, prefix: &str) -> String {
+    let ids = re::get_unchecked(r#"\bid="([^"]+)""#).captures_iter(&svg)
+        .filter_map(|value| value.get(1).map(|value| value.as_str().to_string()))
+        .collect::<Vec<_>>();
+    for id in ids {
+        let scoped = format!("{prefix}-{id}");
+        svg = svg.replace(&format!(r#"id="{id}""#), &format!(r#"id="{scoped}""#))
+            .replace(&format!("url(#{id})"), &format!("url(#{scoped})"))
+            .replace(&format!(r##"href="#{id}""##), &format!(r##"href="#{scoped}""##));
+    }
+    svg
+}
+
+fn render_word_art_text(
+    shape: &str, paragraphs: &[ParsedTextBoxParagraph], width: f64, height: f64,
+    layout: Option<&ParsedTextBoxLayout>,
+    context: &ParseContext<'_, impl std::borrow::Borrow<super::context::ParsedStyleSheet>>,
+) -> Option<String> {
+    use rust_office_art::text::{outline_text, transform_path, warp_text_aligned};
+    let theme = &context.styles().theme_colors;
+    let warp = crate::xml::extract_balanced_tag_slices(shape, "a:prstTxWarp").into_iter().next();
+    let deformed = warp.and_then(|xml| get_attribute(xml, "prst"))
+        .is_some_and(|preset| preset != "textNoShape");
+    let from_word_art = layout.is_some_and(|layout| layout.from_word_art);
+    let path_text = from_word_art && warp.and_then(|xml| get_attribute(xml, "prst"))
+        .is_some_and(|preset| matches!(preset.as_str(), "textArchUp" | "textArchDown" | "textCircle"));
+    let path_font_scale = if path_text { 72.0 / 96.0 } else { 1.0 };
+    let has_text_3d = shape.contains("<w14:props3d");
+    let has_effects = paragraphs.iter().any(|p| p.text_fill.is_some()
+        || p.style.as_ref().is_some_and(|s| s.text_outline.is_some() || s.text_shadow.is_some()));
+    if (!from_word_art && !deformed && !has_text_3d && !has_effects) || paragraphs.iter().any(|p| !p.images.is_empty()) {
+        return None;
+    }
+    let paragraph_xml = crate::xml::extract_balanced_tag_slices(shape, "w:p");
+    if layout.is_some_and(|l| l.wrap_text) || paragraph_xml.iter().any(|xml|
+        crate::xml::extract_balanced_tag_slices(xml, "w:r").len() > 1) {
+        return None;
+    }
+    let font_scale = crate::xml::extract_balanced_tag_slices(shape, "a:normAutofit").into_iter().next()
+        .and_then(|xml| get_attribute(xml, "fontScale")).and_then(|value| value.parse::<f64>().ok())
+        .filter(|value| value.is_finite() && *value > 0.0 && *value <= 100000.0)
+        .map_or(1.0, |value| value / 100000.0);
+    let mut outlined = Vec::new();
+    let mut line_layouts = Vec::new();
+    for (paragraph_index, paragraph) in paragraphs.iter().enumerate() {
+        let size = paragraph.style.as_ref().and_then(|s| s.font_size_pt).unwrap_or(12.0) * 4.0 / 3.0 * font_scale * path_font_scale;
+        let spacing = paragraph_xml.get(paragraph_index)
+            .and_then(|xml| super::style::parse_paragraph_style(xml, context)).and_then(|style| style.spacing);
+        let lines: Vec<_> = paragraph.text.split('\n').collect();
+        for (line_index, line) in lines.iter().enumerate() {
+            let text = outline_text(line, art_font(paragraph.style.as_ref(), size))?;
+            let natural_height = text.ascent + text.descent + text.line_gap;
+            let line_height = spacing.as_ref().and_then(|s| s.line_twips.map(|line| (s, line)))
+                .map_or(natural_height, |(spacing, line)| match spacing.line_rule {
+                    Some(crate::model::ParagraphLineRule::Exact) => (line as f64 / 15.0).max(0.0),
+                    Some(crate::model::ParagraphLineRule::AtLeast) => natural_height.max(line as f64 / 15.0),
+                    _ => natural_height * (line as f64 / 240.0).max(0.0),
+                });
+            let before = if line_index == 0 { spacing.as_ref().and_then(|s| s.before_twips).unwrap_or(0).max(0) as f64 / 15.0 } else { 0.0 };
+            let after = if line_index + 1 == lines.len() { spacing.as_ref().and_then(|s| s.after_twips).unwrap_or(0).max(0) as f64 / 15.0 } else { 0.0 };
+            let leading = (line_height - natural_height) / 2.0;
+            line_layouts.push((before + leading + text.ascent, before + line_height + after));
+            outlined.push((paragraph_index, paragraph, text));
+        }
+    }
+    let total_height: f64 = line_layouts.iter().map(|(_, height)| height).sum();
+    let intrinsic_width = outlined.iter().map(|(_, _, text)| text.advance_width / path_font_scale).fold(0.0_f64, f64::max);
+    let left = layout.and_then(|l| l.padding_left_px).unwrap_or(0.0);
+    let right = layout.and_then(|l| l.padding_right_px).unwrap_or(0.0);
+    let top = layout.and_then(|l| l.padding_top_px).unwrap_or(0.0);
+    let bottom = layout.and_then(|l| l.padding_bottom_px).unwrap_or(0.0);
+    let available_width = (width - left - right).max(1.0);
+    let available_height = (height - top - bottom).max(1.0);
+    let unwrapped = layout.is_some_and(|l| !l.wrap_text);
+    let text_width = if (from_word_art && unwrapped) || layout.is_some_and(|l| l.auto_fit_no_wrap) {
+        intrinsic_width
+    } else { available_width };
+    let center_offset = if layout.is_some_and(|l| l.anchor_center) {
+        (available_width - text_width) / 2.0
+    } else { 0.0 };
+    let mut y = top + match layout.and_then(|l| l.vertical_anchor.as_deref()) {
+        Some("center") => (available_height - total_height) / 2.0,
+        Some("bottom") => available_height - total_height,
+        _ => 0.0,
+    };
+    let mut output = String::new();
+    for (index, (paragraph_index, paragraph, text)) in outlined.iter().enumerate() {
+        let align = paragraph.align.unwrap_or(ParagraphAlignment::Left);
+        let x = left + center_offset + match align {
+            ParagraphAlignment::Center => (text_width - text.advance_width) / 2.0,
+            ParagraphAlignment::Right => text_width - text.advance_width,
+            _ => 0.0,
+        };
+        let path = if deformed {
+            if outlined.len() != 1 { return None; }
+            let alignment = match align { ParagraphAlignment::Center => 0.5, ParagraphAlignment::Right => 1.0, _ => 0.0 };
+            let path = warp_text_aligned(text, warp?, text_width, available_height, from_word_art, alignment)?;
+            let path_top = if path_text {
+                text.ascent + text.ink_bounds[1] + 0.65 * (text.ink_bounds[3] - text.ink_bounds[1])
+            } else { 0.0 };
+            transform_path(&path, 1.0, 1.0, left + center_offset, top + path_top)?
+        } else {
+            transform_path(&text.path, 1.0, 1.0, x, y + line_layouts[index].0)?
+        };
+        if let Some(run_xml) = paragraph_xml.get(*paragraph_index) {
+            let scene = crate::xml::extract_balanced_tag_slices(run_xml, "w14:scene3d").into_iter().next();
+            let properties = crate::xml::extract_balanced_tag_slices(run_xml, "w14:props3d").into_iter().next();
+            if let (Some(scene), Some(properties)) = (scene, properties) {
+                let normalized = format!("<a:spPr>{scene}{properties}</a:spPr>")
+                    .replace("w14:", "a:").replace("a:props3d", "a:sp3d");
+                let normalized = re::get(r"(\s)a:")?.replace_all(&normalized, "$1");
+                let solid = format!(r#"<a:solidFill><a:srgbClr val="{}"/></a:solidFill>"#,
+                    paragraph.style.as_ref().and_then(|s| s.color.as_deref()).unwrap_or("#111111").trim_start_matches('#'));
+                let fill = paragraph.text_fill.as_ref().map(|(xml, _)| xml.as_str()).unwrap_or(&solid);
+                let outline = crate::xml::extract_balanced_tag_slices(run_xml, "w14:textOutline").into_iter().next()
+                    .map(|xml| xml.replace("w14:", "a:").replace("a:textOutline", "a:ln"))
+                    .map(|xml| re::get_unchecked(r"(\s)a:").replace_all(&xml, "$1").into_owned());
+                if let Some(rendered) = rust_office_art::render_3d_path(&path, &normalized, fill, outline.as_deref(), width, height, &TextFillContext(theme)) {
+                    let x = rendered.paint_bounds.as_ref().map_or(0.0, |b| b.x_px);
+                    let paint_y = rendered.paint_bounds.as_ref().map_or(0.0, |b| b.y_px);
+                    let svg = scope_shape_svg_ids(rendered.svg, &format!("wordart-{index}"));
+                    output.push_str(&svg.replacen("<svg ", &format!(r#"<svg x="{x}" y="{paint_y}" "#), 1));
+                    y += line_layouts[index].1;
+                    continue;
+                }
+                context.push_warning("Text 3D settings could not be rendered; glyph outlines retain their planar paint");
+            }
+        }
+        let mut definitions = String::new();
+        let fill = paragraph.text_fill.as_ref().and_then(|(xml, theme)|
+            rust_office_art::render_text_fill(xml, &format!("wordart-fill-{index}"), &TextFillContext(theme)));
+        let attributes = if let Some(fill) = fill {
+            definitions.push_str(&fill.definitions);
+            fill.attributes
+        } else {
+            format!(r#"fill="{}""#, escape_xml_text(paragraph.style.as_ref()
+                .and_then(|s| s.color.as_deref()).unwrap_or("#111111")))
+        };
+        let effects = super::text_effects::svg_attributes(paragraph.style.as_ref(),
+            &format!("wordart-effect-{index}"), width, height, &mut definitions);
+        if !definitions.is_empty() { output.push_str(&format!("<defs>{definitions}</defs>")); }
+        output.push_str(&format!(r#"<path d="{path}" {attributes}{effects}/>"#));
+        y += line_layouts[index].1;
+    }
+    Some(output)
 }
 
 fn independent_text_frame(shape: &str, width: f64, height: f64) -> Option<(f64, f64, DrawingAffine)> {
@@ -2457,6 +2662,20 @@ fn format_js_number(value: f64) -> String {
 fn format_fixed2(value: f64) -> String {
     let value = if value == 0.0 { 0.0 } else { value };
     format!("{value:.2}")
+}
+
+fn measured_text_width_px(text: &str, font_size_px: f64, style: Option<&crate::model::TextStyle>) -> f64 {
+    rust_office_art::text::measure_text(text, art_font(style, font_size_px))
+        .unwrap_or_else(|| estimate_text_width_px(text, font_size_px))
+}
+
+fn art_font(style: Option<&crate::model::TextStyle>, size_px: f64) -> rust_office_art::text::TextFont<'_> {
+    rust_office_art::text::TextFont {
+        family: style.and_then(|s| s.font_family.as_deref()).unwrap_or("Calibri"),
+        size_px,
+        bold: style.and_then(|s| s.bold).unwrap_or(false),
+        italic: style.and_then(|s| s.italic).unwrap_or(false),
+    }
 }
 
 fn estimate_text_width_px(text: &str, font_size_px: f64) -> f64 {

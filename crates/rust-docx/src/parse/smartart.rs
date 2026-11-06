@@ -341,6 +341,7 @@ pub(super) fn render_diagram(
             style: None,
             align: None,
             images: Vec::new(),
+            text_fill: None,
         })
         .collect::<Vec<_>>();
     if paragraphs.is_empty() {

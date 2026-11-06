@@ -5,6 +5,8 @@ use image::ImageEncoder;
 
 #[path = "pattern_data.rs"]
 mod pattern_data;
+#[path = "scene3d.rs"]
+mod scene3d;
 
 use crate::geometry::{geometry_paths, PathFill};
 use crate::xml::{escape_xml_text, extract_direct_child_tag_ranges, get_attribute_ref};
@@ -178,6 +180,50 @@ fn bitmap_fill(
 struct Paint {
     value: String,
     opacity: f64,
+}
+
+#[derive(Clone, Debug)]
+pub struct TextFill {
+    pub attributes: String,
+    pub definitions: String,
+}
+
+pub fn render_text_fill(
+    fill_xml: &str,
+    id: &str,
+    context: &impl PictureContext,
+) -> Option<TextFill> {
+    if fill_xml.len() > 16 * 1024
+        || id.is_empty()
+        || id.len() > 128
+        || !id
+            .bytes()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, b'-' | b'_'))
+        || !matches!(local_name(fill_xml)?, "noFill" | "solidFill" | "gradFill")
+        || child(fill_xml, "path")
+            .is_some_and(|path| get_attribute_ref(path, "path") == Some("rect"))
+    {
+        return None;
+    }
+    let mut definitions = String::new();
+    let fill = paint(
+        Some(fill_xml),
+        false,
+        id,
+        1.0,
+        1.0,
+        PathFill::Norm,
+        context,
+        &mut definitions,
+    )?;
+    definitions = definitions.replace(
+        "gradientUnits=\"userSpaceOnUse\"",
+        "gradientUnits=\"objectBoundingBox\"",
+    );
+    Some(TextFill {
+        attributes: format!(r#"fill="{}" fill-opacity="{}""#, fill.value, fill.opacity),
+        definitions,
+    })
 }
 
 fn resolved_paint(xml: &str, mode: PathFill, context: &impl PictureContext) -> Option<Paint> {
@@ -741,12 +787,60 @@ pub fn render_shape(
     {
         return None;
     }
-    if child(properties_xml, "scene3d").is_some()
-        || child(properties_xml, "sp3d").is_some_and(|xml| !is_empty_element(xml))
+    let paths = geometry_paths(properties_xml, width, height)?;
+    render_shape_paths(&paths, properties_xml, style_xml, width, height, context)
+}
+
+pub fn render_3d_path(
+    path: &str,
+    properties_xml: &str,
+    fill_xml: &str,
+    line_xml: Option<&str>,
+    width: f64,
+    height: f64,
+    context: &impl PictureContext,
+) -> Option<RenderedPicture> {
+    use kurbo::Shape;
+    if path.len() > 4 * 1024 * 1024
+        || !width.is_finite()
+        || !height.is_finite()
+        || width <= 0.0
+        || height <= 0.0
+        || width > 1_000_000.0
+        || height > 1_000_000.0
+        || properties_xml.len() > 4 * 1024 * 1024
+        || fill_xml.len() > 1024 * 1024
+        || line_xml.is_some_and(|xml| xml.len() > 1024 * 1024)
     {
         return None;
     }
-    let paths = geometry_paths(properties_xml, width, height)?;
+    let bounds = kurbo::BezPath::from_svg(path).ok()?.bounding_box();
+    let path = crate::geometry::GeometryPath {
+        d: path.to_string(),
+        fill: PathFill::Norm,
+        stroke: line_xml.is_some(),
+        closed: true,
+        bounds: [bounds.x0, bounds.y0, bounds.x1, bounds.y1],
+    };
+    let inner = extract_direct_child_tag_ranges(properties_xml)
+        .into_iter()
+        .map(|tag| &properties_xml[tag.start..tag.end])
+        .collect::<String>();
+    let properties = format!(
+        "<a:spPr>{inner}{fill_xml}{}</a:spPr>",
+        line_xml.unwrap_or("")
+    );
+    render_shape_paths(&[path], &properties, "", width, height, context)
+}
+
+fn render_shape_paths(
+    paths: &[crate::geometry::GeometryPath],
+    properties_xml: &str,
+    style_xml: &str,
+    width: f64,
+    height: f64,
+    context: &impl PictureContext,
+) -> Option<RenderedPicture> {
     if paths.is_empty() {
         return None;
     }
@@ -785,51 +879,72 @@ pub fn render_shape(
     let mut body = String::new();
     let mut silhouette = String::new();
     let mut outside = 0.0f64;
+    let mut scene_bounds = None;
     let mut bitmap_ready = false;
     let mut fill_cache: Vec<(PathFill, Paint)> = Vec::new();
-    for (index, path) in paths.iter().enumerate() {
-        if !path
-            .bounds
-            .into_iter()
-            .all(|value| value.is_finite() && value.abs() <= 100_000_000.0)
-        {
-            return None;
-        }
-        outside = outside
-            .max(-path.bounds[0])
-            .max(-path.bounds[1])
-            .max(path.bounds[2] - width)
-            .max(path.bounds[3] - height);
-        if !matches!(path.fill, PathFill::None)
-            && fill.is_some_and(|xml| local_name(xml) == Some("blipFill"))
-        {
-            if !bitmap_ready {
-                bitmap_fill(fill?, width, height, context, &mut defs)?;
-                bitmap_ready = true;
+    let three_dimensional = child(properties_xml, "scene3d").is_some()
+        || child(properties_xml, "sp3d").is_some_and(|xml| !is_empty_element(xml))
+        || child(properties_xml, "props3d").is_some();
+    if three_dimensional {
+        let scene = scene3d::render(
+            paths,
+            properties_xml,
+            fill,
+            line,
+            width,
+            height,
+            context,
+            &mut defs,
+        )?;
+        body = scene.body;
+        silhouette = scene.silhouette;
+        outside = scene.outside;
+        scene_bounds = Some(scene.bounds);
+    } else {
+        for (index, path) in paths.iter().enumerate() {
+            if !path
+                .bounds
+                .into_iter()
+                .all(|value| value.is_finite() && value.abs() <= 100_000_000.0)
+            {
+                return None;
             }
-            let clip = format!("shape-bitmap-clip-{index}");
-            let _ = write!(
-                defs,
-                r##"<clipPath id="{clip}"><path d="{}"/></clipPath>"##,
-                path.d
-            );
-            let filter = if let Some((slope, intercept)) = color_adjustment(path.fill) {
-                let id = format!("shape-bitmap-shade-{index}");
+            outside = outside
+                .max(-path.bounds[0])
+                .max(-path.bounds[1])
+                .max(path.bounds[2] - width)
+                .max(path.bounds[3] - height);
+            if !matches!(path.fill, PathFill::None)
+                && fill.is_some_and(|xml| local_name(xml) == Some("blipFill"))
+            {
+                if !bitmap_ready {
+                    bitmap_fill(fill?, width, height, context, &mut defs)?;
+                    bitmap_ready = true;
+                }
+                let clip = format!("shape-bitmap-clip-{index}");
                 let _ = write!(
                     defs,
-                    r##"<filter id="{id}" color-interpolation-filters="sRGB"><feComponentTransfer><feFuncR type="linear" slope="{slope}" intercept="{intercept}"/><feFuncG type="linear" slope="{slope}" intercept="{intercept}"/><feFuncB type="linear" slope="{slope}" intercept="{intercept}"/></feComponentTransfer></filter>"##
+                    r##"<clipPath id="{clip}"><path d="{}"/></clipPath>"##,
+                    path.d
                 );
-                format!(r##" filter="url(#{id})""##)
+                let filter = if let Some((slope, intercept)) = color_adjustment(path.fill) {
+                    let id = format!("shape-bitmap-shade-{index}");
+                    let _ = write!(
+                        defs,
+                        r##"<filter id="{id}" color-interpolation-filters="sRGB"><feComponentTransfer><feFuncR type="linear" slope="{slope}" intercept="{intercept}"/><feFuncG type="linear" slope="{slope}" intercept="{intercept}"/><feFuncB type="linear" slope="{slope}" intercept="{intercept}"/></feComponentTransfer></filter>"##
+                    );
+                    format!(r##" filter="url(#{id})""##)
+                } else {
+                    String::new()
+                };
+                let _ = write!(
+                    body,
+                    r##"<g clip-path="url(#{clip})"{filter}><use xlink:href="#shape-bitmap"/></g>"##
+                );
             } else {
-                String::new()
-            };
-            let _ = write!(
-                body,
-                r##"<g clip-path="url(#{clip})"{filter}><use xlink:href="#shape-bitmap"/></g>"##
-            );
-        } else {
-            let fill =
-                if let Some((_, cached)) = fill_cache.iter().find(|(mode, _)| *mode == path.fill) {
+                let fill = if let Some((_, cached)) =
+                    fill_cache.iter().find(|(mode, _)| *mode == path.fill)
+                {
                     cached.clone()
                 } else {
                     let rendered = paint(
@@ -845,40 +960,41 @@ pub fn render_shape(
                     fill_cache.push((path.fill, rendered.clone()));
                     rendered
                 };
-            if fill.value != "none" {
+                if fill.value != "none" {
+                    let _ = write!(
+                        body,
+                        r##"<path d="{}" fill="{}" fill-opacity="{}" stroke="none"/>"##,
+                        path.d, fill.value, fill.opacity
+                    );
+                }
+            }
+            if path.stroke && stroke.width > 0.0 {
+                if !stroke.compound.is_empty() {
+                    compound_outline(&path.d, &stroke, index, path.bounds, &mut defs, &mut body);
+                    silhouette.push_str(&path.d);
+                    silhouette.push(' ');
+                    continue;
+                }
+                let clip = if stroke.inset && path.closed {
+                    let id = format!("shape-outline-{index}");
+                    let _ = write!(
+                        defs,
+                        r##"<clipPath id="{id}"><path d="{}"/></clipPath>"##,
+                        path.d
+                    );
+                    format!(r##" clip-path="url(#{id})""##)
+                } else {
+                    String::new()
+                };
                 let _ = write!(
                     body,
-                    r##"<path d="{}" fill="{}" fill-opacity="{}" stroke="none"/>"##,
-                    path.d, fill.value, fill.opacity
+                    r##"<path d="{}" fill="none" {}{clip}/>"##,
+                    path.d, stroke.attributes
                 );
             }
+            silhouette.push_str(&path.d);
+            silhouette.push(' ');
         }
-        if path.stroke && stroke.width > 0.0 {
-            if !stroke.compound.is_empty() {
-                compound_outline(&path.d, &stroke, index, path.bounds, &mut defs, &mut body);
-                silhouette.push_str(&path.d);
-                silhouette.push(' ');
-                continue;
-            }
-            let clip = if stroke.inset && path.closed {
-                let id = format!("shape-outline-{index}");
-                let _ = write!(
-                    defs,
-                    r##"<clipPath id="{id}"><path d="{}"/></clipPath>"##,
-                    path.d
-                );
-                format!(r##" clip-path="url(#{id})""##)
-            } else {
-                String::new()
-            };
-            let _ = write!(
-                body,
-                r##"<path d="{}" fill="none" {}{clip}/>"##,
-                path.d, stroke.attributes
-            );
-        }
-        silhouette.push_str(&path.d);
-        silhouette.push(' ');
     }
     let transform = child(properties_xml, "xfrm").unwrap_or("");
     let rotation = (number(transform, "rot", 0.0)? / 60000.0).rem_euclid(360.0);
@@ -921,6 +1037,17 @@ pub fn render_shape(
         &mut defs,
         true,
     )?;
+    if effects.is_empty() {
+        if let Some([left, top, right, bottom]) = scene_bounds {
+            bounds = crate::Bounds {
+                left,
+                top,
+                right,
+                bottom,
+            }
+            .transformed(matrix);
+        }
+    }
     if bounds.right - bounds.left < 0.01 {
         bounds.left -= 0.5;
         bounds.right += 0.5;

@@ -11,13 +11,17 @@ use crate::xml::escape_xml_text;
 
 mod effects;
 mod geometry;
+mod ink;
 pub mod model3d;
 mod raster;
 mod shapes;
 pub mod smartart;
+pub mod text;
 mod xml;
 
-pub use shapes::{render_shape, StyleReferenceKind};
+pub use shapes::{render_shape, render_text_fill, StyleReferenceKind, TextFill};
+pub use shapes::render_3d_path;
+pub use ink::render_ink;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default, rename_all = "camelCase")]

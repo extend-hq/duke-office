@@ -1,0 +1,23 @@
+{
+  "input": {
+    "repo": "google/fonts",
+    "commit": "eb20e9cf19d97cf579fa3867d729d4222d6c59e1",
+    "path": "ofl/tinos",
+    "licenseSource": "https://github.com/googlefonts/tinos/blob/4106aab86ddefe26d58a69745e04ae9479d22993/OFL.txt",
+    "files": {
+      "Tinos-Bold.ttf": "393269dbab8899f938db19783eca5eac92eb431f7ae0ab45b8349ca895f1a06b",
+      "Tinos-BoldItalic.ttf": "a5de79f0fe863ea0954757acb3d47b3ccd0a930ce3dd5b97230cd3866790a06e",
+      "Tinos-Italic.ttf": "5942266ed398b155d7dc23e36833e7ec6be988f2439bdbeb8ef1bede808eaa91",
+      "Tinos-Regular.ttf": "60a0e8ef0c04dd5dd69ffe91025fa2ae5836cbd35600a82ba031977557e2cb61"
+    },
+    "processing": "Original upstream TTF files"
+  },
+  "processing": "Hinting instructions and device-metric tables removed; complete glyph repertoire and shaping retained.",
+  "generator": "scripts/build-art-fonts.py",
+  "files": {
+    "Tinos-Bold.ttf": "30f37d3ede793207c4bec4263739b52f09d0978ad00410ca4bcfa8a23a58d46b",
+    "Tinos-BoldItalic.ttf": "c4e75273500a1e34d35d9a4464cad28cf889af9222ed478c63e323b40f860a69",
+    "Tinos-Italic.ttf": "8dfa94b8c09bd0fd589e24a114cda876cbaa94b27d40a14d1bdea6702d653033",
+    "Tinos-Regular.ttf": "58b6e5af97bfc85cb0f474a366e1dc996da3f8a841d3b3c35aaa050242b9d94e"
+  }
+}

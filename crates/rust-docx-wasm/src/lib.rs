@@ -58,6 +58,22 @@ pub fn extract_document_blocks_with_options_wasm(
 }
 
 #[wasm_bindgen]
+pub fn parse_document_bundle_wasm(bytes: &[u8], options_json: &str) -> Result<String, JsValue> {
+    let options = serde_json::from_str(options_json)
+        .map_err(|e| JsValue::from_str(&format!("Invalid bundle options: {e}")))?;
+    let bundle = rust_docx::parse_document_bundle(bytes, options).map_err(|e| JsValue::from_str(&e))?;
+    serde_json::to_string(&bundle).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+#[wasm_bindgen]
+pub fn export_document_wasm(request_json: &str) -> Result<String, JsValue> {
+    let request = serde_json::from_str(request_json)
+        .map_err(|e| JsValue::from_str(&format!("Invalid export request: {e}")))?;
+    let result = rust_docx::export_document(&request).map_err(|e| JsValue::from_str(&e))?;
+    serde_json::to_string(&result).map_err(|e| JsValue::from_str(&e.to_string()))
+}
+
+#[wasm_bindgen]
 pub fn inspect_document_source_wasm(bytes: &[u8]) -> Result<String, JsValue> {
     let package = parse_document_bytes(bytes).map_err(|error| JsValue::from_str(&error))?;
     serde_json::to_string(&rust_docx::document_source_graph(&package))
