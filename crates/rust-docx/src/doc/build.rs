@@ -1337,9 +1337,10 @@ impl<'a> DocBuilder<'a> {
             }
             xml.push_str("</w:tblBorders>");
         }
-        let gap = first_tap.dxa_gap_half.max(0);
+        let table_cell_padding = first_tap.default_cell_padding_twips();
+        let [top, left, bottom, right] = table_cell_padding;
         xml.push_str(&format!(
-            r#"<w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:left w:w="{gap}" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:right w:w="{gap}" w:type="dxa"/></w:tblCellMar>"#
+            r#"<w:tblCellMar><w:top w:w="{top}" w:type="dxa"/><w:left w:w="{left}" w:type="dxa"/><w:bottom w:w="{bottom}" w:type="dxa"/><w:right w:w="{right}" w:type="dxa"/></w:tblCellMar>"#
         ));
         xml.push_str(r#"<w:tblLayout w:type="fixed"/>"#);
         xml.push_str("</w:tblPr>");
@@ -1434,6 +1435,15 @@ impl<'a> DocBuilder<'a> {
                             tc_pr.push_str(&shd.to_xml());
                         }
                     }
+                }
+                let cell_padding = row.tap.cell_padding_twips(cell_index);
+                if cell_padding != table_cell_padding {
+                    let [top, left, bottom, right] = cell_padding;
+                    tc_pr.push_str(&format!(
+                        r#"<w:tcMar><w:top w:w="{top}" w:type="dxa"/><w:left w:w="{left}" w:type="dxa"/><w:bottom w:w="{bottom}" w:type="dxa"/><w:right w:w="{right}" w:type="dxa"/></w:tcMar>"#
+                    ));
+                }
+                if let Some(tc) = tc {
                     if tc.f_vertical {
                         tc_pr.push_str(&format!(
                             r#"<w:textDirection w:val="{}"/>"#,

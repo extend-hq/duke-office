@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.12
+
+- Preserve explicit table and cell margins from legacy Word documents, including per-cell overrides and row-specific defaults.
+
 ## 0.2.6
 
 - Render picture transforms and effects through the shared native/WebAssembly `rust-office-art` crate, preserving source presentation properties for export.
