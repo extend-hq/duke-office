@@ -8,7 +8,7 @@ Rust libraries for parsing Word documents and PowerPoint presentations, and rend
 
 [rust-office-art](crates/rust-office-art) provides shared picture, shape and connector SVG generation for the Word and PowerPoint parsers and their WebAssembly integrations. It also reads SmartArt data and saved drawing trees. Supported formatting uses separate paint bounds. [Coverage and comparison method](docs/picture-coverage.md) distinguishes implemented rendering, stored previews and remaining fidelity gaps.
 
-[Office fonts](packages/office-fonts) provides shared, lazily loaded Calibri, Arial, Times New Roman, Courier New, Aptos and Aptos Narrow fallbacks in viewers and backend rendering. Font loading is explicit and stays separate from the chart WASM bundle. Build the font assets and metric tables with `python scripts/build-office-fonts.py` using FontTools and Brotli, and package them with `npm pack ./packages/office-fonts`.
+[Office fonts](packages/office-fonts) provides shared, lazily loaded Calibri, Arial, Times New Roman and Courier New fallbacks in viewers and backend rendering. Aptos and Aptos Narrow use host-provided fonts or generic fallbacks; no substitutes for them are bundled. Font loading is explicit and stays separate from the chart WASM bundle. Build the font assets and metric tables with `python scripts/build-office-fonts.py` using FontTools and Brotli, and package them with `npm pack ./packages/office-fonts`.
 
 | Crate | Purpose | Version | Downloads | API docs | Release |
 | --- | --- | --- | --- | --- | --- |
@@ -54,7 +54,7 @@ Expand a package for its usage, measured results, and detailed reports.
 
 ### Excel charts — 382 charts, 48 gallery examples
 
-React XLSX now renders charts through Rust and WebAssembly, including 3D shapes, modern charts, source-linked number formats, shadows and bevels. Shared Office font fallbacks include Carlito, Arimo, Tinos, Cousine, Intos and Intos Narrow.
+React XLSX now renders charts through Rust and WebAssembly, including 3D shapes, modern charts, source-linked number formats, shadows and bevels. Shared Office font fallbacks include Carlito, Arimo, Tinos and Cousine.
 
 [![Microsoft Excel and React XLSX side by side across 24 chart examples](docs/readme-assets/excel-chart-overview.png)](docs/excel-chart-comparisons.md)
 
@@ -201,6 +201,6 @@ The Rust workspace builds with Cargo. Run `cargo test --workspace --locked` for 
 
 See [Publishing Rust crates](RELEASING.md) for versioning, CI checks and automatic publication from `main`.
 
-The libraries are distributed under the [MIT license](LICENSE). Third-party notices accompany the crates that use them.
+The libraries are distributed under the [MIT license](LICENSE). Third-party notices accompany the crates that use them. [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) covers the chart browser package's Cargo dependency graph, including its full build; it is not an inventory for every workspace crate. Bundled font and map data notices are in [FONT-DATA-LICENSE](FONT-DATA-LICENSE) and [MAP-DATA-LICENSE](MAP-DATA-LICENSE).
 
 For React viewers and editors, see [React DOCX](https://github.com/extend-hq/react-docx), [React PPTX](https://github.com/extend-hq/react-pptx), and [React XLSX](https://github.com/extend-hq/react-xlsx).

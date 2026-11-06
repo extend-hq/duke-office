@@ -1,6 +1,6 @@
 {
   "name": "@extend-ai/rust-office-charts",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Render Office Open XML charts to SVG with WebAssembly",
   "type": "module",
   "license": "MIT AND Apache-2.0 AND OFL-1.1",

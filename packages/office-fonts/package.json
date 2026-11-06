@@ -1,6 +1,6 @@
 {
   "name": "@extend-ai/office-fonts",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shared Office font fallbacks for browser viewers and server rendering",
   "type": "module",
   "license": "MIT AND OFL-1.1",

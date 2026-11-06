@@ -16,8 +16,6 @@ pub(super) fn width(text: &str, size: f64, family: &str, bold: bool, italic: boo
         "arial" | "arimo" => include_bytes!("font_metrics/arimo.bin"),
         "times new roman" | "tinos" => include_bytes!("font_metrics/tinos.bin"),
         "courier new" | "cousine" => include_bytes!("font_metrics/cousine.bin"),
-        "aptos" | "intos" => include_bytes!("font_metrics/intos.bin"),
-        "aptos narrow" | "intos narrow" => include_bytes!("font_metrics/intos-narrow.bin"),
         _ => return None,
     };
     let count = usize::from(u16_at(data, 2));

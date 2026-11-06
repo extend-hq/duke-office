@@ -22,17 +22,5 @@
     "family": "Cousine",
     "original": "Courier New",
     "prefix": "Cousine"
-  },
-  {
-    "id": "intos",
-    "family": "Intos",
-    "original": "Aptos",
-    "prefix": "Intos"
-  },
-  {
-    "id": "intos-narrow",
-    "family": "Intos Narrow",
-    "original": "Aptos Narrow",
-    "prefix": "IntosNarrow"
   }
 ]

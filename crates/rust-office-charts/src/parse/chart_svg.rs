@@ -84,8 +84,6 @@ pub(super) fn font_family(props: Option<Node>, default: &str) -> String {
         "arial" | "arimo" => "Arimo, sans-serif",
         "times new roman" | "tinos" => "Tinos, serif",
         "courier new" | "cousine" => "Cousine, monospace",
-        "aptos" | "intos" => "Intos, sans-serif",
-        "aptos narrow" | "intos narrow" => "Intos Narrow, sans-serif",
         "cambria" | "georgia" => "serif",
         _ => "sans-serif",
     };

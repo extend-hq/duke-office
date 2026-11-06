@@ -34,7 +34,7 @@ The inventory covered 1,235 XLSX and 64 XLS inputs. The XLS inputs contained no 
 
 Excel 16.107.3 was used for native captures. Excel's picture-export path can enlarge an inherited title even though the live UI uses a smaller size. Before export, the live title's existing font size was reapplied to the temporary copy. This preserved title bounds in all 381 paired references: 309 had titles and 72 had none. Exported gridlines can still differ from the live UI.
 
-Browser captures waited for the shared font loader. The tested fallbacks are Calibri → Carlito, Arial → Arimo, Times New Roman → Tinos, Courier New → Cousine, Aptos → Intos and Aptos Narrow → Intos Narrow. Font outlines, shaping and vertical metrics can differ even when advances and apparent size are close.
+Browser captures waited for the shared font loader. The tested fallbacks were Calibri → Carlito, Arial → Arimo, Times New Roman → Tinos, Courier New → Cousine, Aptos → Intos and Aptos Narrow → Intos Narrow. Intos and Intos Narrow were subsequently removed because their provenance was unresolved. These historical measurements predate that removal and do not establish current Aptos rendering fidelity. Font outlines, shaping and vertical metrics can differ even when advances and apparent size are close.
 
 The final mounted capture contained 710 effects across 160 charts, including 488 lighting primitives. These counts establish that effects survived the React SVG adapter; they do not establish an exact match to Excel's lighting.
 

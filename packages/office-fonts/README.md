@@ -8,8 +8,8 @@ Shared font fallbacks for document, spreadsheet, presentation and chart renderer
 | Arial | Arimo |
 | Times New Roman | Tinos |
 | Courier New | Cousine |
-| Aptos | Intos |
-| Aptos Narrow | Intos Narrow |
+
+Aptos and Aptos Narrow have no bundled substitutes. They use host-provided fonts or the caller's generic font stack, which can change text widths and line wrapping.
 
 ```js
 import { loadOfficeFonts } from "@extend-ai/office-fonts";
@@ -27,4 +27,4 @@ Sharp uses Fontconfig instead of SVG web fonts. On Linux, set `FONTCONFIG_FILE` 
 
 All sources are pinned by upstream commit or release and SHA-256 hashes in each font directory's `source.json`. Arimo uses static 400 and 700 instances of the upstream variable fonts. WOFF2 assets losslessly encode the bundled TTFs. Redistribution notices are collected in [FONT-LICENSES.txt](FONT-LICENSES.txt).
 
-The selected families' printable ASCII advances match the locally installed Office originals in all four styles. Font versions, non-Latin coverage, glyph outlines, kerning, vertical metrics and layout algorithms can still differ. In particular, the native chart tables measure advances, not full OpenType shaping. There are no automatic aliases for Calibri Light, Cambria, Aptos Display, Aptos Serif or symbol fonts. Modern Caladea did not match the tested Cambria widths closely enough to enable by default. CJK and complex-script documents may require additional original or embedded fonts.
+The selected families' printable ASCII advances match the locally installed Office originals in all four styles. Font versions, non-Latin coverage, glyph outlines, kerning, vertical metrics and layout algorithms can still differ. In particular, the native chart tables measure advances, not full OpenType shaping. There are no automatic aliases for Calibri Light, Cambria, Aptos, Aptos Narrow, Aptos Display, Aptos Serif or symbol fonts. Modern Caladea did not match the tested Cambria widths closely enough to enable by default. CJK and complex-script documents may require additional original or embedded fonts.
