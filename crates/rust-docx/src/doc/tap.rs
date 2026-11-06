@@ -34,6 +34,8 @@ pub struct Tap {
     pub f_table_header: bool,
     pub cells: Vec<TableCell>,
     pub table_borders: [Option<Border>; 6], // top, left, bottom, right, insideH, insideV
+    cell_padding_default: [Option<u16>; 4],
+    cell_padding: Vec<[Option<u16>; 4]>,
 }
 
 impl Tap {
@@ -99,6 +101,8 @@ impl Tap {
                 }
             }
             0xD620 => self.apply_set_brc80(sprm.operand),
+            0xD632 => self.apply_cell_padding(sprm.operand, false),
+            0xD634 => self.apply_cell_padding(sprm.operand, true),
             0xD62B => {
                 // sprmTVertMerge: itc + merge code (0 none, 1 continue, 3 restart).
                 if sprm.operand.len() >= 2 {
@@ -210,6 +214,55 @@ impl Tap {
 
     pub fn row_left_edge(&self) -> i32 {
         self.cells.first().map(|cell| cell.boundary_left).unwrap_or(0)
+    }
+
+    fn apply_cell_padding(&mut self, operand: &[u8], row_default: bool) {
+        if operand.len() != 6 || operand[2] & !0x0F != 0 {
+            return;
+        }
+        let first = operand[0] as usize;
+        let limit = operand[1] as usize;
+        if first >= limit || limit > 64 || (row_default && (first != 0 || limit != 1)) {
+            return;
+        }
+        let width = u16::from_le_bytes([operand[4], operand[5]]);
+        let width = match operand[3] {
+            0 if width == 0 => None,
+            3 if width <= 31680 => Some(width),
+            _ => return,
+        };
+        let apply = |padding: &mut [Option<u16>; 4]| {
+            for (side, value) in padding.iter_mut().enumerate() {
+                if operand[2] & (1 << side) != 0 {
+                    *value = width;
+                }
+            }
+        };
+        if row_default {
+            apply(&mut self.cell_padding_default);
+        } else {
+            self.cell_padding
+                .resize(self.cell_padding.len().max(limit), [None; 4]);
+            for padding in &mut self.cell_padding[first..limit] {
+                apply(padding);
+            }
+        }
+    }
+
+    pub fn default_cell_padding_twips(&self) -> [u16; 4] {
+        let gap = self.dxa_gap_half.max(0) as u16;
+        let fallback = [0, gap, 0, gap];
+        std::array::from_fn(|side| self.cell_padding_default[side].unwrap_or(fallback[side]))
+    }
+
+    pub fn cell_padding_twips(&self, cell_index: usize) -> [u16; 4] {
+        let defaults = self.default_cell_padding_twips();
+        std::array::from_fn(|side| {
+            self.cell_padding
+                .get(cell_index)
+                .and_then(|padding| padding[side])
+                .unwrap_or(defaults[side])
+        })
     }
 }
 
