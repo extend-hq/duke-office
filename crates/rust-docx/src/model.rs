@@ -360,6 +360,8 @@ pub struct TextRunNode {
     pub link: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub note_reference: Option<NoteReference>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub field_instruction: Option<String>,
 }
 
 /// Discriminator for `TextRunNode`.

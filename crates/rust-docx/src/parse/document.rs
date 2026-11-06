@@ -106,6 +106,7 @@ fn nonempty_nodes(mut nodes: Vec<DocNode>) -> Vec<DocNode> {
                 style: None,
                 link: None,
                 note_reference: None,
+                field_instruction: None,
             })],
             style: None,
             paragraph_mark_style: None,

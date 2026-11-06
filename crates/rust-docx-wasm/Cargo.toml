@@ -1,6 +1,6 @@
 [package]
 name = "rust-docx-wasm"
-version = "0.2.12"
+version = "0.2.13"
 edition.workspace = true
 license.workspace = true
 description = "WebAssembly bindings for the rust-docx parser and serializer"
@@ -16,7 +16,7 @@ name = "rust_docx_wasm"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-rust-docx = { version = "=0.2.12", path = "../rust-docx" }
+rust-docx = { version = "=0.2.13", path = "../rust-docx" }
 serde.workspace = true
 serde_json = { workspace = true, features = ["float_roundtrip"] }
 wasm-bindgen = "0.2"

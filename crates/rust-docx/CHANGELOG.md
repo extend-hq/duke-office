@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.13
+
+- Preserve uncached page-field instructions and formatting without synthesizing stored text.
+
 ## 0.2.12
 
 - Preserve explicit table and cell margins from legacy Word documents, including per-cell overrides and row-specific defaults.
