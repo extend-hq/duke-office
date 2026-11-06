@@ -3,6 +3,7 @@
 ## 0.2.14
 
 - Preserve page-field instructions without a stored result separator and retain instruction-run formatting.
+- Exclude the terminal legacy Word footer story guard from rendered content.
 
 ## 0.2.13
 
