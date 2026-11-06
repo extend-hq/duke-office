@@ -868,9 +868,11 @@ fn paragraph_runs<'a>(
         link: Option<String>,
         separated: bool,
         start: usize,
+        instruction_position: Option<(usize, usize)>,
         result_position: Option<(usize, usize)>,
         empty_result_position: Option<(usize, usize)>,
         has_result: bool,
+        has_unseparated_content: bool,
         nested: bool,
     }
     let mut fields: Vec<FieldState> = Vec::new();
@@ -901,6 +903,9 @@ fn paragraph_runs<'a>(
             if let Some(instruction) = token.get(1) {
                 if let Some(field) = fields.last_mut().filter(|field| !field.separated) {
                     field.instruction.push_str(instruction.as_str());
+                    field
+                        .instruction_position
+                        .get_or_insert((run_index, token.get(0).unwrap().end()));
                 }
                 continue;
             }
@@ -948,9 +953,17 @@ fn paragraph_runs<'a>(
                             {
                                 let instruction = decode_xml_entities(&field.instruction);
                                 if is_page_field_instruction(&instruction) {
-                                    if let Some((result_run, result_offset)) =
-                                        field.empty_result_position.or(field.result_position)
-                                    {
+                                    let result_position = field
+                                        .empty_result_position
+                                        .or(field.result_position)
+                                        .or_else(|| {
+                                            if field.separated || field.has_unseparated_content {
+                                                None
+                                            } else {
+                                                field.instruction_position
+                                            }
+                                        });
+                                    if let Some((result_run, result_offset)) = result_position {
                                         empty_fields_by_run
                                             .entry(result_run)
                                             .or_default()
@@ -974,8 +987,12 @@ fn paragraph_runs<'a>(
                         .zip(tag.rfind('<'))
                         .is_some_and(|(start, end)| end > start + 1);
                 if has_result {
-                    for field in fields.iter_mut().filter(|field| field.separated) {
-                        field.has_result = true;
+                    for field in &mut fields {
+                        if field.separated {
+                            field.has_result = true;
+                        } else {
+                            field.has_unseparated_content = true;
+                        }
                     }
                 } else if let Some(field) = fields.last_mut().filter(|field| field.separated) {
                     field

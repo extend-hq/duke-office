@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.14
+
+- Preserve page-field instructions without a stored result separator and retain instruction-run formatting.
+
 ## 0.2.13
 
 - Preserve uncached page-field instructions and formatting without synthesizing stored text.
