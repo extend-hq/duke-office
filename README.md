@@ -20,45 +20,6 @@ Rust libraries for parsing Word documents and PowerPoint presentations, and rend
 | [rust-pptx](crates/rust-pptx) | Parse PowerPoint presentations into a structured slide model | [![rust-pptx version](https://img.shields.io/crates/v/rust-pptx.svg)](https://crates.io/crates/rust-pptx) | [![rust-pptx downloads](https://img.shields.io/crates/d/rust-pptx.svg)](https://crates.io/crates/rust-pptx) | [![rust-pptx documentation](https://docs.rs/rust-pptx/badge.svg)](https://docs.rs/rust-pptx) | [0.1.5](https://github.com/extend-hq/rust-office/releases/tag/rust-pptx-v0.1.5) |
 | [rust-pptx-wasm](crates/rust-pptx-wasm) | WebAssembly bindings for the PowerPoint parser | [![rust-pptx-wasm version](https://img.shields.io/crates/v/rust-pptx-wasm.svg)](https://crates.io/crates/rust-pptx-wasm) | [![rust-pptx-wasm downloads](https://img.shields.io/crates/d/rust-pptx-wasm.svg)](https://crates.io/crates/rust-pptx-wasm) | [![rust-pptx-wasm documentation](https://docs.rs/rust-pptx-wasm/badge.svg)](https://docs.rs/rust-pptx-wasm) | [0.1.5](https://github.com/extend-hq/rust-office/releases/tag/rust-pptx-wasm-v0.1.5) |
 
-<details open>
-<summary><strong>Office Art comparisons — SmartArt, WordArt, 3D models, emoji, icons, pictures and shapes</strong></summary>
-
-[![Microsoft Word versus Rust Office Art: SmartArt, WordArt, 3D emoji models, icons, ink and 3D shapes](docs/readme-assets/word-officeart-expanded-overview.png)](docs/office-art-comparisons.md)
-
-The expanded **30-case gallery**, captured November 6, 2026, compares native Word with the current Rust Office Art renderer through the DOCX adapter. It includes SmartArt diagrams, WordArt fills and outlines, warped and 3D text, five 3D models including emoji, SVG icons, shapes, ink, and an artistic-effect cache control. Both sides use the same page coordinates, crop and display scale. Visible differences are retained.
-
-| Gallery | Cases |
-| --- | ---: |
-| [3D models, emoji and SmartArt](docs/readme-assets/word-officeart-expanded-models-and-smartart.png) | 7 |
-| [WordArt, warped text, extrusion, bevels and materials](docs/readme-assets/word-officeart-expanded-wordart-and-3d.png) | 12 |
-| [SVG icons, shapes, ink and cached artistic effects](docs/readme-assets/word-officeart-expanded-icons-shapes-and-ink.png) | 11 |
-
-**3D models use their saved Office previews.** This preserves the saved view without regenerating meshes or lighting. SmartArt uses its saved drawing tree. WordArt uses shaped font outlines, preset warp geometry and measured text fitting. 3D shapes and text use projected extrusion, bevels and material lighting; ink uses its saved brush and pressure data. Font substitution, curved-text fitting, pencil texture and native shading can still differ. The artistic-effect control checks cache preservation, not regeneration. Scores also retain the native print-PDF page offset. [Comparison method and remaining gaps](docs/office-art-comparisons.md) · [All 30 measurements](docs/readme-assets/word-officeart-expanded-comparison.csv) · [Capture provenance](docs/readme-assets/word-officeart-expanded-provenance.json).
-
-### Pictures, effects, groups, shapes and connectors
-
-The shared `rust-office-art` renderer supports pictures, 187 preset geometries, custom paths and connectors; SmartArt adapters reuse its paint for saved drawing trees. [Shared architecture and current boundaries](docs/office-art-architecture.md). These galleries compare Word for Mac 16.106.1 with React DOCX using the **workspace DOCX/WASM 0.2.9 candidate**, captured November 5, 2026. They measure the complete parser-to-viewer path at fixed page coordinates. The capture provenance identifies the actual WASM and viewer sources; these measurements do not establish registry availability or complete OfficeArt compatibility.
-
-[![Microsoft Word and React DOCX picture appearance side by side](docs/readme-assets/word-officeart-overview.png)](docs/readme-assets/word-officeart-overview.png)
-
-| Matrix | Cases at 96% color agreement | Median | All-case mean |
-| --- | ---: | ---: | ---: |
-| [Pictures and effects](docs/readme-assets/word-picture-comparison.csv) | 37/40 | 100.00% | 94.11% |
-| [Group transforms](docs/readme-assets/word-group-comparison.csv) | 4/5 | 98.55% | 97.67% |
-| [Shapes and connectors](docs/readme-assets/word-shape-comparison.csv) | 10/16 | 97.51% | 93.78% |
-
-[![Microsoft Word and React DOCX shapes and connectors side by side](docs/readme-assets/word-officeart-shapes.png)](docs/readme-assets/word-officeart-shapes.png)
-
-The reference is Word's PDF rasterized with Cairo at 96 dpi. RGB values must agree within 16 levels over the union of visible ink; white margins do not inflate the score. The unchanged bitmap control is exact. All 61 cases remain in the measurements, including the blank native blur, missing SVG alternative, soft-edge and thin-stroke differences. The original Splash references and their resampling differences remain in the provenance. **The 96–97% target is not met across all cases.** [Coverage and method](docs/picture-coverage.md) · [Picture provenance](docs/readme-assets/word-picture-provenance.json) · [Group provenance](docs/readme-assets/word-group-provenance.json) · [Shape provenance](docs/readme-assets/word-shape-provenance.json).
-
-A broader check of **123 drawings in two complete documents** reaches **50.00% mean color agreement**, with **0/123 at 96%**, using the same fixed native page coordinates. Table flow, pattern sampling and unsupported effects remain visible in this harder document-level comparison. Another **206 drawings lack successful native references** and remain unmeasured. These results are separate from the 61 controlled cases above. [All 123 measurements](docs/readme-assets/word-art-document-comparison.csv) · [Document comparison provenance](docs/readme-assets/word-art-document-provenance.json).
-
-The [SmartArt coverage report](docs/smartart-coverage.md) separately inventories 176 native-authored saved layout types and cached text coverage. Saved drawing reconstruction and semantic parsing do not establish pixel parity or complete data-to-layout generation.
-
-Download self-contained Word documents for manual testing: [pictures, crops and effects](docs/readme-assets/office-art-pictures.docx), [effect ordering](docs/readme-assets/office-art-effect-order.docx), [group transforms](docs/readme-assets/office-art-groups.docx), [shapes and connectors](docs/readme-assets/office-art-shapes-connectors.docx), [tile density controls](docs/readme-assets/office-art-tile-dpi.docx), and [saved SmartArt probes](docs/readme-assets/office-art-smartart-probes.zip). The [589-case manual atlas](docs/readme-assets/office-art-manual-atlas.zip) adds seven editable packs covering WordArt, every shape preset, fills, outlines, effects, 3D, artistic extensions and legacy groups; its new visual cases are explicitly unmeasured. [Fixture and comparison tools](scripts/image-fidelity/README.md) reproduce the inputs and reports.
-
-</details>
-
 ## Packages, benchmarks, and chart accuracy
 
 Expand a package for its usage, measured results, and detailed reports.
@@ -109,6 +70,45 @@ The overview shows 28 pairs. The linked galleries include every measured case, i
 The map cases cover countries, states, counties and ZIP areas, numeric and categorical fills, several projections, missing values, point colors, and legend positions. The SDK sample preserves Word’s two-column page clipping. [Download all per-chart measurements](docs/readme-assets/word-chart-comparison.csv) or [open the independent source document](https://github.com/dotnet/Open-XML-SDK/blob/main/test/DocumentFormat.OpenXml.Tests.Assets/assets/TestDataStorage/v2FxTestFiles/wordprocessing/chart/chart2.docx).
 
 Measured November 4, 2026 using the React DOCX 0.14.0 release. These are retained measurements of that integration, not a fresh benchmark of the current standalone chart packages. [Full comparison and measurement method](docs/chart-comparisons.md).
+
+</details>
+
+<details open>
+<summary><strong>Office Art comparisons — SmartArt, WordArt, 3D models, emoji, icons, pictures and shapes</strong></summary>
+
+[![Microsoft Word versus Rust Office Art: SmartArt, WordArt, 3D emoji models, icons, ink and 3D shapes](docs/readme-assets/word-officeart-expanded-overview.png)](docs/office-art-comparisons.md)
+
+The expanded **30-case gallery**, captured November 6, 2026, compares native Word with the current Rust Office Art renderer through the DOCX adapter. It includes SmartArt diagrams, WordArt fills and outlines, warped and 3D text, five 3D models including emoji, SVG icons, shapes, ink, and an artistic-effect cache control. Both sides use the same page coordinates, crop and display scale. Visible differences are retained.
+
+| Gallery | Cases |
+| --- | ---: |
+| [3D models, emoji and SmartArt](docs/readme-assets/word-officeart-expanded-models-and-smartart.png) | 7 |
+| [WordArt, warped text, extrusion, bevels and materials](docs/readme-assets/word-officeart-expanded-wordart-and-3d.png) | 12 |
+| [SVG icons, shapes, ink and cached artistic effects](docs/readme-assets/word-officeart-expanded-icons-shapes-and-ink.png) | 11 |
+
+**3D models use their saved Office previews.** This preserves the saved view without regenerating meshes or lighting. SmartArt uses its saved drawing tree. WordArt uses shaped font outlines, preset warp geometry and measured text fitting. 3D shapes and text use projected extrusion, bevels and material lighting; ink uses its saved brush and pressure data. Font substitution, curved-text fitting, pencil texture and native shading can still differ. The artistic-effect control checks cache preservation, not regeneration. Scores also retain the native print-PDF page offset. [Comparison method and remaining gaps](docs/office-art-comparisons.md) · [All 30 measurements](docs/readme-assets/word-officeart-expanded-comparison.csv) · [Capture provenance](docs/readme-assets/word-officeart-expanded-provenance.json).
+
+### Pictures, effects, groups, shapes and connectors
+
+The shared `rust-office-art` renderer supports pictures, 187 preset geometries, custom paths and connectors; SmartArt adapters reuse its paint for saved drawing trees. [Shared architecture and current boundaries](docs/office-art-architecture.md). These galleries compare Word for Mac 16.106.1 with React DOCX using the **workspace DOCX/WASM 0.2.9 candidate**, captured November 5, 2026. They measure the complete parser-to-viewer path at fixed page coordinates. The capture provenance identifies the actual WASM and viewer sources; these measurements do not establish registry availability or complete OfficeArt compatibility.
+
+[![Microsoft Word and React DOCX picture appearance side by side](docs/readme-assets/word-officeart-overview.png)](docs/readme-assets/word-officeart-overview.png)
+
+| Matrix | Cases at 96% color agreement | Median | All-case mean |
+| --- | ---: | ---: | ---: |
+| [Pictures and effects](docs/readme-assets/word-picture-comparison.csv) | 37/40 | 100.00% | 94.11% |
+| [Group transforms](docs/readme-assets/word-group-comparison.csv) | 4/5 | 98.55% | 97.67% |
+| [Shapes and connectors](docs/readme-assets/word-shape-comparison.csv) | 10/16 | 97.51% | 93.78% |
+
+[![Microsoft Word and React DOCX shapes and connectors side by side](docs/readme-assets/word-officeart-shapes.png)](docs/readme-assets/word-officeart-shapes.png)
+
+The reference is Word's PDF rasterized with Cairo at 96 dpi. RGB values must agree within 16 levels over the union of visible ink; white margins do not inflate the score. The unchanged bitmap control is exact. All 61 cases remain in the measurements, including the blank native blur, missing SVG alternative, soft-edge and thin-stroke differences. The original Splash references and their resampling differences remain in the provenance. **The 96–97% target is not met across all cases.** [Coverage and method](docs/picture-coverage.md) · [Picture provenance](docs/readme-assets/word-picture-provenance.json) · [Group provenance](docs/readme-assets/word-group-provenance.json) · [Shape provenance](docs/readme-assets/word-shape-provenance.json).
+
+A broader check of **123 drawings in two complete documents** reaches **50.00% mean color agreement**, with **0/123 at 96%**, using the same fixed native page coordinates. Table flow, pattern sampling and unsupported effects remain visible in this harder document-level comparison. Another **206 drawings lack successful native references** and remain unmeasured. These results are separate from the 61 controlled cases above. [All 123 measurements](docs/readme-assets/word-art-document-comparison.csv) · [Document comparison provenance](docs/readme-assets/word-art-document-provenance.json).
+
+The [SmartArt coverage report](docs/smartart-coverage.md) separately inventories 176 native-authored saved layout types and cached text coverage. Saved drawing reconstruction and semantic parsing do not establish pixel parity or complete data-to-layout generation.
+
+Download self-contained Word documents for manual testing: [pictures, crops and effects](docs/readme-assets/office-art-pictures.docx), [effect ordering](docs/readme-assets/office-art-effect-order.docx), [group transforms](docs/readme-assets/office-art-groups.docx), [shapes and connectors](docs/readme-assets/office-art-shapes-connectors.docx), [tile density controls](docs/readme-assets/office-art-tile-dpi.docx), and [saved SmartArt probes](docs/readme-assets/office-art-smartart-probes.zip). The [589-case manual atlas](docs/readme-assets/office-art-manual-atlas.zip) adds seven editable packs covering WordArt, every shape preset, fills, outlines, effects, 3D, artistic extensions and legacy groups; its new visual cases are explicitly unmeasured. [Fixture and comparison tools](scripts/image-fidelity/README.md) reproduce the inputs and reports.
 
 </details>
 
