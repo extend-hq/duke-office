@@ -39,6 +39,7 @@ struct RunToken<'a> {
     end: usize,
     link: Option<String>,
     text_links: Vec<(usize, Option<String>)>,
+    empty_fields: Vec<(usize, String)>,
 }
 
 #[derive(Clone, Debug)]
@@ -759,6 +760,17 @@ fn paragraph_nested_tag_ranges(paragraph_xml: &str, tag_name: &str) -> Vec<crate
     ranges
 }
 
+fn is_page_field_instruction(instruction: &str) -> bool {
+    matches!(
+        instruction
+            .split_whitespace()
+            .next()
+            .map(str::to_ascii_uppercase)
+            .as_deref(),
+        Some("PAGE" | "NUMPAGES")
+    )
+}
+
 fn paragraph_runs<'a>(
     paragraph_xml: &'a str,
     context: &ParseContext<'_, impl std::borrow::Borrow<super::context::ParsedStyleSheet>>,
@@ -773,7 +785,28 @@ fn paragraph_runs<'a>(
             !deleted.iter().any(|range| run.start >= range.start && run.end <= range.end)
         });
     }
-    if run_ranges.is_empty() {
+    let simple_fields = if super::scan::contains_tag(paragraph_xml, "w:fldSimple") {
+        let excluded_field_ranges: Vec<_> = [
+            "w:txbxContent",
+            "w:del",
+            "w:moveFrom",
+            "mc:AlternateContent",
+        ]
+        .iter()
+        .flat_map(|tag| extract_balanced_tag_ranges(paragraph_xml, tag))
+        .collect();
+        paragraph_nested_tag_ranges(paragraph_xml, "w:fldSimple")
+            .into_iter()
+            .filter(|field| {
+                !excluded_field_ranges
+                    .iter()
+                    .any(|excluded| field.start >= excluded.start && field.end <= excluded.end)
+            })
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
+    if run_ranges.is_empty() && simple_fields.is_empty() {
         return Vec::new();
     }
 
@@ -790,6 +823,7 @@ fn paragraph_runs<'a>(
                 end: range.end,
                 link: None,
                 text_links: Vec::new(),
+                empty_fields: Vec::new(),
             })
             .collect();
     }
@@ -833,10 +867,18 @@ fn paragraph_runs<'a>(
         instruction: String,
         link: Option<String>,
         separated: bool,
+        start: usize,
+        result_position: Option<(usize, usize)>,
+        empty_result_position: Option<(usize, usize)>,
+        has_result: bool,
+        nested: bool,
     }
     let mut fields: Vec<FieldState> = Vec::new();
+    let mut complex_field_ranges = Vec::new();
+    let mut empty_fields_by_run: std::collections::HashMap<usize, Vec<(usize, String)>> =
+        std::collections::HashMap::new();
     let field_tokens = re::get_unchecked(
-        r#"(?is)<w:instrText\b(?:[^>]*[^/>])?>([\s\S]*?)</w:instrText>|<w:fldChar\b[^>]*>|<w:t\b(?:[^>]*[^/>])?>[\s\S]*?</w:t>|<a:t\b(?:[^>]*[^/>])?>[\s\S]*?</a:t>|<w:(?:drawing|pict)\b[^>]*>|<w:(?:sym|tab|br|cr|noBreakHyphen|softHyphen|footnoteReference|endnoteReference)\b[^>]*/>|<a:(?:tab|br)\b[^>]*/>"#,
+        r#"(?is)<w:instrText\b(?:[^>]*[^/>])?>([\s\S]*?)</w:instrText>|<w:fldChar\b[^>]*>|<w:t\b(?:[^>]*[^/>])?>[\s\S]*?</w:t>|<a:t\b(?:[^>]*[^/>])?>[\s\S]*?</a:t>|<(?:w|a):t\b[^>]*/>|<w:(?:drawing|pict)\b[^>]*>|<w:(?:sym|tab|br|cr|noBreakHyphen|softHyphen|footnoteReference|endnoteReference)\b[^>]*/>|<a:(?:tab|br)\b[^>]*/>"#,
     );
 
     for (run_index, range) in run_ranges.iter().enumerate() {
@@ -865,15 +907,58 @@ fn paragraph_runs<'a>(
             let tag = token.get(0).unwrap().as_str();
             if tag.to_ascii_lowercase().starts_with("<w:fldchar") {
                 match get_attribute(tag, "w:fldCharType").as_deref() {
-                    Some("begin") => fields.push(FieldState::default()),
+                    Some("begin") => {
+                        let nested = !fields.is_empty();
+                        for field in &mut fields {
+                            field.nested = true;
+                        }
+                        fields.push(FieldState {
+                            start: range.start + token.get(0).unwrap().start(),
+                            nested,
+                            ..FieldState::default()
+                        });
+                    }
                     Some("separate") => {
                         if let Some(field) = fields.last_mut() {
+                            if field.separated {
+                                field.nested = true;
+                            }
                             field.link = hyperlink_href_from_field_instruction(&field.instruction);
                             field.separated = true;
+                            field.result_position = Some((run_index, token.get(0).unwrap().end()));
                         }
                     }
                     Some("end") => {
-                        fields.pop();
+                        if let Some(field) = fields.pop() {
+                            let end = range.start + token.get(0).unwrap().end();
+                            complex_field_ranges.push((field.start, end));
+                            let overlaps_simple = simple_fields
+                                .iter()
+                                .any(|simple| simple.start < end && simple.end > field.start);
+                            let has_other_content =
+                                paragraph_xml.get(field.start..end).is_none_or(|xml| {
+                                    ["w:sdt", "m:oMath", "w:object"]
+                                        .iter()
+                                        .any(|tag| super::scan::contains_tag(xml, tag))
+                                });
+                            if !field.nested
+                                && !overlaps_simple
+                                && !field.has_result
+                                && !has_other_content
+                            {
+                                let instruction = decode_xml_entities(&field.instruction);
+                                if is_page_field_instruction(&instruction) {
+                                    if let Some((result_run, result_offset)) =
+                                        field.empty_result_position.or(field.result_position)
+                                    {
+                                        empty_fields_by_run
+                                            .entry(result_run)
+                                            .or_default()
+                                            .push((result_offset, instruction));
+                                    }
+                                }
+                            }
+                        }
                     }
                     _ => {}
                 }
@@ -882,6 +967,21 @@ fn paragraph_runs<'a>(
                     fields.iter().rev().find_map(|field| field.link.clone()),
                 ));
             } else {
+                let is_text = tag.starts_with("<w:t") || tag.starts_with("<a:t");
+                let has_result = !is_text
+                    || tag
+                        .find('>')
+                        .zip(tag.rfind('<'))
+                        .is_some_and(|(start, end)| end > start + 1);
+                if has_result {
+                    for field in fields.iter_mut().filter(|field| field.separated) {
+                        field.has_result = true;
+                    }
+                } else if let Some(field) = fields.last_mut().filter(|field| field.separated) {
+                    field
+                        .empty_result_position
+                        .get_or_insert((run_index, token.get(0).unwrap().start()));
+                }
                 let link = fields.iter().rev().find_map(|field| field.link.clone());
                 if let Some(link) = link.as_ref() {
                     field_links_by_run
@@ -893,9 +993,62 @@ fn paragraph_runs<'a>(
         field_text_links_by_run.insert(run_index, text_links);
     }
 
+    complex_field_ranges.extend(
+        fields
+            .iter()
+            .map(|field| (field.start, paragraph_xml.len())),
+    );
+    let mut synthetic_fields = Vec::new();
+    for simple in &simple_fields {
+        if simple_fields.iter().any(|other| {
+            other.start != simple.start && other.start < simple.end && other.end > simple.start
+        }) || complex_field_ranges
+            .iter()
+            .any(|(start, end)| *start < simple.end && *end > simple.start)
+        {
+            continue;
+        }
+        let xml = &paragraph_xml[simple.start..simple.end];
+        let Some(instruction) = super::scan::find_tag_token_ref(xml, "w:fldSimple")
+            .and_then(|tag| get_attribute(tag, "w:instr"))
+            .map(|instruction| decode_xml_entities(&instruction))
+            .filter(|instruction| is_page_field_instruction(instruction))
+        else {
+            continue;
+        };
+        if parse_run_text_tokens(xml)
+            .iter()
+            .any(|token| !token.text.is_empty() || token.note_reference.is_some())
+            || ["w:drawing", "w:pict", "w:object", "w:sdt", "m:oMath"]
+                .iter()
+                .any(|tag| super::scan::contains_tag(xml, tag))
+        {
+            continue;
+        }
+        if let Some((run_index, _)) = run_ranges
+            .iter()
+            .enumerate()
+            .find(|(_, run)| run.start >= simple.start && run.end <= simple.end)
+        {
+            empty_fields_by_run
+                .entry(run_index)
+                .or_default()
+                .push((0, instruction));
+        } else {
+            synthetic_fields.push(RunToken {
+                xml: std::borrow::Cow::Borrowed(xml),
+                start: simple.start,
+                end: simple.end,
+                link: None,
+                text_links: Vec::new(),
+                empty_fields: vec![(0, instruction)],
+            });
+        }
+    }
+
     let mut hyperlink_range_cursor = 0usize;
     let mut active_hyperlinks: Vec<&(crate::xml::TagRange, Option<String>)> = Vec::new();
-    run_ranges
+    let mut runs: Vec<_> = run_ranges
         .into_iter()
         .enumerate()
         .map(|(run_index, range)| {
@@ -957,9 +1110,13 @@ fn paragraph_runs<'a>(
                 end: range.end,
                 link,
                 text_links,
+                empty_fields: empty_fields_by_run.remove(&run_index).unwrap_or_default(),
             }
         })
-        .collect()
+        .collect();
+    runs.extend(synthetic_fields);
+    runs.sort_by_key(|run| run.start);
+    runs
 }
 
 #[derive(Clone, Debug)]
@@ -1951,6 +2108,7 @@ pub fn parse_paragraph_form_field_tokens(
                 end: run.end,
                 link: run.link.clone(),
                 text_links: run.text_links.clone(),
+                empty_fields: Vec::new(),
             })
             .collect::<Vec<_>>()
     });
@@ -2152,6 +2310,7 @@ pub(crate) fn parse_paragraph_with_table_run_style(
                     },
                     link: None,
                     note_reference: None,
+                    field_instruction: None,
                 }));
             }
         }
@@ -2289,14 +2448,29 @@ pub(crate) fn parse_paragraph_with_table_run_style(
                             std::borrow::Cow::Owned(xml) => parse_run_text_tokens(xml),
                         }
                     };
-                    let mut parsed_tokens = parsed_tokens
+                    let mut parsed_tokens: Vec<_> = parsed_tokens
                         .into_iter()
                         .filter(|token| !token.text.is_empty() || token.note_reference.is_some())
-                        .peekable();
+                        .map(|token| (token, None))
+                        .collect();
+                    parsed_tokens.extend(run.empty_fields.iter().map(
+                        |(source_start, instruction)| {
+                            (
+                                ParsedRunTextToken {
+                                    text: String::new(),
+                                    source_start: *source_start,
+                                    note_reference: None,
+                                },
+                                Some(instruction.clone()),
+                            )
+                        },
+                    ));
+                    parsed_tokens.sort_by_key(|(token, _)| token.source_start);
+                    let mut parsed_tokens = parsed_tokens.into_iter().peekable();
                     let mut remaining_style = style;
                     let needs_child_ordering = !images.is_empty();
                     let mut ordered_children = Vec::new();
-                    while let Some(token) = parsed_tokens.next() {
+                    while let Some((token, field_instruction)) = parsed_tokens.next() {
                         let child = ParagraphChildNode::Text(TextRunNode {
                             r#type: TextRunNodeType::Text,
                             text: token.text,
@@ -2312,6 +2486,7 @@ pub(crate) fn parse_paragraph_with_table_run_style(
                                 .find(|(offset, _)| *offset <= token.source_start)
                                 .and_then(|(_, link)| link.clone()),
                             note_reference: token.note_reference,
+                            field_instruction,
                         });
                         if needs_child_ordering {
                             ordered_children.push((token.source_start, child));
@@ -2358,6 +2533,7 @@ pub(crate) fn parse_paragraph_with_table_run_style(
             style: paragraph_mark_style.clone(),
             link: None,
             note_reference: None,
+            field_instruction: None,
         }));
     }
 

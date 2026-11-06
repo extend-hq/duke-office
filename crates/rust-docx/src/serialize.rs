@@ -4482,6 +4482,15 @@ fn paragraph_xml(
                         note_reference_xml,
                         text_xml
                     );
+                    let run_xml = if let Some(instruction) = &text_run.field_instruction {
+                        format!(
+                            "<w:fldSimple w:instr=\"{}\">{}</w:fldSimple>",
+                            escape_xml(instruction),
+                            run_xml
+                        )
+                    } else {
+                        run_xml
+                    };
                     wrap_with_hyperlink_xml(&run_xml, text_run.link.as_deref(), state)
                 }
                 ParagraphChildNode::FormField(form_field) => form_field_run_xml(form_field, state),
