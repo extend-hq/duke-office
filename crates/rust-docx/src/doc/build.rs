@@ -1580,7 +1580,10 @@ impl<'a> DocBuilder<'a> {
 
                 let entry: Option<(String, String, bool)> = if story_present {
                     let cp_start = hdd_base + cps[story_index];
-                    let cp_end = hdd_base + cps[story_index + 1];
+                    let mut cp_end = hdd_base + cps[story_index + 1];
+                    if !is_header && self.doc.text(cp_end - 1, cp_end).as_slice() == [0x0D] {
+                        cp_end -= 1;
+                    }
                     let part_name = if is_header {
                         self.header_count += 1;
                         format!("word/header{}.xml", self.header_count)
