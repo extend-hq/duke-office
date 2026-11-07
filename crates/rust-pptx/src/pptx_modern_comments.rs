@@ -1,7 +1,7 @@
 use super::{normalized_xml, CommentAuthor};
 use crate::pptx::{
     collect_namespaces, parse_text_paragraphs, scoped_source, HashMap, ParseError, ParseLimits,
-    Relationships, RunStyle, SlideComment, TextParseContext, XmlBudget, XmlNode,
+    Relationships, RunStyle, SlideComment, TextParseContext, OwnedNode, XmlBudget, XmlDocument,
 };
 use crate::{
     CommentAnchor, CommentAnchorKind, CommentAnchorPosition, CommentMoniker, CommentTask,
@@ -42,17 +42,17 @@ impl Element {
             .find(|child| child.namespace == MODERN && child.name == name)
     }
 
-    fn drawing_node(&self) -> XmlNode {
-        let children: Vec<_> = self
+    fn drawing_node(&self) -> XmlDocument {
+        XmlDocument::from_owned(self.owned_drawing_node())
+    }
+
+    fn owned_drawing_node(&self) -> OwnedNode {
+        let children = self
             .children
             .iter()
             .filter(|child| matches!(child.namespace.as_str(), DRAWING | DRAWING_STRICT))
-            .map(Self::drawing_node)
+            .map(Self::owned_drawing_node)
             .collect();
-        let mut subtree_names = XmlNode::name_bit(self.name.as_bytes());
-        for child in &children {
-            subtree_names |= child.subtree_names;
-        }
         let attributes = self
             .attributes
             .iter()
@@ -67,16 +67,15 @@ impl Element {
                 } else {
                     return None;
                 };
-                Some((name.into(), value.as_str().into()))
+                Some((name.to_owned(), value.clone()))
             })
             .collect();
-        XmlNode {
+        OwnedNode {
             source_xml: self.source_xml.clone(),
-            name: self.name.as_str().into(),
+            name: self.name.clone(),
             attributes,
-            children: children.into_boxed_slice(),
+            children,
             text: self.text.clone(),
-            subtree_names,
         }
     }
 
@@ -313,7 +312,7 @@ fn comment(
         colors: None,
         rels,
     };
-    let paragraphs = parse_text_paragraphs(body.as_ref(), None, None, None, &text_context);
+    let paragraphs = parse_text_paragraphs(body.as_ref().map(XmlDocument::root), None, None, None, &text_context);
     let text = paragraphs
         .iter()
         .map(|p| p.runs.iter().map(|r| r.text.as_str()).collect::<String>())

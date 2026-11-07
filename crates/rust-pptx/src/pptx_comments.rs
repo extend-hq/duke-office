@@ -130,14 +130,13 @@ pub(super) fn authors(
         return Ok(HashMap::new());
     }
     let normalized = normalized_xml(xml, limits)?;
-    let xml = normalized.as_ref();
-    let root = parse_xml_tree(xml, limits, context)?;
-    let qualified = qualified_children(xml);
-    Ok(root
-        .children
-        .iter()
+    let qualified = qualified_children(normalized.as_ref());
+    let document = parse_xml_tree(normalized.into_owned(), limits, context)?;
+    Ok(document
+        .root()
+        .children()
         .zip(qualified)
-        .filter(|(node, (qualified, _))| *qualified && node.name == "cmAuthor")
+        .filter(|(node, (qualified, _))| *qualified && node.name() == "cmAuthor")
         .filter_map(|(node, _)| {
             Some((
                 node.attr("id")?.to_owned(),
@@ -186,22 +185,21 @@ pub(super) fn parse(
             .collect());
     }
     let normalized = normalized_xml(xml, limits)?;
-    let xml = normalized.as_ref();
-    let root = parse_xml_tree(xml, limits, context)?;
-    let qualified = qualified_children(xml);
-    Ok(root
-        .children
-        .iter()
+    let qualified = qualified_children(normalized.as_ref());
+    let document = parse_xml_tree(normalized.into_owned(), limits, context)?;
+    Ok(document
+        .root()
+        .children()
         .zip(qualified)
-        .filter(|(node, (qualified, _))| *qualified && node.name == "cm")
+        .filter(|(node, (qualified, _))| *qualified && node.name() == "cm")
         .enumerate()
         .map(|(index, (node, (_, children)))| {
             let child = |name: &str| {
-                node.children
+                node.children()
                     .iter()
                     .zip(&children)
                     .find_map(|(child, qualified)| {
-                        (*qualified && child.name == name).then_some(child)
+                        (*qualified && child.name() == name).then_some(child)
                     })
             };
             let author_id = node.attr("authorId");
@@ -220,7 +218,7 @@ pub(super) fn parse(
                     _ => format!("comment-{}", index + 1),
                 },
                 text: child("text")
-                    .map(|text| text.text.clone())
+                    .map(|text| text.text().to_owned())
                     .unwrap_or_default(),
                 paragraphs: Vec::new(),
                 replies: Vec::new(),

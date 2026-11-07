@@ -72,20 +72,13 @@ impl Element {
             .find_map(|ns| self.attributes.get(&format!("{{{ns}}}embed")))
             .cloned()
     }
-    fn as_color_node(&self) -> XmlNode {
-        let children: Vec<_> = self
-            .children
-            .iter()
-            .filter(|n| n.is_dml())
-            .map(Self::as_color_node)
-            .collect();
-        let mut subtree_names = XmlNode::name_bit(self.name.as_bytes());
-        for child in &children {
-            subtree_names |= child.subtree_names;
-        }
-        XmlNode {
-            source_xml: None,
-            name: self.name.as_str().into(),
+    fn as_color_node(&self) -> XmlDocument {
+        XmlDocument::from_owned(self.owned_color_node())
+    }
+
+    fn owned_color_node(&self) -> OwnedNode {
+        OwnedNode {
+            name: self.name.clone(),
             attributes: self
                 .attributes
                 .iter()
@@ -96,12 +89,17 @@ impl Element {
                         .and_then(finite)
                         .map(|v| (v * 1000.0).to_string())
                         .unwrap_or_else(|| v.clone());
-                    (k.as_str().into(), value.into())
+                    (k.clone(), value)
                 })
                 .collect(),
             text: self.text.clone(),
-            children: children.into_boxed_slice(),
-            subtree_names,
+            children: self
+                .children
+                .iter()
+                .filter(|n| n.is_dml())
+                .map(Self::owned_color_node)
+                .collect(),
+            source_xml: None,
         }
     }
 }
@@ -289,7 +287,7 @@ fn sound(
 }
 
 pub(super) fn parse(
-    root: &XmlNode,
+    root: XmlNode<'_>,
     rels: &Relationships,
     assets: &BTreeMap<String, PresentationAsset>,
     colors: Option<&ColorContext<'_>>,
@@ -297,14 +295,14 @@ pub(super) fn parse(
 ) -> Result<(Option<Box<SlideTransition>>, Option<Box<SlideTiming>>), ParseError> {
     let mut transition = None;
     let mut timing = None;
-    for candidate in &root.children {
+    for candidate in root.children() {
         if !matches!(
-            candidate.name.as_str(),
+            candidate.name(),
             "transition" | "timing" | "AlternateContent"
         ) {
             continue;
         }
-        let Some(source) = candidate.source_xml.as_deref() else {
+        let Some(source) = candidate.source_xml() else {
             continue;
         };
         let scoped = read_source(source, limits)?;
@@ -668,7 +666,7 @@ fn color(n: &Element, cx: &TimingContext<'_, '_>) -> Option<AnimationValue> {
     n.children
         .iter()
         .find(|n| n.is_dml())
-        .and_then(|n| parse_color(&n.as_color_node(), cx.colors))
+        .and_then(|n| parse_color(n.as_color_node().root(), cx.colors))
         .map(AnimationValue::Color)
 }
 fn variant(n: &Element, cx: &TimingContext<'_, '_>) -> Option<AnimationValue> {

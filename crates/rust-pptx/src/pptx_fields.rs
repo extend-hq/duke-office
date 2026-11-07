@@ -1,6 +1,6 @@
 use super::{
-    parse_color, parse_paragraph_style, parse_run_style, text_run, CompactString, RunStyle,
-    TextParseContext, TextRun, XmlNode,
+    parse_color, parse_paragraph_style, parse_run_style, text_run, OwnedNode, RunStyle,
+    TextParseContext, TextRun, XmlDocument, XmlNode,
 };
 use crate::{TextField, TextFieldParagraphProperties};
 use quick_xml::{events::Event, name::ResolveResult, NsReader};
@@ -20,10 +20,10 @@ fn normalized_lines(xml: &str) -> Cow<'_, str> {
     }
 }
 
-fn field_tree(source: &str) -> Option<XmlNode> {
+fn field_tree(source: &str) -> Option<XmlDocument> {
     struct Frame {
-        node: Option<XmlNode>,
-        children: Vec<XmlNode>,
+        node: Option<OwnedNode>,
+        children: Vec<OwnedNode>,
     }
     let xml = normalized_lines(source);
     let mut reader = NsReader::from_reader(xml.as_bytes());
@@ -65,17 +65,14 @@ fn field_tree(source: &str) -> Option<XmlNode> {
                         };
                         let value = quick_xml::escape::unescape(&normalized).ok()?;
                         attributes.push((
-                            CompactString::from(std::str::from_utf8(local.as_ref()).ok()?),
-                            CompactString::from(value),
+                            std::str::from_utf8(local.as_ref()).ok()?.to_owned(),
+                            value.into_owned(),
                         ));
                     }
-                    Some(XmlNode {
-                        source_xml: None,
-                        name: CompactString::from(std::str::from_utf8(name.as_ref()).ok()?),
-                        attributes: attributes.into_boxed_slice(),
-                        text: String::new(),
-                        children: Box::default(),
-                        subtree_names: XmlNode::name_bit(name.as_ref()),
+                    Some(OwnedNode {
+                        name: std::str::from_utf8(name.as_ref()).ok()?.to_owned(),
+                        attributes,
+                        ..OwnedNode::default()
                     })
                 } else {
                     None
@@ -85,8 +82,7 @@ fn field_tree(source: &str) -> Option<XmlNode> {
                         if stack.len() == 1 {
                             result = Some(node);
                         } else if let Some(parent) = stack.last_mut() {
-                            if let Some(parent_node) = &mut parent.node {
-                                parent_node.subtree_names |= node.subtree_names;
+                            if parent.node.is_some() {
                                 parent.children.push(node);
                             }
                         }
@@ -117,25 +113,24 @@ fn field_tree(source: &str) -> Option<XmlNode> {
             (_, Event::End(_)) => {
                 let Frame { node, children } = stack.pop()?;
                 if let Some(mut node) = node {
-                    node.children = children.into_boxed_slice();
+                    node.children = children;
                     if stack.len() == 1 {
                         result = Some(node);
                     } else if let Some(parent) = stack.last_mut() {
-                        if let Some(parent_node) = &mut parent.node {
-                            parent_node.subtree_names |= node.subtree_names;
+                        if parent.node.is_some() {
                             parent.children.push(node);
                         }
                     }
                 }
             }
-            (_, Event::Eof) => return result,
+            (_, Event::Eof) => return result.map(XmlDocument::from_owned),
             _ => {}
         }
     }
 }
 
 fn paragraph_properties(
-    node: &XmlNode,
+    node: XmlNode<'_>,
     context: &TextParseContext<'_, '_>,
 ) -> TextFieldParagraphProperties {
     let style = parse_paragraph_style(Some(node));
@@ -176,17 +171,18 @@ fn paragraph_properties(
 }
 
 pub(super) fn push_run(
-    original: &XmlNode,
+    original: XmlNode<'_>,
     default_style: &RunStyle,
     context: &TextParseContext<'_, '_>,
     runs: &mut Vec<TextRun>,
 ) -> bool {
-    let Some(source_xml) = original.source_xml.as_deref() else {
+    let Some(source_xml) = original.source_xml() else {
         return false;
     };
-    let Some(node) = field_tree(source_xml) else {
+    let Some(document) = field_tree(source_xml) else {
         return true;
     };
+    let node = document.root();
     let paragraph_properties = node
         .child("pPr")
         .map(|properties| Box::new(paragraph_properties(properties, context)));

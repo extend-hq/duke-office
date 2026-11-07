@@ -38,6 +38,9 @@ const DEFAULT_HEIGHT: u64 = 6_858_000;
 
 #[path = "pptx_editing.rs"]
 mod editing;
+#[path = "pptx_xml.rs"]
+mod xml_tree;
+use xml_tree::{OwnedNode, RawAttribute, RawNode, StrRef, XmlDocument, XmlNode, NONE};
 
 fn local_name(name: &[u8]) -> &[u8] {
     name.rsplit(|byte| *byte == b':').next().unwrap_or(name)
@@ -503,120 +506,6 @@ fn deobfuscate_embedded_font(path: &str, data: &mut [u8]) -> bool {
     font_magic(data).is_some()
 }
 
-#[derive(Debug, Clone)]
-struct XmlNode {
-    source_xml: Option<String>,
-    name: CompactString,
-    attributes: Box<[(CompactString, CompactString)]>,
-    text: String,
-    children: Box<[XmlNode]>,
-    subtree_names: u64,
-}
-
-impl XmlNode {
-    fn name_bit(name: &[u8]) -> u64 {
-        let hash = name.iter().fold(2166136261u32, |hash, byte| {
-            (hash ^ u32::from(*byte)).wrapping_mul(16777619)
-        });
-        1 << (hash % 64)
-    }
-
-    fn from_start(
-        start: &BytesStart<'_>,
-        decoder: quick_xml::encoding::Decoder,
-        budget: &mut XmlBudget,
-        limits: &ParseLimits,
-        context: &str,
-    ) -> Result<Self, ParseError> {
-        budget.consume_node_count(limits)?;
-        // Raw tag bytes bound both attribute count and total raw attribute bytes.
-        // Near a limit, reject before decoding or allocating attribute values.
-        let preflight = start.len() > limits.max_xml_attributes.saturating_sub(budget.attributes)
-            || start.len()
-                > limits
-                    .max_xml_attribute_bytes
-                    .saturating_sub(budget.attribute_bytes);
-        if preflight {
-            for attribute in start.attributes().with_checks(false).flatten() {
-                budget.consume_attribute(&attribute);
-            }
-            budget.check_attributes(limits)?;
-        }
-        let attributes = start
-            .attributes()
-            .with_checks(false)
-            .flatten()
-            .map(|attribute| {
-                if !preflight {
-                    budget.consume_attribute(&attribute);
-                }
-                Ok((
-                    CompactString::from(String::from_utf8_lossy(local_name(
-                        attribute.key.as_ref(),
-                    ))),
-                    CompactString::from(attribute.decode_and_unescape_value(decoder)?),
-                ))
-            })
-            .collect::<Result<Vec<_>, quick_xml::Error>>()
-            .map_err(|error| ParseError::Corrupt(format!("{context}: {error}")))?;
-        Ok(Self {
-            source_xml: None,
-            name: CompactString::from(String::from_utf8_lossy(local_name(start.name().as_ref()))),
-            attributes: attributes.into_boxed_slice(),
-            text: String::new(),
-            children: Box::default(),
-            subtree_names: Self::name_bit(local_name(start.name().as_ref())),
-        })
-    }
-
-    fn attr(&self, name: &str) -> Option<&str> {
-        self.attributes
-            .iter()
-            .find_map(|(key, value)| (key == name).then_some(value.as_str()))
-    }
-
-    fn child(&self, name: &str) -> Option<&XmlNode> {
-        self.children.iter().find(|child| child.name == name)
-    }
-
-    fn children_named<'a>(&'a self, name: &'a str) -> impl Iterator<Item = &'a XmlNode> {
-        self.children.iter().filter(move |child| child.name == name)
-    }
-
-    fn descendant(&self, name: &str) -> Option<&XmlNode> {
-        self.descendant_with_bit(name, Self::name_bit(name.as_bytes()))
-    }
-
-    fn descendant_with_bit(&self, name: &str, bit: u64) -> Option<&XmlNode> {
-        if self.subtree_names & bit == 0 {
-            return None;
-        }
-        if self.name == name {
-            return Some(self);
-        }
-        self.children
-            .iter()
-            .find_map(|child| child.descendant_with_bit(name, bit))
-    }
-
-    fn collect_descendants<'a>(&'a self, name: &str, output: &mut Vec<&'a XmlNode>) {
-        if self.name == name {
-            output.push(self);
-        }
-        for child in &self.children {
-            child.collect_descendants(name, output);
-        }
-    }
-
-    fn text_content(&self) -> String {
-        let mut value = self.text.clone();
-        for child in &self.children {
-            value.push_str(&child.text_content());
-        }
-        value
-    }
-}
-
 #[derive(Default)]
 struct XmlBudget {
     nodes: usize,
@@ -679,15 +568,20 @@ impl XmlBudget {
         limits: &ParseLimits,
         context: &str,
     ) -> Result<String, ParseError> {
-        self.source_xml_bytes = self.source_xml_bytes.saturating_add(source.len());
+        self.account_source_xml(source.len(), limits)?;
+        let source = std::str::from_utf8(source)
+            .map_err(|error| ParseError::Corrupt(format!("{context}: {error}")))?;
+        Ok(source.to_owned())
+    }
+
+    fn account_source_xml(&mut self, bytes: usize, limits: &ParseLimits) -> Result<(), ParseError> {
+        self.source_xml_bytes = self.source_xml_bytes.saturating_add(bytes);
         if self.text_bytes.saturating_add(self.source_xml_bytes) > limits.max_xml_text_bytes {
             return Err(ParseError::ResourceLimit(
                 "XML retained source bytes".into(),
             ));
         }
-        let source = std::str::from_utf8(source)
-            .map_err(|error| ParseError::Corrupt(format!("{context}: {error}")))?;
-        Ok(source.to_owned())
+        Ok(())
     }
 }
 
@@ -818,20 +712,249 @@ fn image_extension_scope(
     }
 }
 
-fn parse_xml_tree(xml: &[u8], limits: &ParseLimits, context: &str) -> Result<XmlNode, ParseError> {
+/// Builds the flat node tables for one part while the part bytes are borrowed.
+struct TreeBuilder<'x> {
+    xml: &'x [u8],
+    borrowable: bool,
+    decoder: quick_xml::encoding::Decoder,
+    context: &'x str,
+    nodes: Vec<RawNode>,
+    attributes: Vec<RawAttribute>,
+    strings: Vec<String>,
+}
+
+impl<'x> TreeBuilder<'x> {
+    fn buffer_ref(&self, bytes: &[u8]) -> Option<StrRef> {
+        if !self.borrowable {
+            return None;
+        }
+        let start = (bytes.as_ptr() as usize).checked_sub(self.xml.as_ptr() as usize)?;
+        let end = start.checked_add(bytes.len())?;
+        (end <= self.xml.len()).then(|| StrRef::Buffer {
+            start: start as u32,
+            len: bytes.len() as u32,
+        })
+    }
+
+    fn intern(&mut self, value: String) -> StrRef {
+        self.strings.push(value);
+        StrRef::Owned(self.strings.len() as u32 - 1)
+    }
+
+    /// Stores raw bytes that are known to be valid UTF-8 when borrowable.
+    fn name_ref(&mut self, bytes: &[u8]) -> StrRef {
+        match self.buffer_ref(bytes) {
+            Some(value) => value,
+            None => self.intern(String::from_utf8_lossy(bytes).into_owned()),
+        }
+    }
+
+    fn resolve(&self, value: StrRef) -> &str {
+        match value {
+            StrRef::None => "",
+            StrRef::Buffer { start, len } => {
+                let bytes = &self.xml[start as usize..start as usize + len as usize];
+                debug_assert!(std::str::from_utf8(bytes).is_ok());
+                // SAFETY: see `XmlDocument::resolve`; the builder only creates
+                // buffer references for borrowable (UTF-8 validated) parts at
+                // ASCII delimiter boundaries.
+                unsafe { std::str::from_utf8_unchecked(bytes) }
+            }
+            StrRef::Owned(index) => self.strings[index as usize].as_str(),
+        }
+    }
+
+    fn push_start(
+        &mut self,
+        start: &BytesStart<'_>,
+        budget: &mut XmlBudget,
+        limits: &ParseLimits,
+    ) -> Result<u32, ParseError> {
+        budget.consume_node_count(limits)?;
+        // Raw tag bytes bound both attribute count and total raw attribute bytes.
+        // Near a limit, reject before decoding or allocating attribute values.
+        let preflight = start.len() > limits.max_xml_attributes.saturating_sub(budget.attributes)
+            || start.len()
+                > limits
+                    .max_xml_attribute_bytes
+                    .saturating_sub(budget.attribute_bytes);
+        if preflight {
+            for attribute in start.attributes().with_checks(false).flatten() {
+                budget.consume_attribute(&attribute);
+            }
+            budget.check_attributes(limits)?;
+        }
+        let attributes_start = self.attributes.len() as u32;
+        for attribute in start.attributes().with_checks(false).flatten() {
+            if !preflight {
+                budget.consume_attribute(&attribute);
+            }
+            let name = self.name_ref(local_name(attribute.key.as_ref()));
+            let raw = attribute.value.as_ref();
+            let value = if self.borrowable && memchr::memchr(b'&', raw).is_none() {
+                self.name_ref(raw)
+            } else {
+                let decoded = attribute
+                    .decode_and_unescape_value(self.decoder)
+                    .map_err(|error| ParseError::Corrupt(format!("{}: {error}", self.context)))?;
+                self.intern(decoded.into_owned())
+            };
+            self.attributes.push(RawAttribute { name, value });
+        }
+        let attributes_len = self.attributes.len() as u32 - attributes_start;
+        let qualified = start.name();
+        let local = local_name(qualified.as_ref());
+        let name = self.name_ref(local);
+        let index = self.nodes.len() as u32;
+        self.nodes.push(RawNode::new(
+            name,
+            attributes_start,
+            attributes_len,
+            XmlNode::name_bit(local),
+        ));
+        Ok(index)
+    }
+
+    fn link_child(&mut self, parent: Option<&mut (u32, u32)>, index: u32) {
+        if let Some((parent_index, last_child)) = parent {
+            if *last_child == NONE {
+                self.nodes[*parent_index as usize].first_child = index;
+            } else {
+                self.nodes[*last_child as usize].next_sibling = index;
+            }
+            *last_child = index;
+        }
+    }
+
+    fn has_attribute(&self, index: u32, name: &str) -> bool {
+        let node = &self.nodes[index as usize];
+        let range = node.attributes_start as usize
+            ..(node.attributes_start + node.attributes_len) as usize;
+        self.attributes[range]
+            .iter()
+            .any(|attribute| self.resolve(attribute.name) == name)
+    }
+
+    /// Appends raw part bytes (valid UTF-8 in a borrowable part) to a node's text.
+    fn append_raw_text(&mut self, index: u32, raw: &[u8]) {
+        match self.nodes[index as usize].text {
+            StrRef::None => {
+                let value = self.name_ref(raw);
+                self.nodes[index as usize].text = value;
+            }
+            existing => {
+                let piece = String::from_utf8_lossy(raw).into_owned();
+                self.append_owned_text(index, existing, &piece);
+            }
+        }
+    }
+
+    fn append_text(&mut self, index: u32, piece: &str) {
+        match self.nodes[index as usize].text {
+            StrRef::None => {
+                let value = self.intern(piece.to_owned());
+                self.nodes[index as usize].text = value;
+            }
+            existing => self.append_owned_text(index, existing, piece),
+        }
+    }
+
+    fn append_owned_text(&mut self, index: u32, existing: StrRef, piece: &str) {
+        if let StrRef::Owned(string) = existing {
+            self.strings[string as usize].push_str(piece);
+        } else {
+            let mut value = self.resolve(existing).to_owned();
+            value.push_str(piece);
+            let value = self.intern(value);
+            self.nodes[index as usize].text = value;
+        }
+    }
+
+    fn retain_source(
+        &mut self,
+        index: u32,
+        source: &[u8],
+        qualified: Option<Vec<u8>>,
+        budget: &mut XmlBudget,
+        limits: &ParseLimits,
+    ) -> Result<(), ParseError> {
+        let value = match qualified {
+            Some(bytes) => {
+                budget.account_source_xml(bytes.len(), limits)?;
+                let text = String::from_utf8(bytes).map_err(|error| {
+                    ParseError::Corrupt(format!("{}: {}", self.context, error.utf8_error()))
+                })?;
+                self.intern(text)
+            }
+            None => {
+                budget.account_source_xml(source.len(), limits)?;
+                match self.buffer_ref(source) {
+                    Some(value) => value,
+                    None => {
+                        let text = std::str::from_utf8(source).map_err(|error| {
+                            ParseError::Corrupt(format!("{}: {error}", self.context))
+                        })?;
+                        self.intern(text.to_owned())
+                    }
+                }
+            }
+        };
+        self.nodes[index as usize].source_xml = value;
+        Ok(())
+    }
+}
+
+fn qualified_source(
+    name: &str,
+    is_properties: bool,
+    source: &[u8],
+    namespaces: &mut NamespaceDeclarations,
+) -> Option<Vec<u8>> {
+    let wrapper = if is_properties {
+        "nonvisualSource"
+    } else if matches!(name, "oMath" | "oMathPara") {
+        "officeMathSource"
+    } else if name == "fld" {
+        "textFieldSource"
+    } else if name == "svgBlip" {
+        "imageExtensionSource"
+    } else if matches!(name, "transition" | "timing" | "AlternateContent") {
+        "animationSource"
+    } else {
+        return None;
+    };
+    Some(scoped_source(source, namespaces, wrapper))
+}
+
+fn parse_xml_tree(
+    xml: Vec<u8>,
+    limits: &ParseLimits,
+    context: &str,
+) -> Result<XmlDocument, ParseError> {
     struct Frame {
-        node: XmlNode,
-        children: Vec<XmlNode>,
+        link: (u32, u32),
         image_extension_scope: ImageExtensionScope,
         editing_scope: editing::Scope,
     }
 
-    let xml = xml.strip_prefix(b"\xef\xbb\xbf").unwrap_or(xml);
+    let buffer = xml;
+    let base = if buffer.starts_with(b"\xef\xbb\xbf") { 3 } else { 0 };
+    let xml: &[u8] = &buffer[base..];
+    let borrowable = xml.len() < u32::MAX as usize && std::str::from_utf8(xml).is_ok();
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(false);
+    let mut builder = TreeBuilder {
+        xml,
+        borrowable,
+        decoder: reader.decoder(),
+        context,
+        nodes: Vec::new(),
+        attributes: Vec::new(),
+        strings: Vec::new(),
+    };
     let mut stack = Vec::<Frame>::new();
     let mut source_starts = Vec::new();
-    let mut root = None;
+    let mut root = NONE;
     let mut budget = XmlBudget::default();
     let track_image_extensions = memchr::memmem::find(xml, b"svgBlip").is_some();
     let track_editing = memchr::memmem::find(xml, b"cNv").is_some();
@@ -851,8 +974,7 @@ fn parse_xml_tree(xml: &[u8], limits: &ParseLimits, context: &str) -> Result<Xml
                 if stack.len() >= limits.max_xml_depth {
                     return Err(ParseError::ResourceLimit("XML nesting depth".into()));
                 }
-                let node =
-                    XmlNode::from_start(&start, reader.decoder(), &mut budget, limits, context)?;
+                let index = builder.push_start(&start, &mut budget, limits)?;
                 if track_namespaces {
                     namespace_scopes.push(namespaces.len());
                     collect_namespaces(&start, stack.len(), &mut namespaces);
@@ -870,9 +992,11 @@ fn parse_xml_tree(xml: &[u8], limits: &ParseLimits, context: &str) -> Result<Xml
                 } else {
                     ImageExtensionScope::None
                 };
+                let qualified = start.name();
+                let local = local_name(qualified.as_ref());
                 source_starts.push(
                     (editing_scope.is_properties() || matches!(
-                        local_name(start.name().as_ref()),
+                        local,
                         b"pic"
                             | b"sp"
                             | b"cxnSp"
@@ -887,22 +1011,21 @@ fn parse_xml_tree(xml: &[u8], limits: &ParseLimits, context: &str) -> Result<Xml
                             | b"timing"
                             | b"fld"
                     ) || (parent_scope == ImageExtensionScope::Extension
-                        && node.name == "svgBlip")
+                        && local == b"svgBlip")
                         || (track_existing_namespaces
-                            && local_name(start.name().as_ref()) == b"AlternateContent"
+                            && local == b"AlternateContent"
                             && stack.len() == 1))
                         .then_some(source_start),
                 );
+                builder.link_child(stack.last_mut().map(|frame| &mut frame.link), index);
                 stack.push(Frame {
-                    node,
-                    children: Vec::new(),
+                    link: (index, NONE),
                     image_extension_scope,
                     editing_scope,
                 });
             }
             Ok(Event::Empty(start)) => {
-                let mut node =
-                    XmlNode::from_start(&start, reader.decoder(), &mut budget, limits, context)?;
+                let index = builder.push_start(&start, &mut budget, limits)?;
                 let namespace_count = namespaces.len();
                 if track_namespaces {
                     collect_namespaces(&start, stack.len(), &mut namespaces);
@@ -911,124 +1034,111 @@ fn parse_xml_tree(xml: &[u8], limits: &ParseLimits, context: &str) -> Result<Xml
                     stack.last().map(|frame| frame.editing_scope).unwrap_or_default()
                         .next(&start, &namespaces.values)
                 } else { editing::Scope::None };
-                if editing_scope.retain(&node) || matches!(
-                    node.name.as_str(),
-                    "pic"
-                        | "sp"
-                        | "cxnSp"
-                        | "fmtScheme"
-                        | "model3d"
-                        | "oleObj"
-                        | "contentPart"
-                        | "control"
-                        | "oMath"
-                        | "oMathPara"
-                        | "transition"
-                        | "timing"
-                        | "fld"
-                ) || (node.name == "svgBlip"
+                let qualified = start.name();
+                let local = local_name(qualified.as_ref());
+                if editing_scope.retain(false, |name| builder.has_attribute(index, name)) || matches!(
+                    local,
+                    b"pic"
+                        | b"sp"
+                        | b"cxnSp"
+                        | b"fmtScheme"
+                        | b"model3d"
+                        | b"oleObj"
+                        | b"contentPart"
+                        | b"control"
+                        | b"oMath"
+                        | b"oMathPara"
+                        | b"transition"
+                        | b"timing"
+                        | b"fld"
+                ) || (local == b"svgBlip"
                     && stack.last().is_some_and(|frame| {
                         frame.image_extension_scope == ImageExtensionScope::Extension
                     }))
                 {
                     let source = &xml[source_start..reader.buffer_position() as usize];
-                    let qualified;
-                    let source = if editing_scope.is_properties() {
-                        qualified = scoped_source(source, &mut namespaces, "nonvisualSource");
-                        qualified.as_slice()
-                    } else if matches!(node.name.as_str(), "oMath" | "oMathPara") {
-                        qualified = scoped_source(source, &mut namespaces, "officeMathSource");
-                        qualified.as_slice()
-                    } else if node.name == "fld" {
-                        qualified = scoped_source(source, &mut namespaces, "textFieldSource");
-                        qualified.as_slice()
-                    } else if node.name == "svgBlip" {
-                        qualified = scoped_source(source, &mut namespaces, "imageExtensionSource");
-                        qualified.as_slice()
-                    } else if matches!(
-                        node.name.as_str(),
-                        "transition" | "timing" | "AlternateContent"
-                    ) {
-                        qualified = scoped_source(source, &mut namespaces, "animationSource");
-                        qualified.as_slice()
-                    } else {
-                        source
-                    };
-                    node.source_xml = Some(budget.retain_source_xml(source, limits, context)?);
+                    let name = builder.resolve(builder.nodes[index as usize].name).to_owned();
+                    let qualified = qualified_source(
+                        &name,
+                        editing_scope.is_properties(),
+                        source,
+                        &mut namespaces,
+                    );
+                    builder.retain_source(index, source, qualified, &mut budget, limits)?;
                 }
                 if track_namespaces {
                     namespaces.truncate(namespace_count);
                 }
-                if let Some(parent) = stack.last_mut() {
-                    parent.node.subtree_names |= node.subtree_names;
-                    parent.children.push(node);
-                } else if root.replace(node).is_some() {
+                builder.link_child(stack.last_mut().map(|frame| &mut frame.link), index);
+                if let Some(parent) = stack.last() {
+                    let bits = builder.nodes[index as usize].subtree_names;
+                    builder.nodes[parent.link.0 as usize].subtree_names |= bits;
+                } else if root != NONE {
                     return Err(ParseError::Corrupt(format!(
                         "{context} contains multiple XML roots"
                     )));
+                } else {
+                    root = index;
                 }
             }
             Ok(Event::Text(text)) => {
-                if let Some(node) = stack.last_mut() {
-                    let value = text
-                        .unescape()
-                        .map_err(|error| ParseError::Corrupt(format!("{context}: {error}")))?;
-                    budget.consume_text(value.len(), limits)?;
-                    node.node.text.push_str(&value);
+                if let Some(frame) = stack.last() {
+                    let index = frame.link.0;
+                    let raw = text.as_ref();
+                    if builder.borrowable && memchr::memchr(b'&', raw).is_none() {
+                        budget.consume_text(raw.len(), limits)?;
+                        builder.append_raw_text(index, raw);
+                    } else {
+                        let value = text
+                            .unescape()
+                            .map_err(|error| ParseError::Corrupt(format!("{context}: {error}")))?;
+                        budget.consume_text(value.len(), limits)?;
+                        builder.append_text(index, &value);
+                    }
                 }
             }
             Ok(Event::CData(text)) => {
-                if let Some(node) = stack.last_mut() {
+                if let Some(frame) = stack.last() {
+                    let index = frame.link.0;
                     budget.consume_text(text.len(), limits)?;
-                    node.node
-                        .text
-                        .push_str(&String::from_utf8_lossy(text.as_ref()));
+                    if builder.borrowable {
+                        builder.append_raw_text(index, text.as_ref());
+                    } else {
+                        builder.append_text(index, &String::from_utf8_lossy(text.as_ref()));
+                    }
                 }
             }
             Ok(Event::End(_)) => {
-                let Frame {
-                    mut node, children, editing_scope, ..
-                } = stack.pop().ok_or_else(|| {
+                let Frame { link: (index, last_child), editing_scope, .. } = stack.pop().ok_or_else(|| {
                     ParseError::Corrupt(format!("{context} contains an unmatched closing tag"))
                 })?;
-                node.children = children.into_boxed_slice();
-                if let Some(start) = source_starts.pop().flatten()
-                    .filter(|_| !editing_scope.is_properties() || editing_scope.retain(&node)) {
+                let has_children = last_child != NONE;
+                if let Some(start) = source_starts.pop().flatten().filter(|_| {
+                    !editing_scope.is_properties()
+                        || editing_scope.retain(has_children, |name| builder.has_attribute(index, name))
+                }) {
                     let source = &xml[start..reader.buffer_position() as usize];
-                    let qualified;
-                    let source = if editing_scope.is_properties() {
-                        qualified = scoped_source(source, &mut namespaces, "nonvisualSource");
-                        qualified.as_slice()
-                    } else if matches!(node.name.as_str(), "oMath" | "oMathPara") {
-                        qualified = scoped_source(source, &mut namespaces, "officeMathSource");
-                        qualified.as_slice()
-                    } else if node.name == "fld" {
-                        qualified = scoped_source(source, &mut namespaces, "textFieldSource");
-                        qualified.as_slice()
-                    } else if node.name == "svgBlip" {
-                        qualified = scoped_source(source, &mut namespaces, "imageExtensionSource");
-                        qualified.as_slice()
-                    } else if matches!(
-                        node.name.as_str(),
-                        "transition" | "timing" | "AlternateContent"
-                    ) {
-                        qualified = scoped_source(source, &mut namespaces, "animationSource");
-                        qualified.as_slice()
-                    } else {
-                        source
-                    };
-                    node.source_xml = Some(budget.retain_source_xml(source, limits, context)?);
+                    let name = builder.resolve(builder.nodes[index as usize].name).to_owned();
+                    let qualified = qualified_source(
+                        &name,
+                        editing_scope.is_properties(),
+                        source,
+                        &mut namespaces,
+                    );
+                    builder.retain_source(index, source, qualified, &mut budget, limits)?;
                 }
                 if track_namespaces {
                     namespaces.truncate(namespace_scopes.pop().unwrap_or(0));
                 }
-                if let Some(parent) = stack.last_mut() {
-                    parent.node.subtree_names |= node.subtree_names;
-                    parent.children.push(node);
-                } else if root.replace(node).is_some() {
+                if let Some(parent) = stack.last() {
+                    let bits = builder.nodes[index as usize].subtree_names;
+                    builder.nodes[parent.link.0 as usize].subtree_names |= bits;
+                } else if root != NONE {
                     return Err(ParseError::Corrupt(format!(
                         "{context} contains multiple XML roots"
                     )));
+                } else {
+                    root = index;
                 }
             }
             Ok(Event::Eof) => break,
@@ -1041,7 +1151,24 @@ fn parse_xml_tree(xml: &[u8], limits: &ParseLimits, context: &str) -> Result<Xml
             "{context} contains unclosed XML elements"
         )));
     }
-    root.ok_or_else(|| ParseError::Corrupt(format!("{context} has no XML root")))
+    if root == NONE {
+        return Err(ParseError::Corrupt(format!("{context} has no XML root")));
+    }
+    let TreeBuilder {
+        nodes,
+        attributes,
+        strings,
+        ..
+    } = builder;
+    drop(reader);
+    Ok(XmlDocument {
+        buffer,
+        base,
+        nodes,
+        attributes,
+        strings,
+        root,
+    })
 }
 
 fn bool_value(value: &str) -> Option<bool> {
@@ -1052,7 +1179,7 @@ fn bool_value(value: &str) -> Option<bool> {
     }
 }
 
-fn parse_transform(xfrm: Option<&XmlNode>) -> Transform {
+fn parse_transform(xfrm: Option<XmlNode<'_>>) -> Transform {
     let Some(xfrm) = xfrm else {
         return Transform::default();
     };
@@ -1084,7 +1211,7 @@ fn parse_transform(xfrm: Option<&XmlNode>) -> Transform {
     }
 }
 
-fn parse_child_transform(xfrm: Option<&XmlNode>) -> Option<Transform> {
+fn parse_child_transform(xfrm: Option<XmlNode<'_>>) -> Option<Transform> {
     let xfrm = xfrm?;
     let off = xfrm.child("chOff")?;
     let ext = xfrm.child("chExt")?;
@@ -1109,7 +1236,7 @@ fn parse_child_transform(xfrm: Option<&XmlNode>) -> Option<Transform> {
     })
 }
 
-fn node_identity(node: &XmlNode, slide_index: usize, node_index: usize) -> (String, String) {
+fn node_identity(node: XmlNode<'_>, slide_index: usize, node_index: usize) -> (String, String) {
     let properties = node.descendant("cNvPr");
     (
         properties
@@ -1123,10 +1250,10 @@ fn node_identity(node: &XmlNode, slide_index: usize, node_index: usize) -> (Stri
     )
 }
 
-fn nonvisual_properties(node: &XmlNode) -> Option<&XmlNode> {
-    node.children.iter().find(|child| {
+fn nonvisual_properties(node: XmlNode<'_>) -> Option<XmlNode<'_>> {
+    node.children().iter().find(|child| {
         matches!(
-            child.name.as_str(),
+            child.name(),
             "nvSpPr"
                 | "nvPicPr"
                 | "nvGrpSpPr"
@@ -1137,7 +1264,7 @@ fn nonvisual_properties(node: &XmlNode) -> Option<&XmlNode> {
     })
 }
 
-fn object_action(node: &XmlNode, rels: &Relationships) -> crate::ObjectAction {
+fn object_action(node: XmlNode<'_>, rels: &Relationships) -> crate::ObjectAction {
     let string = |name| node.attr(name).map(str::to_owned);
     let sound = node.child("snd");
     crate::ObjectAction {
@@ -1168,7 +1295,7 @@ fn object_action(node: &XmlNode, rels: &Relationships) -> crate::ObjectAction {
 }
 
 fn node_metadata(
-    node: &XmlNode,
+    node: XmlNode<'_>,
     context: &NodeParseContext<'_, '_>,
 ) -> Option<crate::NodeMetadata> {
     let properties = nonvisual_properties(node)?.child("cNvPr")?;
@@ -1179,7 +1306,7 @@ fn node_metadata(
     let title = properties.attr("title").map(str::to_owned);
     Some(crate::NodeMetadata {
         editing: nonvisual_properties(node).and_then(|properties| {
-            properties.children.iter().filter_map(|child| child.source_xml.as_deref())
+            properties.children().iter().filter_map(|child| child.source_xml())
                 .find_map(|xml| context.editing_cache.borrow_mut().parse(xml))
         }),
         source_id: properties.attr("id").map(str::to_owned),
@@ -1207,14 +1334,14 @@ fn node_metadata(
     })
 }
 
-fn color_element(node: &XmlNode) -> Option<&XmlNode> {
+fn color_element(node: XmlNode<'_>) -> Option<XmlNode<'_>> {
     if matches!(
-        node.name.as_str(),
+        node.name(),
         "srgbClr" | "scrgbClr" | "hslClr" | "schemeClr" | "sysClr" | "prstClr"
     ) {
         return Some(node);
     }
-    node.children.iter().find_map(color_element)
+    node.children().iter().find_map(color_element)
 }
 
 #[derive(Debug, Clone)]
@@ -1225,14 +1352,35 @@ struct ThemeDataInternal {
     major_fonts: BTreeMap<String, String>,
     minor_fonts: BTreeMap<String, String>,
     rels: Relationships,
-    fill_styles: Vec<XmlNode>,
-    background_fill_styles: Vec<XmlNode>,
-    line_styles: Vec<XmlNode>,
-    effect_styles: Vec<XmlNode>,
+    document: XmlDocument,
+    fill_styles: Vec<u32>,
+    background_fill_styles: Vec<u32>,
+    line_styles: Vec<u32>,
+    effect_styles: Vec<u32>,
     format_scheme_xml: Option<String>,
 }
 
 impl ThemeDataInternal {
+    fn style(&self, indices: &[u32], index: usize) -> Option<XmlNode<'_>> {
+        indices.get(index).map(|node| self.document.node(*node))
+    }
+
+    fn fill_style(&self, index: usize) -> Option<XmlNode<'_>> {
+        self.style(&self.fill_styles, index)
+    }
+
+    fn background_fill_style(&self, index: usize) -> Option<XmlNode<'_>> {
+        self.style(&self.background_fill_styles, index)
+    }
+
+    fn line_style(&self, index: usize) -> Option<XmlNode<'_>> {
+        self.style(&self.line_styles, index)
+    }
+
+    fn effect_style(&self, index: usize) -> Option<XmlNode<'_>> {
+        self.style(&self.effect_styles, index)
+    }
+
     fn public(&self) -> crate::PresentationTheme {
         crate::PresentationTheme {
             id: self.id.clone(),
@@ -1436,11 +1584,11 @@ fn linear_channel_to_srgb(channel: f64) -> f64 {
     encoded * 255.0
 }
 
-fn transformed_color(value: &str, color: &XmlNode) -> Option<String> {
+fn transformed_color(value: &str, color: XmlNode<'_>) -> Option<String> {
     let mut rgb = rgb_from_hex(value)?;
-    for transform in &color.children {
+    for transform in color.children() {
         let amount = transform.attr("val").and_then(percentage);
-        match (transform.name.as_str(), amount) {
+        match (transform.name(), amount) {
             ("tint", Some(amount)) => {
                 for channel in &mut rgb {
                     let linear = srgb_channel_to_linear(*channel);
@@ -1534,16 +1682,16 @@ fn transformed_color(value: &str, color: &XmlNode) -> Option<String> {
 }
 
 fn parse_color_with_placeholder(
-    node: &XmlNode,
+    node: XmlNode<'_>,
     context: Option<&ColorContext<'_>>,
     placeholder: Option<&ColorValue>,
 ) -> Option<ColorValue> {
     let color = color_element(node)?;
-    let inherited_alpha = (color.name == "schemeClr" && color.attr("val") == Some("phClr"))
+    let inherited_alpha = (color.name() == "schemeClr" && color.attr("val") == Some("phClr"))
         .then(|| placeholder.and_then(|value| value.alpha))
         .flatten()
         .unwrap_or(1.0);
-    let base_value = match color.name.as_str() {
+    let base_value = match color.name() {
         "srgbClr" => normalized_hex(color.attr("val")?),
         "scrgbClr" => {
             let channel = |name: &str| {
@@ -1642,27 +1790,28 @@ fn parse_color_with_placeholder(
     Some(ColorValue { value, alpha })
 }
 
-fn parse_color(node: &XmlNode, context: Option<&ColorContext<'_>>) -> Option<ColorValue> {
+fn parse_color(node: XmlNode<'_>, context: Option<&ColorContext<'_>>) -> Option<ColorValue> {
     parse_color_with_placeholder(node, context, None)
 }
 
 fn parse_theme(
-    xml: &[u8],
+    xml: Vec<u8>,
     path: &str,
     rels: Relationships,
     limits: &ParseLimits,
 ) -> Result<ThemeDataInternal, ParseError> {
-    let root = parse_xml_tree(xml, limits, path)?;
+    let document = parse_xml_tree(xml, limits, path)?;
+    let root = document.root();
     let color_scheme = root.descendant("clrScheme");
     let mut colors = BTreeMap::new();
     if let Some(color_scheme) = color_scheme {
-        for entry in &color_scheme.children {
+        for entry in color_scheme.children() {
             if let Some(color) = parse_color(entry, None) {
-                colors.insert(entry.name.to_string(), color.value);
+                colors.insert(entry.name().to_string(), color.value);
             }
         }
     }
-    let parse_fonts = |node: Option<&XmlNode>| {
+    let parse_fonts = |node: Option<XmlNode<'_>>| {
         let mut fonts = BTreeMap::new();
         if let Some(node) = node {
             for (element, key) in [
@@ -1681,37 +1830,42 @@ fn parse_theme(
     };
     let font_scheme = root.descendant("fontScheme");
     let format_scheme = root.descendant("fmtScheme");
+    let name = root
+        .attr("name")
+        .or_else(|| color_scheme.and_then(|scheme| scheme.attr("name")))
+        .map(str::to_owned);
+    let major_fonts = parse_fonts(font_scheme.and_then(|scheme| scheme.child("majorFont")));
+    let minor_fonts = parse_fonts(font_scheme.and_then(|scheme| scheme.child("minorFont")));
+    let format_scheme_xml = format_scheme
+        .and_then(|node| node.source_xml())
+        .map(str::to_owned);
+    let indices = |list: &str| {
+        format_scheme
+            .and_then(|scheme| scheme.child(list))
+            .map(|list| list.children().map(|node| node.index()).collect::<Vec<u32>>())
+            .unwrap_or_default()
+    };
+    let fill_styles = indices("fillStyleLst");
+    let background_fill_styles = indices("bgFillStyleLst");
+    let line_styles = indices("lnStyleLst");
+    let effect_styles = indices("effectStyleLst");
     Ok(ThemeDataInternal {
         id: path.to_owned(),
-        name: root
-            .attr("name")
-            .or_else(|| color_scheme.and_then(|scheme| scheme.attr("name")))
-            .map(str::to_owned),
+        name,
         colors,
-        major_fonts: parse_fonts(font_scheme.and_then(|scheme| scheme.child("majorFont"))),
-        minor_fonts: parse_fonts(font_scheme.and_then(|scheme| scheme.child("minorFont"))),
+        major_fonts,
+        minor_fonts,
         rels,
-        format_scheme_xml: format_scheme.and_then(|node| node.source_xml.clone()),
-        fill_styles: format_scheme
-            .and_then(|scheme| scheme.child("fillStyleLst"))
-            .map(|list| list.children.to_vec())
-            .unwrap_or_default(),
-        background_fill_styles: format_scheme
-            .and_then(|scheme| scheme.child("bgFillStyleLst"))
-            .map(|list| list.children.to_vec())
-            .unwrap_or_default(),
-        line_styles: format_scheme
-            .and_then(|scheme| scheme.child("lnStyleLst"))
-            .map(|list| list.children.to_vec())
-            .unwrap_or_default(),
-        effect_styles: format_scheme
-            .and_then(|scheme| scheme.child("effectStyleLst"))
-            .map(|list| list.children.to_vec())
-            .unwrap_or_default(),
+        document,
+        format_scheme_xml,
+        fill_styles,
+        background_fill_styles,
+        line_styles,
+        effect_styles,
     })
 }
 
-fn color_map(root: &XmlNode) -> BTreeMap<String, String> {
+fn color_map(root: XmlNode<'_>) -> BTreeMap<String, String> {
     let mapping = root.child("clrMap").or_else(|| {
         root.child("clrMapOvr")
             .and_then(|override_node| override_node.child("overrideClrMapping"))
@@ -1719,7 +1873,7 @@ fn color_map(root: &XmlNode) -> BTreeMap<String, String> {
     mapping
         .map(|mapping| {
             mapping
-                .attributes
+                .attributes()
                 .iter()
                 .map(|(name, value)| (name.to_string(), value.to_string()))
                 .collect()
@@ -1736,13 +1890,13 @@ fn merge_color_maps(
     result
 }
 
-fn named_fill<'a>(properties: &'a XmlNode, name: &str) -> Option<&'a XmlNode> {
-    (properties.name == name)
+fn named_fill<'a>(properties: XmlNode<'a>, name: &str) -> Option<XmlNode<'a>> {
+    (properties.name() == name)
         .then_some(properties)
         .or_else(|| properties.child(name))
 }
 
-fn image_crop(fill: &XmlNode) -> Option<crate::ImageCrop> {
+fn image_crop(fill: XmlNode<'_>) -> Option<crate::ImageCrop> {
     let source = fill.child("srcRect")?;
     let edge = |name: &str| {
         source
@@ -1762,7 +1916,7 @@ fn image_crop(fill: &XmlNode) -> Option<crate::ImageCrop> {
 
 /// Parse DrawingML recolor effects declared directly on an `a:blip`.
 fn parse_blip_effects(
-    blip: &XmlNode,
+    blip: XmlNode<'_>,
     context: Option<&ColorContext<'_>>,
 ) -> Option<crate::ImageEffects> {
     let mut effects = crate::ImageEffects::default();
@@ -1782,7 +1936,7 @@ fn parse_blip_effects(
     }
     if let Some(node) = blip.child("duotone") {
         let colors = node
-            .children
+            .children()
             .iter()
             .filter_map(|child| parse_color(child, context))
             .collect::<Vec<_>>();
@@ -1810,7 +1964,7 @@ fn parse_blip_effects(
 }
 
 fn parse_blip_fill(
-    fill: &XmlNode,
+    fill: XmlNode<'_>,
     context: Option<&ColorContext<'_>>,
     rels: &Relationships,
 ) -> Option<FillStyle> {
@@ -1837,7 +1991,7 @@ fn parse_blip_fill(
 }
 
 fn parse_fill_with_placeholder(
-    properties: &XmlNode,
+    properties: XmlNode<'_>,
     context: Option<&ColorContext<'_>>,
     rels: &Relationships,
     placeholder: Option<&ColorValue>,
@@ -1892,7 +2046,7 @@ fn parse_fill_with_placeholder(
 }
 
 fn parse_fill(
-    properties: &XmlNode,
+    properties: XmlNode<'_>,
     context: Option<&ColorContext<'_>>,
     rels: &Relationships,
 ) -> Option<FillStyle> {
@@ -1900,7 +2054,7 @@ fn parse_fill(
 }
 
 fn parse_line_node_with_placeholder(
-    line: &XmlNode,
+    line: XmlNode<'_>,
     context: Option<&ColorContext<'_>>,
     placeholder: Option<&ColorValue>,
 ) -> Option<LineStyle> {
@@ -1951,11 +2105,11 @@ fn parse_line_node_with_placeholder(
     })
 }
 
-fn parse_line_node(line: &XmlNode, context: Option<&ColorContext<'_>>) -> Option<LineStyle> {
+fn parse_line_node(line: XmlNode<'_>, context: Option<&ColorContext<'_>>) -> Option<LineStyle> {
     parse_line_node_with_placeholder(line, context, None)
 }
 
-fn style_matrix_fill(reference: &XmlNode, context: Option<&ColorContext<'_>>) -> Option<FillStyle> {
+fn style_matrix_fill(reference: XmlNode<'_>, context: Option<&ColorContext<'_>>) -> Option<FillStyle> {
     let index = reference.attr("idx")?.parse::<usize>().ok()?;
     if matches!(index, 0 | 1000) {
         return Some(FillStyle::None);
@@ -1963,9 +2117,9 @@ fn style_matrix_fill(reference: &XmlNode, context: Option<&ColorContext<'_>>) ->
     let theme = context?.theme?;
     let placeholder = parse_color(reference, context);
     let style = if index >= 1001 {
-        theme.background_fill_styles.get(index - 1001)
+        theme.background_fill_style(index - 1001)
     } else {
-        theme.fill_styles.get(index - 1)
+        theme.fill_style(index - 1)
     };
     style
         .and_then(|style| {
@@ -1974,7 +2128,7 @@ fn style_matrix_fill(reference: &XmlNode, context: Option<&ColorContext<'_>>) ->
         .or_else(|| placeholder.map(|color| FillStyle::Solid { color }))
 }
 
-fn style_matrix_line(reference: &XmlNode, context: Option<&ColorContext<'_>>) -> Option<LineStyle> {
+fn style_matrix_line(reference: XmlNode<'_>, context: Option<&ColorContext<'_>>) -> Option<LineStyle> {
     let index = reference.attr("idx")?.parse::<usize>().ok()?;
     if index == 0 {
         return None;
@@ -1982,8 +2136,7 @@ fn style_matrix_line(reference: &XmlNode, context: Option<&ColorContext<'_>>) ->
     let theme = context?.theme?;
     let placeholder = parse_color(reference, context);
     theme
-        .line_styles
-        .get(index - 1)
+        .line_style(index - 1)
         .and_then(|line| parse_line_node_with_placeholder(line, context, placeholder.as_ref()))
         .or_else(|| {
             placeholder.map(|color| LineStyle {
@@ -2053,7 +2206,7 @@ impl RunStyle {
 }
 
 fn run_font_family(
-    properties: &XmlNode,
+    properties: XmlNode<'_>,
     element: &str,
     colors: Option<&ColorContext<'_>>,
 ) -> Option<String> {
@@ -2069,7 +2222,7 @@ fn run_font_family(
 }
 
 fn parse_run_style(
-    properties: Option<&XmlNode>,
+    properties: Option<XmlNode<'_>>,
     colors: Option<&ColorContext<'_>>,
     rels: &Relationships,
 ) -> RunStyle {
@@ -2218,7 +2371,7 @@ impl ParagraphStyle {
     }
 }
 
-fn spacing_value(node: Option<&XmlNode>) -> Option<crate::TextSpacing> {
+fn spacing_value(node: Option<XmlNode<'_>>) -> Option<crate::TextSpacing> {
     let node = node?;
     node.child("spcPts")
         .and_then(|value| value.attr("val"))
@@ -2238,7 +2391,7 @@ fn spacing_value(node: Option<&XmlNode>) -> Option<crate::TextSpacing> {
         })
 }
 
-fn parse_paragraph_style(properties: Option<&XmlNode>) -> ParagraphStyle {
+fn parse_paragraph_style(properties: Option<XmlNode<'_>>) -> ParagraphStyle {
     let Some(properties) = properties else {
         return ParagraphStyle::default();
     };
@@ -2347,13 +2500,13 @@ fn parse_paragraph_style(properties: Option<&XmlNode>) -> ParagraphStyle {
 // Their `a:p` children are prompt text ("Click to edit Master text styles",
 // "Second level", ...), not styles: paragraph N of a slide must not pick up
 // the `lvl`/`marL` of prompt paragraph N.
-fn fallback_paragraph_properties(text_body: Option<&XmlNode>, level: usize) -> Option<&XmlNode> {
+fn fallback_paragraph_properties(text_body: Option<XmlNode<'_>>, level: usize) -> Option<XmlNode<'_>> {
     text_body?
         .child("lstStyle")
         .and_then(|style| style.child(&format!("lvl{}pPr", level.saturating_add(1))))
 }
 
-fn style_level_properties(style: Option<&XmlNode>, level: usize) -> Option<&XmlNode> {
+fn style_level_properties(style: Option<XmlNode<'_>>, level: usize) -> Option<XmlNode<'_>> {
     style.and_then(|style| {
         style
             .child(&format!("lvl{}pPr", level.saturating_add(1)))
@@ -2363,17 +2516,17 @@ fn style_level_properties(style: Option<&XmlNode>, level: usize) -> Option<&XmlN
 
 struct TextParseContext<'a, 'color> {
     source_part: Option<&'a str>,
-    presentation_text_style: Option<&'a XmlNode>,
+    presentation_text_style: Option<XmlNode<'a>>,
     shape_default_style: RunStyle,
     colors: Option<&'a ColorContext<'color>>,
     rels: &'a Relationships,
 }
 
 fn parse_text_paragraphs(
-    text_body: Option<&XmlNode>,
-    layout_text_body: Option<&XmlNode>,
-    master_text_body: Option<&XmlNode>,
-    master_text_style: Option<&XmlNode>,
+    text_body: Option<XmlNode<'_>>,
+    layout_text_body: Option<XmlNode<'_>>,
+    master_text_body: Option<XmlNode<'_>>,
+    master_text_style: Option<XmlNode<'_>>,
     context: &TextParseContext<'_, '_>,
 ) -> Vec<TextParagraph> {
     let Some(text_body) = text_body else {
@@ -2426,18 +2579,18 @@ fn parse_text_paragraphs(
                 context.rels,
             ));
             let mut runs = Vec::new();
-            let mut children = paragraph.children.iter();
+            let mut children = paragraph.children().iter();
             let mut branches = Vec::new();
             loop {
                 let Some(child) = children.next() else {
                     if let Some(previous) = branches.pop() { children = previous; continue; }
                     break;
                 };
-                match child.name.as_str() {
+                match child.name() {
                     "AlternateContent" => {
-                        if let Some(branch) = ["Choice", "Fallback"].into_iter().flat_map(|name| child.children_named(name)).find(|branch| branch.children.iter().any(|child| matches!(child.name.as_str(), "r" | "fld" | "br" | "tab" | "t" | "m" | "oMath" | "oMathPara" | "AlternateContent"))) {
+                        if let Some(branch) = ["Choice", "Fallback"].into_iter().flat_map(|name| child.children_named(name)).find(|branch| branch.children().iter().any(|child| matches!(child.name(), "r" | "fld" | "br" | "tab" | "t" | "m" | "oMath" | "oMathPara" | "AlternateContent"))) {
                             branches.push(children);
-                            children = branch.children.iter();
+                            children = branch.children().iter();
                         }
                     }
                     "fld" if fields::push_run(child, &default_style, context, &mut runs) => {}
@@ -2470,12 +2623,12 @@ fn parse_text_paragraphs(
                         runs.push(text_run("\t".into(), style));
                     }
                     "m" | "oMath" | "oMathPara" => {
-                        let source = if matches!(child.name.as_str(), "oMath" | "oMathPara") { Some(child) }
+                        let source = if matches!(child.name(), "oMath" | "oMathPara") { Some(child) }
                             else { child.descendant("oMathPara").or_else(|| child.descendant("oMath")) };
                         if let Some(source) = source {
-                            let source_xml = source.source_xml.as_deref().unwrap_or_default();
+                            let source_xml = source.source_xml().unwrap_or_default();
                             let math = rust_office_art::parse_office_math(source_xml).unwrap_or_else(||
-                                rust_office_art::OfficeMath::unparsed(source_xml.into(), source.text_content(), source.name == "oMathPara"));
+                                rust_office_art::OfficeMath::unparsed(source_xml.into(), source.text_content(), source.name() == "oMathPara"));
                             if !math.unsupported.is_empty() {
                                 if let Some(colors) = context.colors {
                                     colors.diagnostics.warn("math-fallback", "Equation has features retained in the source that are not rendered in MathML.", Some("math"));
@@ -2522,7 +2675,7 @@ fn parse_text_paragraphs(
         .collect()
 }
 
-fn inherited_body_attribute<'a>(bodies: &[Option<&'a XmlNode>], name: &str) -> Option<&'a str> {
+fn inherited_body_attribute<'a>(bodies: &[Option<XmlNode<'a>>], name: &str) -> Option<&'a str> {
     bodies.iter().find_map(|body| {
         body.and_then(|body| body.child("bodyPr"))
             .and_then(|properties| properties.attr(name))
@@ -2538,11 +2691,11 @@ fn vertical_alignment_from_value(value: Option<&str>) -> Option<VerticalAlignmen
     }
 }
 
-fn inherited_vertical_alignment(bodies: &[Option<&XmlNode>]) -> Option<VerticalAlignment> {
+fn inherited_vertical_alignment(bodies: &[Option<XmlNode<'_>>]) -> Option<VerticalAlignment> {
     vertical_alignment_from_value(inherited_body_attribute(bodies, "anchor"))
 }
 
-fn inherited_text_insets(bodies: &[Option<&XmlNode>]) -> Option<crate::TextInsets> {
+fn inherited_text_insets(bodies: &[Option<XmlNode<'_>>]) -> Option<crate::TextInsets> {
     if bodies.iter().all(Option::is_none) {
         return None;
     }
@@ -2559,7 +2712,7 @@ fn inherited_text_insets(bodies: &[Option<&XmlNode>]) -> Option<crate::TextInset
     })
 }
 
-fn inherited_autofit(bodies: &[Option<&XmlNode>]) -> Option<crate::TextAutofit> {
+fn inherited_autofit(bodies: &[Option<XmlNode<'_>>]) -> Option<crate::TextAutofit> {
     let autofit = bodies.iter().find_map(|body| {
         let properties = body.and_then(|body| body.child("bodyPr"))?;
         if properties.child("noAutofit").is_some() {
@@ -2596,7 +2749,7 @@ fn inherited_autofit(bodies: &[Option<&XmlNode>]) -> Option<crate::TextAutofit> 
     })
 }
 
-fn shape_font_style(node: Option<&XmlNode>, colors: Option<&ColorContext<'_>>) -> RunStyle {
+fn shape_font_style(node: Option<XmlNode<'_>>, colors: Option<&ColorContext<'_>>) -> RunStyle {
     let Some(reference) = node
         .and_then(|node| node.child("style"))
         .and_then(|style| style.child("fontRef"))
@@ -2621,7 +2774,7 @@ fn shape_font_style(node: Option<&XmlNode>, colors: Option<&ColorContext<'_>>) -
     }
 }
 
-fn shape_tree(root: &XmlNode) -> Option<&XmlNode> {
+fn shape_tree(root: XmlNode<'_>) -> Option<XmlNode<'_>> {
     root.child("cSld").and_then(|slide| slide.child("spTree"))
 }
 
@@ -2639,7 +2792,7 @@ fn normalized_placeholder_kind(kind: &str) -> &str {
     }
 }
 
-fn placeholder_key(node: &XmlNode) -> Option<PlaceholderKey<'_>> {
+fn placeholder_key(node: XmlNode<'_>) -> Option<PlaceholderKey<'_>> {
     let placeholder = node.descendant("ph")?;
     Some(PlaceholderKey {
         index: placeholder.attr("idx"),
@@ -2647,17 +2800,17 @@ fn placeholder_key(node: &XmlNode) -> Option<PlaceholderKey<'_>> {
     })
 }
 
-fn find_placeholder<'a>(root: &'a XmlNode, source: &XmlNode) -> Option<&'a XmlNode> {
+fn find_placeholder<'a>(root: XmlNode<'a>, source: XmlNode<'_>) -> Option<XmlNode<'a>> {
     let key = placeholder_key(source)?;
-    let candidates = shape_tree(root)?.children.iter().filter(|candidate| {
+    let candidates = shape_tree(root)?.children().iter().filter(|candidate| {
         matches!(
-            candidate.name.as_str(),
+            candidate.name(),
             "sp" | "cxnSp" | "pic" | "graphicFrame"
         )
     });
     if let Some(index) = key.index {
         if let Some(candidate) = candidates.clone().find(|candidate| {
-            placeholder_key(candidate).and_then(|value| value.index) == Some(index)
+            placeholder_key(*candidate).and_then(|value| value.index) == Some(index)
         }) {
             return Some(candidate);
         }
@@ -2665,11 +2818,11 @@ fn find_placeholder<'a>(root: &'a XmlNode, source: &XmlNode) -> Option<&'a XmlNo
     key.kind.and_then(|kind| {
         candidates
             .into_iter()
-            .find(|candidate| placeholder_key(candidate).and_then(|value| value.kind) == Some(kind))
+            .find(|candidate| placeholder_key(*candidate).and_then(|value| value.kind) == Some(kind))
     })
 }
 
-fn master_text_style<'a>(master: Option<&'a XmlNode>, source: &XmlNode) -> Option<&'a XmlNode> {
+fn master_text_style<'a>(master: Option<XmlNode<'a>>, source: XmlNode<'_>) -> Option<XmlNode<'a>> {
     let styles = master?.child("txStyles")?;
     // `p:ph@type` defaults to "obj" (ECMA-376 CT_Placeholder), so a typeless
     // placeholder such as python-pptx's `<p:ph idx="1"/>` content placeholder
@@ -2681,7 +2834,7 @@ fn master_text_style<'a>(master: Option<&'a XmlNode>, source: &XmlNode) -> Optio
     }
 }
 
-fn apply_transform(target: &mut Transform, xfrm: Option<&XmlNode>) {
+fn apply_transform(target: &mut Transform, xfrm: Option<XmlNode<'_>>) {
     let Some(xfrm) = xfrm else {
         return;
     };
@@ -2712,14 +2865,14 @@ fn apply_transform(target: &mut Transform, xfrm: Option<&XmlNode>) {
     }
 }
 
-fn shape_xfrm(node: Option<&XmlNode>) -> Option<&XmlNode> {
+fn shape_xfrm(node: Option<XmlNode<'_>>) -> Option<XmlNode<'_>> {
     node?.child("spPr")?.child("xfrm")
 }
 
 fn inherited_shape_transform(
-    own: &XmlNode,
-    layout: Option<&XmlNode>,
-    master: Option<&XmlNode>,
+    own: XmlNode<'_>,
+    layout: Option<XmlNode<'_>>,
+    master: Option<XmlNode<'_>>,
 ) -> Transform {
     let mut transform = Transform::default();
     apply_transform(&mut transform, shape_xfrm(master));
@@ -2728,6 +2881,7 @@ fn inherited_shape_transform(
     transform
 }
 
+#[cfg(test)]
 fn compact_path_number(value: f64) -> String {
     let mut output = String::new();
     push_compact_path_number(&mut output, value);
@@ -2832,7 +2986,7 @@ fn push_fixed_eight(output: &mut String, value: f64) -> bool {
     true
 }
 
-fn custom_path_point(node: &XmlNode) -> Option<(f64, f64)> {
+fn custom_path_point(node: XmlNode<'_>) -> Option<(f64, f64)> {
     Some((
         node.attr("x")?.parse::<f64>().ok()?,
         node.attr("y")?.parse::<f64>().ok()?,
@@ -2842,7 +2996,7 @@ fn custom_path_point(node: &XmlNode) -> Option<(f64, f64)> {
 /// Converts DrawingML custom paths into SVG path data normalized to a 0..1
 /// view box. Most authored freeforms use literal path coordinates; unsupported
 /// guide formulas are skipped instead of degrading the shape to a rectangle.
-fn custom_geometry_path(node: &XmlNode) -> Option<String> {
+fn custom_geometry_path(node: XmlNode<'_>) -> Option<String> {
     let paths = node.child("spPr")?.child("custGeom")?.child("pathLst")?;
     let mut output = String::new();
     let mut has_drawn_segment = false;
@@ -2868,8 +3022,8 @@ fn custom_geometry_path(node: &XmlNode) -> Option<String> {
             push_compact_path_number(output, y / height);
         };
         let mut current = None;
-        for command in &path.children {
-            match command.name.as_str() {
+        for command in path.children() {
+            match command.name() {
                 "moveTo" => {
                     if let Some(point) = command.child("pt").and_then(custom_path_point) {
                         push_command(&mut output, "M");
@@ -2962,7 +3116,7 @@ fn custom_geometry_path(node: &XmlNode) -> Option<String> {
 }
 
 fn shape_fill(
-    node: &XmlNode,
+    node: XmlNode<'_>,
     colors: Option<&ColorContext<'_>>,
     rels: &Relationships,
 ) -> Option<Option<FillStyle>> {
@@ -2992,7 +3146,7 @@ fn shape_fill(
         .map(|fill| style_matrix_fill(fill, colors))
 }
 
-fn shape_line(node: &XmlNode, colors: Option<&ColorContext<'_>>) -> Option<Option<LineStyle>> {
+fn shape_line(node: XmlNode<'_>, colors: Option<&ColorContext<'_>>) -> Option<Option<LineStyle>> {
     if let Some(line) = node
         .child("spPr")
         .and_then(|properties| properties.child("ln"))
@@ -3021,16 +3175,16 @@ struct NodeParseContext<'a, 'color> {
     limits: &'a ParseLimits,
     colors: Option<&'a ColorContext<'color>>,
     diagnostics: &'a ParseDiagnostics,
-    layout_root: Option<&'a XmlNode>,
-    master_root: Option<&'a XmlNode>,
+    layout_root: Option<XmlNode<'a>>,
+    master_root: Option<XmlNode<'a>>,
     layout_rels: Option<&'a Relationships>,
     master_rels: Option<&'a Relationships>,
-    presentation_text_style: Option<&'a XmlNode>,
-    table_styles: Option<&'a XmlNode>,
+    presentation_text_style: Option<XmlNode<'a>>,
+    table_styles: Option<XmlNode<'a>>,
 }
 
 fn parse_shape_node(
-    node: &XmlNode,
+    node: XmlNode<'_>,
     node_index: usize,
     context: &NodeParseContext<'_, '_>,
 ) -> SlideNode {
@@ -3108,7 +3262,7 @@ fn parse_shape_node(
         transform,
         shape_svg,
         paint_bounds,
-        source_xml: node.source_xml.clone(),
+        source_xml: node.source_xml().map(str::to_owned),
         geometry: ShapeGeometry {
             preset: geometry,
             path: custom_geometry_path(node),
@@ -3158,7 +3312,7 @@ fn parse_shape_node(
 }
 
 fn collect_model_assets(
-    node: &XmlNode,
+    node: XmlNode<'_>,
     rels: &Relationships,
     paths: &mut BTreeMap<String, String>,
 ) {
@@ -3180,10 +3334,10 @@ fn collect_model_assets(
         .iter()
         .fold(0, |mask, name| mask | XmlNode::name_bit(name.as_bytes()))
     });
-    if node.subtree_names & mask == 0 {
+    if node.subtree_names() & mask == 0 {
         return;
     }
-    let relationship = match node.name.as_str() {
+    let relationship = match node.name() {
         "model3d" | "wavAudioFile" | "snd" | "sndTgt" => node.attr("embed"),
         "oleObj" | "contentPart" | "control" => node.attr("id"),
         "audioFile" | "videoFile" | "quickTimeFile" => node.attr("link"),
@@ -3191,20 +3345,20 @@ fn collect_model_assets(
         _ => None,
     };
     if let Some(path) = relationship.and_then(|id| rels.internal(id)) {
-        if node.name == "model3d" {
-            paths.insert(path.clone(), node.name.to_string());
+        if node.name() == "model3d" {
+            paths.insert(path.clone(), node.name().to_string());
         } else {
             paths
                 .entry(path.clone())
-                .or_insert_with(|| node.name.to_string());
+                .or_insert_with(|| node.name().to_string());
         }
     }
-    for child in &node.children {
+    for child in node.children() {
         collect_model_assets(child, rels, paths);
     }
 }
 
-fn asset_content_type(path: &str, types: &XmlNode) -> String {
+fn asset_content_type(path: &str, types: XmlNode<'_>) -> String {
     types
         .children_named("Override")
         .find(|node| {
@@ -3231,7 +3385,7 @@ fn load_picture_assets(
     assets: &mut BTreeMap<String, PresentationAsset>,
     limits: &ParseLimits,
     options: &ParseOptions,
-    content_types: &XmlNode,
+    content_types: XmlNode<'_>,
 ) -> Result<(), ParseError> {
     for path in paths
         .keys()
@@ -3284,8 +3438,8 @@ impl rust_office_art::PictureContext for OfficeArtColors<'_, '_> {
     }
 
     fn resolve_color(&self, xml: &str) -> Option<rust_office_art::ResolvedColor> {
-        let node = parse_xml_tree(xml.as_bytes(), self.limits, "picture color").ok()?;
-        let color = parse_color(&node, self.colors)?;
+        let node = parse_xml_tree(xml.as_bytes().to_vec(), self.limits, "picture color").ok()?;
+        let color = parse_color(node.root(), self.colors)?;
         Some(rust_office_art::ResolvedColor {
             color: color.value,
             opacity: color.alpha,
@@ -3301,25 +3455,25 @@ impl rust_office_art::PictureContext for OfficeArtColors<'_, '_> {
         let index = index as usize;
         let style = match kind {
             rust_office_art::StyleReferenceKind::Fill if index >= 1001 => {
-                theme.background_fill_styles.get(index - 1001)?
+                theme.background_fill_style(index - 1001)?
             }
             rust_office_art::StyleReferenceKind::Fill => {
-                theme.fill_styles.get(index.checked_sub(1)?)?
+                theme.fill_style(index.checked_sub(1)?)?
             }
             rust_office_art::StyleReferenceKind::Line => {
-                theme.line_styles.get(index.checked_sub(1)?)?
+                theme.line_style(index.checked_sub(1)?)?
             }
             rust_office_art::StyleReferenceKind::Effect => {
-                let style = theme.effect_styles.get(index.checked_sub(1)?)?;
+                let style = theme.effect_style(index.checked_sub(1)?)?;
                 if style.child("scene3d").is_some() || style.child("sp3d").is_some() {
                     return None;
                 }
                 style.child("effectLst")?
             }
         };
-        let placeholder = parse_xml_tree(placeholder_xml.as_bytes(), self.limits, "style color")
+        let placeholder = parse_xml_tree(placeholder_xml.as_bytes().to_vec(), self.limits, "style color")
             .ok()
-            .and_then(|node| parse_color(&node, self.colors));
+            .and_then(|node| parse_color(node.root(), self.colors));
         let mut output = String::new();
         office_art_node_xml_with_color(
             style,
@@ -3332,41 +3486,41 @@ impl rust_office_art::PictureContext for OfficeArtColors<'_, '_> {
     }
 }
 
-fn office_art_node_xml(node: &XmlNode, prefix: &str, output: &mut String) {
+fn office_art_node_xml(node: XmlNode<'_>, prefix: &str, output: &mut String) {
     office_art_node_xml_with_color(node, prefix, output, None, None);
 }
 
 fn office_art_node_xml_with_color(
-    node: &XmlNode,
+    node: XmlNode<'_>,
     prefix: &str,
     output: &mut String,
     placeholder: Option<&ColorValue>,
     relationships: Option<&Relationships>,
 ) {
-    let prefix = if node.name == "useLocalDpi" {
+    let prefix = if node.name() == "useLocalDpi" {
         "a14"
     } else {
         prefix
     };
-    let replacement = (node.name == "schemeClr" && node.attr("val") == Some("phClr"))
+    let replacement = (node.name() == "schemeClr" && node.attr("val") == Some("phClr"))
         .then_some(placeholder)
         .flatten();
     let name = if replacement.is_some() {
         "srgbClr"
     } else {
-        &node.name
+        &node.name()
     };
     output.push('<');
     output.push_str(prefix);
     output.push(':');
     output.push_str(name);
-    for (name, value) in &node.attributes {
+    for (name, value) in node.attributes() {
         if value.starts_with("http://schemas.") || value.starts_with("http://purl.org/") {
             continue;
         }
-        let relationship = matches!(name.as_str(), "embed" | "link");
+        let relationship = matches!(name, "embed" | "link");
         let resolved = relationship
-            .then(|| relationships.and_then(|rels| rels.get(value.as_str())))
+            .then(|| relationships.and_then(|rels| rels.get(value)))
             .flatten();
         let value = if let Some(resolved) = resolved {
             resolved.as_str()
@@ -3387,11 +3541,11 @@ fn office_art_node_xml_with_color(
         output.push('"');
     }
     output.push('>');
-    output.push_str(&quick_xml::escape::escape(&node.text));
+    output.push_str(&quick_xml::escape::escape(node.text()));
     if let Some(alpha) = replacement.and_then(|color| color.alpha) {
         let _ = write!(output, r#"<a:alpha val="{}"/>"#, (alpha * 100000.0).round());
     }
-    for child in &node.children {
+    for child in node.children() {
         office_art_node_xml_with_color(child, "a", output, placeholder, relationships);
     }
     output.push_str("</");
@@ -3402,7 +3556,7 @@ fn office_art_node_xml_with_color(
 }
 
 fn shape_appearance_xml(
-    sources: &[(Option<&XmlNode>, Option<&Relationships>)],
+    sources: &[(Option<XmlNode<'_>>, Option<&Relationships>)],
     frame: &Transform,
 ) -> (String, String) {
     let mut properties = format!(
@@ -3428,14 +3582,14 @@ fn shape_appearance_xml(
         .iter()
         .filter_map(|(source, rels)| Some(((*source)?.child("spPr")?, *rels)))
     {
-        for child in &source.children {
-            let key = match child.name.as_str() {
+        for child in source.children() {
+            let key = match child.name() {
                 "noFill" | "solidFill" | "gradFill" | "pattFill" | "blipFill" | "grpFill" => "fill",
                 "custGeom" | "prstGeom" => "geometry",
                 "effectLst" | "effectDag" => "effects",
                 name => name,
             };
-            if child.name != "xfrm" && inherited.insert(key) {
+            if child.name() != "xfrm" && inherited.insert(key) {
                 office_art_node_xml_with_color(child, "a", &mut properties, None, relationships);
             }
         }
@@ -3447,8 +3601,8 @@ fn shape_appearance_xml(
         .iter()
         .filter_map(|(source, _)| (*source)?.child("style"))
     {
-        for child in &source.children {
-            if inherited.insert(&child.name) {
+        for child in source.children() {
+            if inherited.insert(child.name()) {
                 office_art_node_xml(child, "a", &mut style);
             }
         }
@@ -3458,8 +3612,8 @@ fn shape_appearance_xml(
 }
 
 fn picture_appearance_xml(
-    fill: &XmlNode,
-    sources: &[Option<&XmlNode>],
+    fill: XmlNode<'_>,
+    sources: &[Option<XmlNode<'_>>],
     frame: &Transform,
 ) -> String {
     let mut xml = "<pic:pic>".to_owned();
@@ -3473,8 +3627,8 @@ fn picture_appearance_xml(
         .flatten()
         .filter_map(|source| source.child("spPr"))
     {
-        for child in &properties.children {
-            if child.name != "xfrm" && inherited.insert(&child.name) {
+        for child in properties.children() {
+            if child.name() != "xfrm" && inherited.insert(child.name()) {
                 office_art_node_xml(child, "a", &mut xml);
             }
         }
@@ -3484,8 +3638,8 @@ fn picture_appearance_xml(
 }
 
 fn picture_needs_rendering(
-    fill: &XmlNode,
-    sources: &[Option<&XmlNode>],
+    fill: XmlNode<'_>,
+    sources: &[Option<XmlNode<'_>>],
     frame: &Transform,
 ) -> bool {
     frame.rotation.is_some_and(|value| value != 0.0)
@@ -3496,21 +3650,21 @@ fn picture_needs_rendering(
         || fill
             .child("stretch")
             .and_then(|node| node.child("fillRect"))
-            .is_some_and(|node| !node.attributes.is_empty())
+            .is_some_and(|node| !node.attributes().is_empty())
         || fill
             .child("blip")
-            .is_some_and(|node| node.children.iter().any(|child| child.name != "extLst"))
+            .is_some_and(|node| node.children().iter().any(|child| child.name() != "extLst"))
         || sources
             .iter()
             .flatten()
             .filter_map(|node| node.child("spPr"))
             .any(|properties| {
                 properties
-                    .children
+                    .children()
                     .iter()
-                    .any(|child| match child.name.as_str() {
+                    .any(|child| match child.name() {
                         "custGeom" | "scene3d" | "sp3d" | "effectDag" | "ln" => true,
-                        "effectLst" => !child.children.is_empty(),
+                        "effectLst" => !child.children().is_empty(),
                         "prstGeom" => child.attr("prst").is_some_and(|value| value != "rect"),
                         _ => false,
                     })
@@ -3518,8 +3672,8 @@ fn picture_needs_rendering(
 }
 
 fn parse_model3d_node(
-    frame: &XmlNode,
-    model: &XmlNode,
+    frame: XmlNode<'_>,
+    model: XmlNode<'_>,
     node_index: usize,
     context: &NodeParseContext<'_, '_>,
 ) -> SlideNode {
@@ -3536,7 +3690,7 @@ fn parse_model3d_node(
         .and_then(|id| context.rels.get(id))
         .filter(|path| context.assets.contains_key(*path))
         .cloned();
-    let source = model.source_xml.as_deref().unwrap_or_default();
+    let source = model.source_xml().unwrap_or_default();
     let model_3d = rust_office_art::model3d::parse_model3d(source, context.options, |id| {
         let path = context.rels.get(id)?;
         let asset = context.assets.get(path)?;
@@ -3580,12 +3734,12 @@ fn parse_model3d_node(
         picture_svg: None,
         fallback_picture: None,
         paint_bounds: None,
-        source_xml: model.source_xml.clone(),
+        source_xml: model.source_xml().map(str::to_owned),
     }
 }
 
-fn svg_image_relationship(node: &XmlNode) -> Option<String> {
-    let source = node.source_xml.as_deref()?;
+fn svg_image_relationship(node: XmlNode<'_>) -> Option<String> {
+    let source = node.source_xml()?;
     let mut reader = NsReader::from_reader(source.as_bytes());
     let mut depth = 0;
     loop {
@@ -3624,7 +3778,7 @@ fn svg_image_relationship(node: &XmlNode) -> Option<String> {
 }
 
 fn parse_image_node(
-    node: &XmlNode,
+    node: XmlNode<'_>,
     node_index: usize,
     context: &NodeParseContext<'_, '_>,
 ) -> SlideNode {
@@ -3675,7 +3829,7 @@ fn parse_image_node(
         .and_then(|(_, _, fallback)| fallback.clone());
     let crop = resolved_fill
         .as_ref()
-        .and_then(|(fill, _, _)| image_crop(fill));
+        .and_then(|(fill, _, _)| image_crop(*fill));
     let opacity = resolved_fill.as_ref().and_then(|(fill, _, _)| {
         fill.child("blip")
             .and_then(|blip| blip.child("alphaModFix"))
@@ -3693,7 +3847,7 @@ fn parse_image_node(
     });
     let transform = inherited_shape_transform(node, layout, master);
     let sources = [Some(node), layout, master];
-    let render_asset = |fill: &XmlNode, asset_id: &str| {
+    let render_asset = |fill: XmlNode<'_>, asset_id: &str| {
         let asset = context.assets.get(asset_id)?;
         if !picture_needs_rendering(fill, &sources, &transform)
             && !matches!(asset.content_type.as_str(), "image/tiff" | "image/tif")
@@ -3722,9 +3876,9 @@ fn parse_image_node(
     };
     let rendered = resolved_fill
         .as_ref()
-        .and_then(|(fill, asset_id, _)| render_asset(fill, asset_id));
+        .and_then(|(fill, asset_id, _)| render_asset(*fill, asset_id));
     let fallback_picture = resolved_fill.as_ref().and_then(|(fill, _, fallback)| {
-        render_asset(fill, fallback.as_deref()?).map(|picture| {
+        render_asset(*fill, fallback.as_deref()?).map(|picture| {
             Box::new(crate::PictureArtwork {
                 svg: picture.svg,
                 paint_bounds: picture.paint_bounds,
@@ -3734,7 +3888,7 @@ fn parse_image_node(
     if rendered.is_none()
         && resolved_fill
             .as_ref()
-            .is_some_and(|(fill, _, _)| picture_needs_rendering(fill, &sources, &transform))
+            .is_some_and(|(fill, _, _)| picture_needs_rendering(*fill, &sources, &transform))
     {
         let message = if fallback_picture.is_some() {
             "Preferred image appearance could not be generated; compatibility-image artwork is available."
@@ -3771,7 +3925,7 @@ fn parse_image_node(
         picture_svg,
         fallback_picture,
         paint_bounds,
-        source_xml: node.source_xml.clone(),
+        source_xml: node.source_xml().map(str::to_owned),
     }
 }
 
@@ -3815,15 +3969,14 @@ fn medium_style_2_xml(style_id: &str, style_name: &str, accent: &str) -> String 
     )
 }
 
-fn builtin_table_style(style_id: &str) -> Option<&'static XmlNode> {
-    static STYLES: OnceLock<Vec<XmlNode>> = OnceLock::new();
+fn builtin_table_style(style_id: &str) -> Option<XmlNode<'static>> {
+    static STYLES: OnceLock<Vec<XmlDocument>> = OnceLock::new();
     STYLES
         .get_or_init(|| {
             BUILTIN_MEDIUM_STYLE_2
                 .iter()
                 .filter_map(|(id, name, accent)| {
-                    parse_xml_tree(
-                        medium_style_2_xml(id, name, accent).as_bytes(),
+                    parse_xml_tree(medium_style_2_xml(id, name, accent).as_bytes().to_vec(),
                         &ParseLimits::default(),
                         "built-in table style",
                     )
@@ -3832,6 +3985,7 @@ fn builtin_table_style(style_id: &str) -> Option<&'static XmlNode> {
                 .collect()
         })
         .iter()
+        .map(XmlDocument::root)
         .find(|style| {
             style
                 .attr("styleId")
@@ -3839,7 +3993,7 @@ fn builtin_table_style(style_id: &str) -> Option<&'static XmlNode> {
         })
 }
 
-fn selected_table_style<'a>(table: &XmlNode, styles: Option<&'a XmlNode>) -> Option<&'a XmlNode> {
+fn selected_table_style<'a>(table: XmlNode<'_>, styles: Option<XmlNode<'a>>) -> Option<XmlNode<'a>> {
     let requested = table
         .child("tblPr")
         .and_then(|properties| properties.child("tableStyleId"))
@@ -3860,7 +4014,7 @@ fn selected_table_style<'a>(table: &XmlNode, styles: Option<&'a XmlNode>) -> Opt
         .or_else(|| builtin_table_style(requested))
 }
 
-fn table_flag(table: &XmlNode, name: &str) -> bool {
+fn table_flag(table: XmlNode<'_>, name: &str) -> bool {
     table
         .child("tblPr")
         .and_then(|properties| properties.attr(name))
@@ -3869,13 +4023,13 @@ fn table_flag(table: &XmlNode, name: &str) -> bool {
 }
 
 fn table_style_regions<'a>(
-    table: &XmlNode,
-    style: Option<&'a XmlNode>,
+    table: XmlNode<'_>,
+    style: Option<XmlNode<'a>>,
     row_index: usize,
     column_index: usize,
     row_count: usize,
     column_count: usize,
-) -> Vec<&'a XmlNode> {
+) -> Vec<XmlNode<'a>> {
     let Some(style) = style else {
         return Vec::new();
     };
@@ -3947,7 +4101,7 @@ fn table_style_regions<'a>(
     regions
 }
 
-fn table_region_fill(region: &XmlNode, context: &NodeParseContext<'_, '_>) -> Option<FillStyle> {
+fn table_region_fill(region: XmlNode<'_>, context: &NodeParseContext<'_, '_>) -> Option<FillStyle> {
     let style = region.child("tcStyle")?;
     style
         .child("fill")
@@ -3959,7 +4113,7 @@ fn table_region_fill(region: &XmlNode, context: &NodeParseContext<'_, '_>) -> Op
         })
 }
 
-fn table_region_text_style(region: &XmlNode, context: &NodeParseContext<'_, '_>) -> RunStyle {
+fn table_region_text_style(region: XmlNode<'_>, context: &NodeParseContext<'_, '_>) -> RunStyle {
     let Some(style) = region.child("tcTxStyle") else {
         return RunStyle::default();
     };
@@ -3976,11 +4130,11 @@ fn table_region_text_style(region: &XmlNode, context: &NodeParseContext<'_, '_>)
         _ => None,
     };
     let color = style
-        .children
+        .children()
         .iter()
         .find(|child| {
             matches!(
-                child.name.as_str(),
+                child.name(),
                 "srgbClr" | "scrgbClr" | "hslClr" | "schemeClr" | "sysClr" | "prstClr"
             )
         })
@@ -3998,7 +4152,7 @@ fn table_region_text_style(region: &XmlNode, context: &NodeParseContext<'_, '_>)
 }
 
 fn table_region_borders(
-    region: &XmlNode,
+    region: XmlNode<'_>,
     context: &NodeParseContext<'_, '_>,
     row_index: usize,
     column_index: usize,
@@ -4037,9 +4191,9 @@ fn table_region_borders(
 }
 
 fn parse_table_cell(
-    cell: &XmlNode,
+    cell: XmlNode<'_>,
     context: &NodeParseContext<'_, '_>,
-    regions: &[&XmlNode],
+    regions: &[XmlNode<'_>],
     row_index: usize,
     column_index: usize,
     row_count: usize,
@@ -4049,7 +4203,7 @@ fn parse_table_cell(
     let mut borders = BTreeMap::new();
     let mut style_fill = None;
     let mut text_style = RunStyle::default();
-    for region in regions {
+    for region in regions.iter().copied() {
         if let Some(fill) = table_region_fill(region, context) {
             style_fill = Some(fill);
         }
@@ -4127,7 +4281,7 @@ fn parse_table_cell(
     }
 }
 
-fn is_merge_continuation(cell: &XmlNode) -> bool {
+fn is_merge_continuation(cell: XmlNode<'_>) -> bool {
     ["hMerge", "vMerge"]
         .into_iter()
         .filter_map(|name| cell.attr(name))
@@ -4151,8 +4305,8 @@ impl TableMergeOrigin {
 }
 
 fn parse_table_node(
-    frame: &XmlNode,
-    table: &XmlNode,
+    frame: XmlNode<'_>,
+    table: XmlNode<'_>,
     node_index: usize,
     context: &NodeParseContext<'_, '_>,
 ) -> SlideNode {
@@ -4265,7 +4419,7 @@ fn parse_table_node(
     }
 }
 
-fn indexed_cache_values(node: &XmlNode) -> Vec<Option<String>> {
+fn indexed_cache_values(node: XmlNode<'_>) -> Vec<Option<String>> {
     let cache = [
         "strCache",
         "numCache",
@@ -4308,11 +4462,11 @@ fn indexed_cache_values(node: &XmlNode) -> Vec<Option<String>> {
     values
 }
 
-fn category_cache_is_numeric(node: &XmlNode) -> bool {
+fn category_cache_is_numeric(node: XmlNode<'_>) -> bool {
     node.descendant("numCache").is_some() || node.descendant("numLit").is_some()
 }
 
-fn chart_title(root: &XmlNode) -> Option<String> {
+fn chart_title(root: XmlNode<'_>) -> Option<String> {
     let title = root.descendant("title")?;
     let mut values = Vec::new();
     for name in ["t", "v"] {
@@ -4337,7 +4491,7 @@ struct ParsedChart {
 }
 
 fn render_shared_chart(
-    root: &XmlNode,
+    root: XmlNode<'_>,
     xml: &[u8],
     frame: &Transform,
     context: &NodeParseContext<'_, '_>,
@@ -4350,9 +4504,9 @@ fn render_shared_chart(
     let group = chart
         .and_then(|chart| chart.child("plotArea"))
         .and_then(|plot| {
-            plot.children
+            plot.children()
                 .iter()
-                .find(|node| node.name.ends_with("Chart"))
+                .find(|node| node.name().ends_with("Chart"))
         });
 
     let colors = context.colors;
@@ -4413,7 +4567,8 @@ fn parse_chart_part(
     transform: &Transform,
     companions: Option<&ChartCompanionParts>,
 ) -> Result<ParsedChart, ParseError> {
-    let root = parse_xml_tree(xml, context.limits, part_name)?;
+    let document = parse_xml_tree(xml.to_vec(), context.limits, part_name)?;
+    let root = document.root();
     let chart_types = [
         ("barChart", "bar"),
         ("bar3DChart", "bar"),
@@ -4436,11 +4591,11 @@ fn parse_chart_part(
         .child("chart")
         .and_then(|chart| chart.child("plotArea"))
         .into_iter()
-        .flat_map(|area| &area.children)
+        .flat_map(|area| area.children())
         .filter_map(|node| {
             chart_types
                 .iter()
-                .find(|(name, _)| node.name == *name)
+                .find(|(name, _)| node.name() == *name)
                 .map(|(_, kind)| (node, *kind))
         })
         .collect();
@@ -4504,9 +4659,9 @@ fn parse_chart_part(
         })
         .collect();
     Ok(ParsedChart {
-        svg: render_shared_chart(&root, xml, transform, context, companions),
+        svg: render_shared_chart(root, xml, transform, context, companions),
         chart_type: chart_type.into(),
-        title: chart_title(&root),
+        title: chart_title(root),
         series,
         has_legend: Some(root.descendant("legend").is_some()),
     })
@@ -4546,9 +4701,9 @@ fn parse_smartart_data(xml: &[u8], context: &NodeParseContext<'_, '_>) -> Parsed
             .background_xml
             .as_deref()
             .and_then(|xml| {
-                parse_xml_tree(xml.as_bytes(), context.limits, "SmartArt background").ok()
+                parse_xml_tree(xml.as_bytes().to_vec(), context.limits, "SmartArt background").ok()
             })
-            .and_then(|node| parse_fill(&node, context.colors, context.rels)),
+            .and_then(|node| parse_fill(node.root(), context.colors, context.rels)),
         ..Default::default()
     };
     for point in &data.points {
@@ -4559,8 +4714,7 @@ fn parse_smartart_data(xml: &[u8], context: &NodeParseContext<'_, '_>) -> Parsed
             continue;
         }
         let text_body = point.text_body_xml.as_deref().and_then(|xml| {
-            parse_xml_tree(
-                fields::canonical_fragment(xml).as_bytes(),
+            parse_xml_tree(fields::canonical_fragment(xml).as_bytes().to_vec(),
                 context.limits,
                 "SmartArt text",
             )
@@ -4573,7 +4727,7 @@ fn parse_smartart_data(xml: &[u8], context: &NodeParseContext<'_, '_>) -> Parsed
             colors: context.colors,
             rels: context.rels,
         };
-        let paragraphs = parse_text_paragraphs(text_body.as_ref(), None, None, None, &text_context);
+        let paragraphs = parse_text_paragraphs(text_body.as_ref().map(XmlDocument::root), None, None, None, &text_context);
         if paragraphs_have_content(&paragraphs) {
             parsed
                 .semantic_labels
@@ -4594,7 +4748,7 @@ fn smartart_child_transform(frame: &Transform) -> Transform {
 }
 
 fn parse_materialized_smartart(
-    frame_node: &XmlNode,
+    frame_node: XmlNode<'_>,
     node_index: usize,
     drawing: &rust_office_art::smartart::SmartArtDrawing,
     context: &NodeParseContext<'_, '_>,
@@ -4605,12 +4759,13 @@ fn parse_materialized_smartart(
         frame_id: &str,
         context: &NodeParseContext<'_, '_>,
     ) -> Option<SlideNode> {
-        let shape = parse_xml_tree(
-            fields::canonical_fragment(&entry.source_xml).as_bytes(),
+        let shape_document = parse_xml_tree(
+            fields::canonical_fragment(&entry.source_xml).as_bytes().to_vec(),
             context.limits,
             "SmartArt drawing",
         )
         .ok()?;
+        let shape = shape_document.root();
         if shape.child("txXfrm").is_some() && entry.text_transform.is_none() {
             context.diagnostics.warn(
                 "unsupported-smartart-text-transform",
@@ -4622,7 +4777,7 @@ fn parse_materialized_smartart(
             .model_id
             .clone()
             .unwrap_or_else(|| format!("shape-{index}"));
-        let mut parsed = parse_slide_node(&shape, index, context).ok().flatten()?;
+        let mut parsed = parse_slide_node(shape, index, context).ok().flatten()?;
         let (id, name) = match &mut parsed {
             SlideNode::Shape { id, name, .. }
             | SlideNode::Image { id, name, .. }
@@ -4670,10 +4825,10 @@ fn parse_materialized_smartart(
     let properties = drawing
         .group_properties_xml
         .as_deref()
-        .and_then(|xml| parse_xml_tree(xml.as_bytes(), context.limits, "SmartArt group").ok());
+        .and_then(|xml| parse_xml_tree(xml.as_bytes().to_vec(), context.limits, "SmartArt group").ok());
     let drawing_xfrm = properties
         .as_ref()
-        .and_then(|properties| properties.child("xfrm"));
+        .and_then(|properties| properties.root().child("xfrm"));
     let child_transform =
         parse_child_transform(drawing_xfrm).or_else(|| Some(smartart_child_transform(&frame)));
     let child_context = group_paint_context(context, &frame, child_transform.as_ref());
@@ -4720,7 +4875,7 @@ fn normalize_smartart_fallback_text(paragraphs: &mut [TextParagraph]) {
 }
 
 fn smartart_fallback_group(
-    frame_node: &XmlNode,
+    frame_node: XmlNode<'_>,
     node_index: usize,
     data: &ParsedSmartArtData,
     context: &NodeParseContext<'_, '_>,
@@ -4865,9 +5020,9 @@ fn smartart_fallback_group(
 }
 
 fn parse_smartart_frame(
-    frame_node: &XmlNode,
+    frame_node: XmlNode<'_>,
     node_index: usize,
-    graphic_data: &XmlNode,
+    graphic_data: XmlNode<'_>,
     context: &NodeParseContext<'_, '_>,
 ) -> Result<Option<SlideNode>, ParseError> {
     let Some(relationships) = graphic_data.descendant("relIds") else {
@@ -4892,7 +5047,7 @@ fn parse_smartart_frame(
         );
         return Ok(None);
     };
-    parse_xml_tree(data_xml, context.limits, data_path)?;
+    parse_xml_tree(data_xml.to_vec(), context.limits, data_path)?;
     let data_rels = context
         .related_relationships
         .get(data_path)
@@ -4926,7 +5081,7 @@ fn parse_smartart_frame(
             else {
                 continue;
             };
-            parse_xml_tree(drawing_xml, context.limits, drawing_path)?;
+            parse_xml_tree(drawing_xml.to_vec(), context.limits, drawing_path)?;
             let drawing_context = NodeParseContext {
                 source_part: Some(drawing_path),
                 rels: context
@@ -4994,7 +5149,7 @@ fn media_time_ms(value: &str) -> Option<f64> {
     result.is_finite().then_some(result)
 }
 
-fn media_playback(media: &XmlNode) -> crate::MediaPlayback {
+fn media_playback(media: XmlNode<'_>) -> crate::MediaPlayback {
     let time = |child, attribute| {
         media
             .child(child)
@@ -5047,15 +5202,15 @@ fn media_source(
 }
 
 fn parse_picture_or_media(
-    node: &XmlNode,
+    node: XmlNode<'_>,
     node_index: usize,
     context: &NodeParseContext<'_, '_>,
 ) -> SlideNode {
     let properties = nonvisual_properties(node).and_then(|node| node.child("nvPr"));
     let classic = properties.and_then(|properties| {
-        properties.children.iter().find(|child| {
+        properties.children().iter().find(|child| {
             matches!(
-                child.name.as_str(),
+                child.name(),
                 "audioCd" | "wavAudioFile" | "audioFile" | "videoFile" | "quickTimeFile"
             )
         })
@@ -5071,12 +5226,12 @@ fn parse_picture_or_media(
         .and_then(|media| media.attr("link").or_else(|| media.attr("embed")))
         .or_else(|| classic.and_then(|media| media.attr("link").or_else(|| media.attr("embed"))));
     let (asset_id, source_url) =
-        if classic.is_some_and(|media| media.name == "audioCd") && relationship.is_none() {
+        if classic.is_some_and(|media| media.name() == "audioCd") && relationship.is_none() {
             (None, None)
         } else {
             media_source(relationship, context)
         };
-    let media_type = match classic.map(|media| media.name.as_str()) {
+    let media_type = match classic.map(|media| media.name()) {
         Some("audioCd" | "wavAudioFile" | "audioFile") => crate::MediaType::Audio,
         Some("videoFile" | "quickTimeFile") => crate::MediaType::Video,
         _ => match asset_id
@@ -5116,8 +5271,8 @@ fn parse_picture_or_media(
 }
 
 fn parse_embedded_object(
-    frame: &XmlNode,
-    object: &XmlNode,
+    frame: XmlNode<'_>,
+    object: XmlNode<'_>,
     node_index: usize,
     context: &NodeParseContext<'_, '_>,
 ) -> SlideNode {
@@ -5176,12 +5331,12 @@ fn parse_embedded_object(
                 .and_then(|link| link.attr("updateAutomatic"))
                 .and_then(bool_value),
         }),
-        source_xml: object.source_xml.clone(),
+        source_xml: object.source_xml().map(str::to_owned),
     }
 }
 
 fn parse_graphic_frame(
-    node: &XmlNode,
+    node: XmlNode<'_>,
     node_index: usize,
     context: &NodeParseContext<'_, '_>,
 ) -> Result<SlideNode, ParseError> {
@@ -5297,7 +5452,7 @@ fn group_paint_context<'a, 'color>(
 }
 
 fn parse_group_node(
-    node: &XmlNode,
+    node: XmlNode<'_>,
     node_index: usize,
     context: &NodeParseContext<'_, '_>,
 ) -> Result<SlideNode, ParseError> {
@@ -5309,7 +5464,7 @@ fn parse_group_node(
     let child_transform = parse_child_transform(xfrm);
     let child_context = group_paint_context(context, &transform, child_transform.as_ref());
     let mut children = Vec::new();
-    for (child_index, child) in node.children.iter().enumerate() {
+    for (child_index, child) in node.children().iter().enumerate() {
         if let Some(child) = parse_slide_node(child, child_index, &child_context)? {
             children.push(child);
         }
@@ -5325,7 +5480,7 @@ fn parse_group_node(
 }
 
 fn parse_content_part(
-    node: &XmlNode,
+    node: XmlNode<'_>,
     node_index: usize,
     context: &NodeParseContext<'_, '_>,
 ) -> SlideNode {
@@ -5377,16 +5532,16 @@ fn parse_content_part(
         picture_svg,
         fallback_picture: None,
         paint_bounds,
-        source_xml: node.source_xml.clone(),
+        source_xml: node.source_xml().map(str::to_owned),
     }
 }
 
 fn parse_slide_node(
-    node: &XmlNode,
+    node: XmlNode<'_>,
     node_index: usize,
     context: &NodeParseContext<'_, '_>,
 ) -> Result<Option<SlideNode>, ParseError> {
-    let mut parsed = match node.name.as_str() {
+    let mut parsed = match node.name() {
         "sp" | "cxnSp" => Ok(Some(parse_shape_node(node, node_index, context))),
         "pic" => Ok(Some(parse_picture_or_media(node, node_index, context))),
         "model3d" => Ok(Some(parse_model3d_node(node, node, node_index, context))),
@@ -5404,7 +5559,7 @@ fn parse_slide_node(
             let mut media_without_preview = None;
             for branch_name in ["Choice", "Fallback"] {
                 for branch in node.children_named(branch_name) {
-                    for child in &branch.children {
+                    for child in branch.children() {
                         let Some(mut parsed) = parse_slide_node(child, node_index, context)? else {
                             continue;
                         };
@@ -5507,7 +5662,7 @@ fn parse_slide_node(
 }
 
 fn part_background(
-    root: &XmlNode,
+    root: XmlNode<'_>,
     colors: Option<&ColorContext<'_>>,
     rels: &Relationships,
 ) -> Option<FillStyle> {
@@ -5570,7 +5725,7 @@ fn clean_vml_conditionals(xml: &str) -> String {
 }
 
 fn control_vml_preview(
-    control: &XmlNode,
+    control: XmlNode<'_>,
     context: &NodeParseContext<'_, '_>,
 ) -> Option<(Transform, Option<String>, String)> {
     let shape_id = control.attr("spid")?;
@@ -5592,10 +5747,11 @@ fn control_vml_preview(
             continue;
         }
         let cleaned = clean_vml_conditionals(xml);
-        let root = match parse_xml_tree(cleaned.as_bytes(), context.limits, path) {
-            Ok(root) => root,
+        let document = match parse_xml_tree(cleaned.as_bytes().to_vec(), context.limits, path) {
+            Ok(document) => document,
             Err(_) => continue,
         };
+        let root = document.root();
         for shape in root.children_named("shape") {
             if !shape
                 .attr("spid")
@@ -5645,7 +5801,7 @@ fn control_vml_preview(
     None
 }
 
-fn parse_control(control: &XmlNode, index: usize, context: &NodeParseContext<'_, '_>) -> SlideNode {
+fn parse_control(control: XmlNode<'_>, index: usize, context: &NodeParseContext<'_, '_>) -> SlideNode {
     let id = control
         .attr("spid")
         .map(str::to_owned)
@@ -5656,9 +5812,12 @@ fn parse_control(control: &XmlNode, index: usize, context: &NodeParseContext<'_,
         .as_ref()
         .and_then(|path| context.related_parts.get(path))
         .and_then(|bytes| std::str::from_utf8(bytes).ok());
-    let root = source
-        .and_then(|xml| parse_xml_tree(xml.as_bytes(), context.limits, "embedded control").ok());
-    let root = root.as_ref().filter(|root| root.name == "ocx");
+    let document = source
+        .and_then(|xml| parse_xml_tree(xml.as_bytes().to_vec(), context.limits, "embedded control").ok());
+    let root = document
+        .as_ref()
+        .map(XmlDocument::root)
+        .filter(|root| root.name() == "ocx");
     let mut binary_asset_ids = asset_id
         .as_ref()
         .and_then(|path| context.related_relationships.get(path))
@@ -5773,11 +5932,11 @@ fn parse_control(control: &XmlNode, index: usize, context: &NodeParseContext<'_,
             preview_height_emu: control.attr("imgH").and_then(|v| v.parse().ok()),
             ..Default::default()
         }),
-        source_xml: control.source_xml.clone(),
+        source_xml: control.source_xml().map(str::to_owned),
     }
 }
 
-fn append_controls(root: &XmlNode, nodes: &mut Vec<SlideNode>, context: &NodeParseContext<'_, '_>) {
+fn append_controls(root: XmlNode<'_>, nodes: &mut Vec<SlideNode>, context: &NodeParseContext<'_, '_>) {
     if let Some(controls) = root.child("cSld").and_then(|slide| slide.child("controls")) {
         for (index, control) in controls.children_named("control").enumerate() {
             nodes.push(parse_control(control, index, context));
@@ -5786,14 +5945,14 @@ fn append_controls(root: &XmlNode, nodes: &mut Vec<SlideNode>, context: &NodePar
 }
 
 fn parse_part_nodes(
-    root: &XmlNode,
+    root: XmlNode<'_>,
     context: &NodeParseContext<'_, '_>,
 ) -> Result<Vec<SlideNode>, ParseError> {
     let mut nodes = Vec::new();
     let Some(shape_tree) = shape_tree(root) else {
         return Ok(nodes);
     };
-    for (node_index, node) in shape_tree.children.iter().enumerate() {
+    for (node_index, node) in shape_tree.children().iter().enumerate() {
         if let Some(node) = parse_slide_node(node, node_index, context)? {
             nodes.push(node);
         }
@@ -5803,14 +5962,14 @@ fn parse_part_nodes(
 }
 
 fn parse_decorative_part_nodes(
-    root: &XmlNode,
+    root: XmlNode<'_>,
     context: &NodeParseContext<'_, '_>,
 ) -> Result<Vec<SlideNode>, ParseError> {
     let mut nodes = Vec::new();
     let Some(shape_tree) = shape_tree(root) else {
         return Ok(nodes);
     };
-    for (node_index, node) in shape_tree.children.iter().enumerate() {
+    for (node_index, node) in shape_tree.children().iter().enumerate() {
         if placeholder_key(node).is_some() {
             continue;
         }
@@ -5839,14 +5998,14 @@ fn prefix_node_ids(node: &mut SlideNode, prefix: &str) {
     }
 }
 
-fn master_shapes_are_visible(root: &XmlNode) -> bool {
+fn master_shapes_are_visible(root: XmlNode<'_>) -> bool {
     root.attr("showMasterSp")
         .and_then(bool_value)
         .unwrap_or(true)
 }
 
 fn parse_slide(
-    root: &XmlNode,
+    root: XmlNode<'_>,
     context: &NodeParseContext<'_, '_>,
 ) -> Result<ParsedSlideContent, ParseError> {
     let background = [
@@ -5994,7 +6153,8 @@ fn parse_notes(
     part_name: &str,
     rels: &Relationships,
 ) -> Result<Vec<SlideNote>, ParseError> {
-    let root = parse_xml_tree(xml, limits, part_name)?;
+    let document = parse_xml_tree(xml.to_vec(), limits, part_name)?;
+    let root = document.root();
     let mut shapes = Vec::new();
     root.collect_descendants("sp", &mut shapes);
     let mut paragraphs = Vec::new();
@@ -6111,7 +6271,7 @@ fn content_type(path: &str) -> String {
 #[derive(Clone)]
 struct ParsedXmlPart {
     path: String,
-    root: XmlNode,
+    document: XmlDocument,
     rels: Relationships,
 }
 
@@ -6130,14 +6290,14 @@ fn load_xml_part(
     let Some(xml) = read_entry(archive, path, limits)? else {
         return Ok(None);
     };
-    let root = parse_xml_tree(&xml, limits, path)?;
+    let document = parse_xml_tree(xml, limits, path)?;
     let rels = match read_entry(archive, &relationship_part_path(path), limits)? {
         Some(xml) => relationships(&xml, path, limits.max_xml_depth)?,
         None => Relationships::default(),
     };
     Ok(Some(ParsedXmlPart {
         path: path.to_owned(),
-        root,
+        document,
         rels,
     }))
 }
@@ -6154,7 +6314,7 @@ fn load_theme_part(
         Some(xml) => relationships(&xml, path, limits.max_xml_depth)?,
         None => Relationships::default(),
     };
-    Ok(Some(parse_theme(&xml, path, rels, limits)?))
+    Ok(Some(parse_theme(xml, path, rels, limits)?))
 }
 
 fn related_path(rels: &Relationships, kind: &str, prefix: &str) -> Option<String> {
@@ -6201,16 +6361,9 @@ fn parse_cached(
     }
 
     let content_types = read_entry(&mut archive, "[Content_Types].xml", limits)?
-        .map(|xml| parse_xml_tree(&xml, limits, "[Content_Types].xml"))
+        .map(|xml| parse_xml_tree(xml, limits, "[Content_Types].xml"))
         .transpose()?
-        .unwrap_or(XmlNode {
-            source_xml: None,
-            name: "Types".into(),
-            attributes: Box::default(),
-            text: String::new(),
-            children: Box::default(),
-            subtree_names: XmlNode::name_bit(b"Types"),
-        });
+        .unwrap_or_else(|| XmlDocument::leaf("Types"));
     let package_rels = match read_entry(&mut archive, "_rels/.rels", limits)? {
         Some(xml) => relationships(&xml, "", limits.max_xml_depth)?,
         None => Relationships::default(),
@@ -6220,10 +6373,10 @@ fn parse_cached(
         .map(String::as_str)
         .unwrap_or("docProps/app.xml");
     let legacy_chart_defaults = read_entry(&mut archive, app_path, limits)?
-        .and_then(|xml| parse_xml_tree(&xml, limits, app_path).ok())
-        .and_then(|root| {
-            root.child("AppVersion")?
-                .text
+        .and_then(|xml| parse_xml_tree(xml, limits, app_path).ok())
+        .and_then(|document| {
+            document.root().child("AppVersion")?
+                .text()
                 .trim()
                 .split('.')
                 .next()?
@@ -6247,18 +6400,19 @@ fn parse_cached(
     let mut comment_authors = None;
     let mut modern_comment_authors = None;
     let (size, slide_paths) = parse_presentation_xml(&presentation, &rels, limits)?;
-    let presentation_root = parse_xml_tree(&presentation, limits, presentation_path)?;
-    if presentation_root.name != "presentation" {
+    let embedded_font_refs = parse_embedded_font_references(&presentation);
+    let presentation_document = parse_xml_tree(presentation, limits, presentation_path)?;
+    let presentation_root = presentation_document.root();
+    if presentation_root.name() != "presentation" {
         return Err(ParseError::Corrupt("invalid presentation root".into()));
     }
     let presentation_text_style = presentation_root.child("defaultTextStyle");
     let table_styles_path = related_path(&rels, "tableStyles", "ppt/tableStyles")
         .unwrap_or_else(|| "ppt/tableStyles.xml".to_owned());
     let table_styles_root = match read_entry(&mut archive, &table_styles_path, limits)? {
-        Some(xml) => Some(parse_xml_tree(&xml, limits, &table_styles_path)?),
+        Some(xml) => Some(parse_xml_tree(xml, limits, &table_styles_path)?),
         None => None,
     };
-    let embedded_font_refs = parse_embedded_font_references(&presentation);
     if slide_paths.is_empty()
         && presentation_root
             .child("sldIdLst")
@@ -6281,7 +6435,8 @@ fn parse_cached(
     for (index, slide_path) in slide_paths.iter().enumerate() {
         let xml = read_entry(&mut archive, slide_path, limits)?
             .ok_or_else(|| ParseError::Corrupt(format!("missing {slide_path}")))?;
-        let slide_root = parse_xml_tree(&xml, limits, slide_path)?;
+        let slide_document = parse_xml_tree(xml, limits, slide_path)?;
+        let slide_root = slide_document.root();
         let slide_relationship_xml =
             read_entry(&mut archive, &relationship_part_path(slide_path), limits)?;
         let slide_rels = match slide_relationship_xml.as_deref() {
@@ -6365,15 +6520,15 @@ fn parse_cached(
             }
         }
         for (root, rels) in [
-            (Some(&slide_root), Some(&slide_rels)),
-            (layout.map(|part| &part.root), layout.map(|part| &part.rels)),
-            (master.map(|part| &part.root), master.map(|part| &part.rels)),
+            (Some(slide_root), Some(&slide_rels)),
+            (layout.map(|part| part.document.root()), layout.map(|part| &part.rels)),
+            (master.map(|part| part.document.root()), master.map(|part| &part.rels)),
         ] {
             if let (Some(root), Some(rels)) = (root, rels) {
                 let mut content_parts = Vec::new();
                 root.collect_descendants("contentPart", &mut content_parts);
                 root.collect_descendants("control", &mut content_parts);
-                if content_parts.iter().any(|node| node.name == "control") {
+                if content_parts.iter().any(|node| node.name() == "control") {
                     for path in rels.values().filter(|path| path.ends_with(".vml")) {
                         related_paths.entry(path.clone()).or_insert(false);
                     }
@@ -6476,9 +6631,9 @@ fn parse_cached(
                     .or_insert_with(|| target.clone());
             }
         }
-        collect_model_assets(&slide_root, &slide_rels, &mut asset_paths);
+        collect_model_assets(slide_root, &slide_rels, &mut asset_paths);
         for part in [layout.as_ref(), master.as_ref()].into_iter().flatten() {
-            collect_model_assets(&part.root, &part.rels, &mut asset_paths);
+            collect_model_assets(part.document.root(), &part.rels, &mut asset_paths);
         }
         load_picture_assets(
             &mut archive,
@@ -6486,7 +6641,7 @@ fn parse_cached(
             &mut assets,
             limits,
             options,
-            &content_types,
+            content_types.root(),
         )?;
         let notes = if let Some(target) = slide_rels.related("notesSlide", "ppt/notesSlides/") {
             let notes_rels =
@@ -6555,13 +6710,13 @@ fn parse_cached(
         };
         let master_color_map = master
             .as_ref()
-            .map(|part| color_map(&part.root))
+            .map(|part| color_map(part.document.root()))
             .unwrap_or_default();
         let layout_color_map = layout
             .as_ref()
-            .map(|part| merge_color_maps(&master_color_map, &color_map(&part.root)))
+            .map(|part| merge_color_maps(&master_color_map, &color_map(part.document.root())))
             .unwrap_or_else(|| master_color_map.clone());
-        let slide_color_map = merge_color_maps(&layout_color_map, &color_map(&slide_root));
+        let slide_color_map = merge_color_maps(&layout_color_map, &color_map(slide_root));
         let diagnostics = ParseDiagnostics::new(Some(index), slide_path);
         let content = {
             let colors = ColorContext {
@@ -6586,14 +6741,14 @@ fn parse_cached(
                 limits,
                 colors: Some(&colors),
                 diagnostics: &diagnostics,
-                layout_root: layout.as_ref().map(|part| &part.root),
-                master_root: master.as_ref().map(|part| &part.root),
+                layout_root: layout.as_ref().map(|part| part.document.root()),
+                master_root: master.as_ref().map(|part| part.document.root()),
                 layout_rels: layout.as_ref().map(|part| &part.rels),
                 master_rels: master.as_ref().map(|part| &part.rels),
                 presentation_text_style,
-                table_styles: table_styles_root.as_ref(),
+                table_styles: table_styles_root.as_ref().map(XmlDocument::root),
             };
-            parse_slide(&slide_root, &context)?
+            parse_slide(slide_root, &context)?
         };
         let slide_warnings = diagnostics.take();
         slides.push(PresentationSlide {
@@ -6670,7 +6825,7 @@ fn parse_cached(
     }
 
     for part in master_parts.values().chain(layout_parts.values()) {
-        collect_model_assets(&part.root, &part.rels, &mut asset_paths);
+        collect_model_assets(part.document.root(), &part.rels, &mut asset_paths);
     }
     load_picture_assets(
         &mut archive,
@@ -6678,7 +6833,7 @@ fn parse_cached(
         &mut assets,
         limits,
         options,
-        &content_types,
+        content_types.root(),
     )?;
     let empty_related_parts = HashMap::new();
     let empty_related_relationships = HashMap::new();
@@ -6687,7 +6842,7 @@ fn parse_cached(
     for part in master_parts.values() {
         let theme_path = related_path(&part.rels, "theme", "ppt/theme/");
         let theme = theme_path.as_ref().and_then(|path| theme_parts.get(path));
-        let part_color_map = color_map(&part.root);
+        let part_color_map = color_map(part.document.root());
         let diagnostics = ParseDiagnostics::new(None, &part.path);
         let (nodes, transition, timing) = {
             let colors = ColorContext {
@@ -6717,18 +6872,19 @@ fn parse_cached(
                 layout_rels: None,
                 master_rels: None,
                 presentation_text_style,
-                table_styles: table_styles_root.as_ref(),
+                table_styles: table_styles_root.as_ref().map(XmlDocument::root),
             };
-            let nodes = parse_part_nodes(&part.root, &context)?;
+            let nodes = parse_part_nodes(part.document.root(), &context)?;
             let (transition, timing) =
-                timing::parse(&part.root, &part.rels, &assets, Some(&colors), limits)?;
+                timing::parse(part.document.root(), &part.rels, &assets, Some(&colors), limits)?;
             (nodes, transition, timing)
         };
         document_warnings.extend(diagnostics.take());
         masters.push(crate::SlideMaster {
             id: part.path.clone(),
             name: part
-                .root
+                .document
+                .root()
                 .child("cSld")
                 .and_then(|slide| slide.attr("name"))
                 .map(str::to_owned),
@@ -6754,14 +6910,14 @@ fn parse_cached(
             for target in part.rels.asset_paths() {
                 part_asset_paths.insert(target.clone(), target.clone());
             }
-            collect_model_assets(&part.root, &part.rels, &mut part_asset_paths);
+            collect_model_assets(part.document.root(), &part.rels, &mut part_asset_paths);
             load_picture_assets(
                 &mut archive,
                 &part_asset_paths,
                 &mut assets,
                 limits,
                 options,
-                &content_types,
+                content_types.root(),
             )?;
             part
         } else {
@@ -6778,8 +6934,8 @@ fn parse_cached(
         let theme = master
             .and_then(|part| related_path(&part.rels, "theme", "ppt/theme/"))
             .and_then(|path| theme_parts.get(&path));
-        let master_color_map = master.map(|part| color_map(&part.root)).unwrap_or_default();
-        let part_color_map = merge_color_maps(&master_color_map, &color_map(&part.root));
+        let master_color_map = master.map(|part| color_map(part.document.root())).unwrap_or_default();
+        let part_color_map = merge_color_maps(&master_color_map, &color_map(part.document.root()));
         let diagnostics = ParseDiagnostics::new(None, &part.path);
         let (nodes, transition, timing) = {
             let colors = ColorContext {
@@ -6805,22 +6961,23 @@ fn parse_cached(
                 colors: Some(&colors),
                 diagnostics: &diagnostics,
                 layout_root: None,
-                master_root: master.map(|part| &part.root),
+                master_root: master.map(|part| part.document.root()),
                 layout_rels: None,
                 master_rels: master.map(|part| &part.rels),
                 presentation_text_style,
-                table_styles: table_styles_root.as_ref(),
+                table_styles: table_styles_root.as_ref().map(XmlDocument::root),
             };
-            let nodes = parse_part_nodes(&part.root, &context)?;
+            let nodes = parse_part_nodes(part.document.root(), &context)?;
             let (transition, timing) =
-                timing::parse(&part.root, &part.rels, &assets, Some(&colors), limits)?;
+                timing::parse(part.document.root(), &part.rels, &assets, Some(&colors), limits)?;
             (nodes, transition, timing)
         };
         document_warnings.extend(diagnostics.take());
         layouts.push(crate::SlideLayout {
             id: part.path.clone(),
             name: part
-                .root
+                .document
+                .root()
                 .child("cSld")
                 .and_then(|slide| slide.attr("name"))
                 .map(str::to_owned),
@@ -6912,8 +7069,8 @@ fn parse_cached(
 mod tests {
     use super::*;
 
-    fn xml(value: &[u8]) -> XmlNode {
-        parse_xml_tree(value, &ParseLimits::default(), "test.xml").unwrap()
+    fn xml(value: &[u8]) -> XmlDocument {
+        parse_xml_tree(value.to_vec(), &ParseLimits::default(), "test.xml").unwrap()
     }
 
     #[test]
@@ -6922,8 +7079,8 @@ mod tests {
             xml(br#"<a:srgbClr xmlns:a="a" val="00FF00"><a:tint val="50000"/></a:srgbClr>"#);
         let shaded =
             xml(br#"<a:srgbClr xmlns:a="a" val="00FF00"><a:shade val="50000"/></a:srgbClr>"#);
-        assert_eq!(parse_color(&tinted, None).unwrap().value, "#BCFFBC");
-        assert_eq!(parse_color(&shaded, None).unwrap().value, "#00BC00");
+        assert_eq!(parse_color(tinted.root(), None).unwrap().value, "#BCFFBC");
+        assert_eq!(parse_color(shaded.root(), None).unwrap().value, "#00BC00");
     }
 
     #[test]
@@ -6942,7 +7099,7 @@ mod tests {
             ..Default::default()
         };
         assert!(matches!(
-            parse_blip_fill(&fill, None, &rels),
+            parse_blip_fill(fill.root(), None, &rels),
             Some(FillStyle::Image { opacity: Some(value), .. }) if (value - 0.14).abs() < f64::EPSILON
         ));
     }
@@ -6951,7 +7108,7 @@ mod tests {
     fn background_fill_shapes_do_not_fall_through_to_theme_styles() {
         let shape = xml(br#"<p:sp xmlns:p="p" useBgFill="1"><p:spPr/></p:sp>"#);
         assert!(matches!(
-            shape_fill(&shape, None, &Relationships::default()),
+            shape_fill(shape.root(), None, &Relationships::default()),
             Some(Some(FillStyle::None))
         ));
     }
@@ -6962,7 +7119,7 @@ mod tests {
             br#"<p:sp xmlns:p="p" xmlns:a="a"><p:spPr><a:custGeom><a:pathLst><a:path w="200" h="100"><a:moveTo><a:pt x="0" y="0"/></a:moveTo><a:lnTo><a:pt x="200" y="100"/></a:lnTo><a:close/></a:path></a:pathLst></a:custGeom></p:spPr></p:sp>"#,
         );
         assert_eq!(
-            custom_geometry_path(&shape).as_deref(),
+            custom_geometry_path(shape.root()).as_deref(),
             Some("M 0 0 L 1 1 Z")
         );
     }

@@ -1,6 +1,5 @@
 use quick_xml::{events::{BytesStart, Event}, name::ResolveResult, NsReader};
 
-use super::XmlNode;
 use crate::{ConnectorConnections, ConnectorEndpoint, ObjectEditing, ObjectEditingKind as Kind, ObjectLocks};
 use std::collections::VecDeque;
 
@@ -106,11 +105,11 @@ impl Scope {
 
     pub(super) fn is_properties(self) -> bool { matches!(self, Self::Properties(_)) }
 
-    pub(super) fn retain(self, node: &XmlNode) -> bool {
+    pub(super) fn retain(self, has_children: bool, has_attribute: impl Fn(&str) -> bool) -> bool {
         let Self::Properties(kind) = self else { return false; };
-        kind == Kind::Connector || !node.children.is_empty()
-            || node.attr("txBox").is_some() || node.attr("preferRelativeResize").is_some()
-            || node.attr("isComment").is_some()
+        kind == Kind::Connector || has_children
+            || has_attribute("txBox") || has_attribute("preferRelativeResize")
+            || has_attribute("isComment")
     }
 }
 
