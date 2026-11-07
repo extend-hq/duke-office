@@ -133,9 +133,9 @@ November 2, 2026: **1,000 documents**, with latency measured on the **999 inputs
 
 Text and feature scores use independent source-XML references; they measure extraction, not rendering fidelity. A separate 25-document Word reference sample is included in the full report.
 
-[![DOCX feature recall heatmap: rust-docx, docx-rs, office_oxide and undoc across 24 source-XML checks](docs/readme-assets/docx-optimized-20261102-feature-recall.png)](docs/readme-assets/docx-optimized-20261102-feature-recall.png)
+[![DOCX feature recall heatmap: rust-docx, docx-rs, office_oxide and undoc across 23 source-XML checks](docs/readme-assets/docx-optimized-20261102-feature-recall.png)](docs/readme-assets/docx-optimized-20261102-feature-recall.png)
 
-Each cell is recall against the independent source-XML reference on all 1,000 inputs, on a fixed 0–100% scale. Gray cells are checks a parser's output model cannot express. rust-docx (November 2 build) leads or ties on 18 of 24 checks. Its largest gaps are the image occurrence-count proxy (87.278%; payload-matched images reach 100.000%) and exact horizontal-span anchors (96.492%).
+Each cell is recall against the independent source-XML reference on all 1,000 inputs, on a fixed 0–100% scale. Gray cells are checks a parser's output model cannot express. rust-docx (November 2 build) leads or ties on 18 of 23 checks and matches all 1,069 source image occurrences to retained payload bytes. Its largest gap is exact horizontal-span anchors (96.492%); literal span text reaches 99.946%. The superseded image node-count proxy remains in the [original scoring details](docs/docx-benchmarks.md).
 
 [Results, feature recall and methodology](docs/docx-benchmarks.md) · [Benchmark tools](scripts/parser-benchmark/README.md) · [Source-reference data](crates/rust-docx/benchmarks/optimized-20261102/accuracy.json) · [Word-reference data](crates/rust-docx/benchmarks/word-reference-20261103/summary.json)
 

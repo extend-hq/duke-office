@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
+# The superseded image node-count proxy is omitted; payload-matched occurrences replace it.
 DOCX = [
     ('image_payload_occurrences', 'Images · payload occurrences'),
     ('explicit_bold_characters', 'Bold · aligned characters'),
@@ -35,7 +36,6 @@ DOCX = [
     ('tables', 'Tables · exact text anchors'),
     ('table_cells', 'Table cells · exact text anchors'),
     ('horizontal_merges', 'Horizontal spans · exact anchors'),
-    ('images', 'Images · occurrence-count proxy'),
 ]
 PPTX = [
     ('body_text','Slide text · five-grams'),('ordered_text','Slide text · ordered characters'),

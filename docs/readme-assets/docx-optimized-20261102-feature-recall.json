@@ -14,7 +14,7 @@
     },
     "display_scope": "1,000 reference inputs \u00b7 measured 2026-11-02"
   },
-  "generator_sha256": "ac3c4aa5e6f9a350c4a59c23057d81bde4c4650b3d6bee86b0d68587b0ace138",
+  "generator_sha256": "328e45474c33443f39e3aab34ef490bdcc2f5c1b64036990f03ad9b9b5350ad8",
   "matplotlib_version": "3.11.2",
   "numpy_version": "2.5.4",
   "source": "crates/rust-docx/benchmarks/optimized-20261102/accuracy.json",
@@ -827,41 +827,6 @@
           "matched": 3677,
           "expected": 3706,
           "unit": "exact normalized content anchor and value"
-        }
-      ]
-    },
-    {
-      "feature": "images",
-      "label": "Images \u00b7 occurrence-count proxy",
-      "expected": 1069,
-      "cells": [
-        {
-          "engine": "docx-core",
-          "recall": 0.872778297474275,
-          "matched": 933,
-          "expected": 1069,
-          "unit": "occurrence count only"
-        },
-        {
-          "engine": "docx-rs",
-          "recall": 0.9738072965388214,
-          "matched": 1041,
-          "expected": 1069,
-          "unit": "occurrence count only"
-        },
-        {
-          "engine": "office_oxide",
-          "recall": 0.9560336763330215,
-          "matched": 1022,
-          "expected": 1069,
-          "unit": "occurrence count only"
-        },
-        {
-          "engine": "undoc",
-          "recall": 0.9775491113189897,
-          "matched": 1045,
-          "expected": 1069,
-          "unit": "occurrence count only"
         }
       ]
     }

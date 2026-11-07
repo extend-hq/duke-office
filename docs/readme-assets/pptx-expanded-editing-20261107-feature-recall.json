@@ -846,7 +846,7 @@
     ],
     "display_scope": "628 reference packages \u00b7 expanded-editing \u00b7 measured 2026-11-07"
   },
-  "generator_sha256": "ac3c4aa5e6f9a350c4a59c23057d81bde4c4650b3d6bee86b0d68587b0ace138",
+  "generator_sha256": "328e45474c33443f39e3aab34ef490bdcc2f5c1b64036990f03ad9b9b5350ad8",
   "matplotlib_version": "3.11.2",
   "numpy_version": "2.5.4",
   "source": "output/pptx-benchmark-20261106/expanded-editing/assessment.json",
