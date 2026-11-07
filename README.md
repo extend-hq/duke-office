@@ -46,7 +46,7 @@ CI uses Rust 1.93.1 and Node.js 24. Install `wasm-pack` and run `npm run build:b
 | PowerPoint parsing and slide models | [rust-pptx](crates/rust-pptx) |
 | Shared chart and artwork rendering | [rust-office-charts](crates/rust-office-charts), [rust-office-art](crates/rust-office-art), [art architecture](docs/office-art-architecture.md) |
 | Browser loaders and generated chart WASM | [browser](browser), [chart WASM bindings](crates/rust-office-charts-wasm) |
-| Benchmarks and visual comparisons | [parser tools](scripts/parser-benchmark/README.md), [chart tools](scripts/chart-fidelity/README.md), [art tools](scripts/image-fidelity/README.md) |
+| Benchmarks and visual comparisons | [DOCX parser tools](scripts/parser-benchmark/README.md), [PPTX parser tools](scripts/pptx-benchmark/README.md), [chart tools](scripts/chart-fidelity/README.md), [art tools](scripts/image-fidelity/README.md) |
 | Versions and publication from main | [Release guide](RELEASING.md) |
 
 Parser and shared renderer fixes belong here; React layout and interaction changes belong in the viewer repositories. Rust crates and npm packages have independent versions.
@@ -133,7 +133,21 @@ November 2, 2026: **1,000 documents**, with latency measured on the **999 inputs
 
 Text and feature scores use independent source-XML references; they measure extraction, not rendering fidelity. A separate 25-document Word reference sample is included in the full report.
 
+[![DOCX feature recall heatmap: rust-docx, docx-rs, office_oxide and undoc across 24 source-XML checks](docs/readme-assets/docx-optimized-20261102-feature-recall.png)](docs/readme-assets/docx-optimized-20261102-feature-recall.png)
+
+Each cell is recall against the independent source-XML reference on all 1,000 inputs, on a fixed 0–100% scale. Gray cells are checks a parser's output model cannot express. rust-docx (November 2 build) leads or ties on 18 of 24 checks. Its largest gaps are the image occurrence-count proxy (87.278%; payload-matched images reach 100.000%) and exact horizontal-span anchors (96.492%).
+
 [Results, feature recall and methodology](docs/docx-benchmarks.md) · [Benchmark tools](scripts/parser-benchmark/README.md) · [Source-reference data](crates/rust-docx/benchmarks/optimized-20261102/accuracy.json) · [Word-reference data](crates/rust-docx/benchmarks/word-reference-20261103/summary.json)
+
+### PPTX parser benchmarks
+
+[![PPTX feature recall heatmap: rust-pptx and seven other PowerPoint parsers across 19 source-XML checks](docs/readme-assets/pptx-expanded-editing-20261107-feature-recall.png)](docs/readme-assets/pptx-expanded-editing-20261107-feature-recall.png)
+
+November 7, 2026, rust-pptx 0.1.6: **eight parsers on 630 OOXML inputs**, scored against **628 independent source-XML references**. Each cell is recall on a fixed 0–100% scale; failed parses count as zero, and gray cells are checks a parser's output model cannot express. These measure extraction, not rendering fidelity.
+
+rust-pptx leads or ties on 18 of 19 checks. Image payload occurrences reach 93.791%: all 113 misses are pictures with a preferred SVG alternative, where rust-pptx selects the SVG and retains the fallback bitmap separately, while the reference counts only the primary blip.
+
+[Specification audit, timing and methodology](docs/pptx-parser-audit.md) · [Benchmark tools](scripts/pptx-benchmark/README.md) · [Measurements](docs/readme-assets/pptx-expanded-editing-20261107-feature-recall.csv) · [Provenance](docs/readme-assets/pptx-expanded-editing-20261107-feature-recall.json)
 
 ## License
 

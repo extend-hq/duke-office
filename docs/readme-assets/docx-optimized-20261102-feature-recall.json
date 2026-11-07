@@ -1,0 +1,869 @@
+{
+  "format": "docx",
+  "scope": "Seeded 1,000 DOCX inputs. Accuracy includes failures as zero wherever a source reference is available. Native latency uses the 999 common successful inputs. Source XML references are independent extraction checks, not a Word rendering oracle.",
+  "identity": {
+    "measured_date": "2026-11-02",
+    "measured_commit": "dcce836072cb01a24f6490c97643f825d2d6902e",
+    "binary_sha256": [
+      "f15b9150db8ed9136311995e8f554ed16a55ebf300aee446ff9e7b34a35b9220"
+    ],
+    "versions": {
+      "docx-rs": "0.4.22",
+      "office_oxide": "0.1.15",
+      "undoc": "0.27.1"
+    },
+    "display_scope": "1,000 reference inputs \u00b7 measured 2026-11-02"
+  },
+  "generator_sha256": "ac3c4aa5e6f9a350c4a59c23057d81bde4c4650b3d6bee86b0d68587b0ace138",
+  "matplotlib_version": "3.11.2",
+  "numpy_version": "2.5.4",
+  "source": "crates/rust-docx/benchmarks/optimized-20261102/accuracy.json",
+  "source_sha256": "c9825ca33297c39476bfb51ef09a6c416853633666579647df3006e641dd2680",
+  "scale": [
+    0,
+    100
+  ],
+  "unscored": "Not scored",
+  "rows": [
+    {
+      "feature": "image_payload_occurrences",
+      "label": "Images \u00b7 payload occurrences",
+      "expected": 1069,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 1.0,
+          "matched": 1069,
+          "expected": 1069,
+          "unit": "source image occurrence matched to native payload bytes, allowing declared SVG alternatives"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.9738072965388214,
+          "matched": 1041,
+          "expected": 1069,
+          "unit": "source image occurrence matched to native payload bytes, allowing declared SVG alternatives"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 0.9560336763330215,
+          "matched": 1022,
+          "expected": 1069,
+          "unit": "source image occurrence matched to native payload bytes, allowing declared SVG alternatives"
+        },
+        {
+          "engine": "undoc",
+          "recall": 0.9756782039289055,
+          "matched": 1043,
+          "expected": 1069,
+          "unit": "source image occurrence matched to native payload bytes, allowing declared SVG alternatives"
+        }
+      ]
+    },
+    {
+      "feature": "explicit_bold_characters",
+      "label": "Bold \u00b7 aligned characters",
+      "expected": 680435,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 1.0,
+          "matched": 680435,
+          "expected": 680435,
+          "unit": "explicit source bold characters at aligned literal paragraph offsets"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.9457714550250942,
+          "matched": 643536,
+          "expected": 680435,
+          "unit": "explicit source bold characters at aligned literal paragraph offsets"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 0.999476805278976,
+          "matched": 680079,
+          "expected": 680435,
+          "unit": "explicit source bold characters at aligned literal paragraph offsets"
+        },
+        {
+          "engine": "undoc",
+          "recall": 0.9801553418034051,
+          "matched": 666932,
+          "expected": 680435,
+          "unit": "explicit source bold characters at aligned literal paragraph offsets"
+        }
+      ]
+    },
+    {
+      "feature": "explicit_italic_characters",
+      "label": "Italic \u00b7 aligned characters",
+      "expected": 433678,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 1.0,
+          "matched": 433678,
+          "expected": 433678,
+          "unit": "explicit source markup at ordered literal character offsets; inherited styles and field links are outside reference scope"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": null,
+          "matched": null,
+          "expected": 433678,
+          "unit": null
+        },
+        {
+          "engine": "office_oxide",
+          "recall": null,
+          "matched": null,
+          "expected": 433678,
+          "unit": null
+        },
+        {
+          "engine": "undoc",
+          "recall": null,
+          "matched": null,
+          "expected": 433678,
+          "unit": null
+        }
+      ]
+    },
+    {
+      "feature": "hyperlink_target_characters",
+      "label": "Links \u00b7 targets at aligned characters",
+      "expected": 101572,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 1.0,
+          "matched": 101572,
+          "expected": 101572,
+          "unit": "explicit source markup at ordered literal character offsets; inherited styles and field links are outside reference scope"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": null,
+          "matched": null,
+          "expected": 101572,
+          "unit": null
+        },
+        {
+          "engine": "office_oxide",
+          "recall": null,
+          "matched": null,
+          "expected": 101572,
+          "unit": null
+        },
+        {
+          "engine": "undoc",
+          "recall": null,
+          "matched": null,
+          "expected": 101572,
+          "unit": null
+        }
+      ]
+    },
+    {
+      "feature": "table_text_literal",
+      "label": "Tables \u00b7 literal text retained",
+      "expected": 2267,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 1.0,
+          "matched": 2267,
+          "expected": 2267,
+          "unit": "one-to-one literal-content subsequence anchor"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.9642699602999559,
+          "matched": 2186,
+          "expected": 2267,
+          "unit": "one-to-one literal-content subsequence anchor"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 0.9986766651962946,
+          "matched": 2264,
+          "expected": 2267,
+          "unit": "one-to-one literal-content subsequence anchor"
+        },
+        {
+          "engine": "undoc",
+          "recall": 0.9770621967357741,
+          "matched": 2215,
+          "expected": 2267,
+          "unit": "one-to-one literal-content subsequence anchor"
+        }
+      ]
+    },
+    {
+      "feature": "horizontal_spans_literal",
+      "label": "Horizontal spans \u00b7 literal text + span",
+      "expected": 3706,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 0.9994603345925526,
+          "matched": 3704,
+          "expected": 3706,
+          "unit": "one-to-one literal-content subsequence anchor and exact span value"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.9835402050728548,
+          "matched": 3645,
+          "expected": 3706,
+          "unit": "one-to-one literal-content subsequence anchor and exact span value"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 1.0,
+          "matched": 3706,
+          "expected": 3706,
+          "unit": "one-to-one literal-content subsequence anchor and exact span value"
+        },
+        {
+          "engine": "undoc",
+          "recall": 0.9921748515920129,
+          "matched": 3677,
+          "expected": 3706,
+          "unit": "one-to-one literal-content subsequence anchor and exact span value"
+        }
+      ]
+    },
+    {
+      "feature": "headings",
+      "label": "Headings \u00b7 text + level",
+      "expected": 6741,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 0.9998516540572615,
+          "matched": 6740,
+          "expected": 6741,
+          "unit": "exact normalized content anchor and value"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.5300400534045394,
+          "matched": 3573,
+          "expected": 6741,
+          "unit": "exact normalized content anchor and value"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 0.9946595460614153,
+          "matched": 6705,
+          "expected": 6741,
+          "unit": "exact normalized content anchor and value"
+        },
+        {
+          "engine": "undoc",
+          "recall": 0.862186619195965,
+          "matched": 5812,
+          "expected": 6741,
+          "unit": "exact normalized content anchor and value"
+        }
+      ]
+    },
+    {
+      "feature": "lists",
+      "label": "Lists \u00b7 paragraph membership",
+      "expected": 15361,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 0.9998047002148298,
+          "matched": 15358,
+          "expected": 15361,
+          "unit": "exact normalized content anchor"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.9856780157541827,
+          "matched": 15141,
+          "expected": 15361,
+          "unit": "exact normalized content anchor"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 0.9175834906581603,
+          "matched": 14095,
+          "expected": 15361,
+          "unit": "exact normalized content anchor"
+        },
+        {
+          "engine": "undoc",
+          "recall": 0.9318403749755876,
+          "matched": 14314,
+          "expected": 15361,
+          "unit": "exact normalized content anchor"
+        }
+      ]
+    },
+    {
+      "feature": "vertical_merges",
+      "label": "Vertical merges \u00b7 start markers",
+      "expected": 1398,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 0.9957081545064378,
+          "matched": 1392,
+          "expected": 1398,
+          "unit": "exact normalized content anchor"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.9992846924177397,
+          "matched": 1397,
+          "expected": 1398,
+          "unit": "exact normalized content anchor"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 0.98068669527897,
+          "matched": 1371,
+          "expected": 1398,
+          "unit": "exact normalized content anchor"
+        },
+        {
+          "engine": "undoc",
+          "recall": 0.9413447782546495,
+          "matched": 1316,
+          "expected": 1398,
+          "unit": "exact normalized content anchor"
+        }
+      ]
+    },
+    {
+      "feature": "textbox_text",
+      "label": "Textboxes \u00b7 exact text anchors",
+      "expected": 2652,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 0.997737556561086,
+          "matched": 2646,
+          "expected": 2652,
+          "unit": "exact normalized content anchor"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.3563348416289593,
+          "matched": 945,
+          "expected": 2652,
+          "unit": "exact normalized content anchor"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 0.9962292609351433,
+          "matched": 2642,
+          "expected": 2652,
+          "unit": "exact normalized content anchor"
+        },
+        {
+          "engine": "undoc",
+          "recall": 1.0,
+          "matched": 2652,
+          "expected": 2652,
+          "unit": "exact normalized content anchor"
+        }
+      ]
+    },
+    {
+      "feature": "nested_tables",
+      "label": "Nested tables \u00b7 exact anchors",
+      "expected": 97,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 1.0,
+          "matched": 97,
+          "expected": 97,
+          "unit": "exact normalized content anchor"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.979381443298969,
+          "matched": 95,
+          "expected": 97,
+          "unit": "exact normalized content anchor"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 0.9896907216494846,
+          "matched": 96,
+          "expected": 97,
+          "unit": "exact normalized content anchor"
+        },
+        {
+          "engine": "undoc",
+          "recall": 0.979381443298969,
+          "matched": 95,
+          "expected": 97,
+          "unit": "exact normalized content anchor"
+        }
+      ]
+    },
+    {
+      "feature": "header_text",
+      "label": "Headers \u00b7 exact paragraph anchors",
+      "expected": 807,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 1.0,
+          "matched": 807,
+          "expected": 807,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.6988847583643123,
+          "matched": 564,
+          "expected": 807,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 0.9950433705080545,
+          "matched": 803,
+          "expected": 807,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        },
+        {
+          "engine": "undoc",
+          "recall": 1.0,
+          "matched": 807,
+          "expected": 807,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        }
+      ]
+    },
+    {
+      "feature": "footer_text",
+      "label": "Footers \u00b7 exact paragraph anchors",
+      "expected": 818,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 1.0,
+          "matched": 818,
+          "expected": 818,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.6185819070904646,
+          "matched": 506,
+          "expected": 818,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 0.980440097799511,
+          "matched": 802,
+          "expected": 818,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        },
+        {
+          "engine": "undoc",
+          "recall": 1.0,
+          "matched": 818,
+          "expected": 818,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        }
+      ]
+    },
+    {
+      "feature": "footnotes_text",
+      "label": "Footnotes \u00b7 exact text anchors",
+      "expected": 339,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 1.0,
+          "matched": 339,
+          "expected": 339,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.0,
+          "matched": 0,
+          "expected": 339,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 1.0,
+          "matched": 339,
+          "expected": 339,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        },
+        {
+          "engine": "undoc",
+          "recall": 0.9203539823008849,
+          "matched": 312,
+          "expected": 339,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        }
+      ]
+    },
+    {
+      "feature": "endnotes_text",
+      "label": "Endnotes \u00b7 exact text anchors",
+      "expected": 46,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 1.0,
+          "matched": 46,
+          "expected": 46,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.0,
+          "matched": 0,
+          "expected": 46,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 1.0,
+          "matched": 46,
+          "expected": 46,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        },
+        {
+          "engine": "undoc",
+          "recall": 0.9565217391304348,
+          "matched": 44,
+          "expected": 46,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        }
+      ]
+    },
+    {
+      "feature": "equations",
+      "label": "Equations \u00b7 occurrence-count proxy",
+      "expected": 52,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 1.0,
+          "matched": 52,
+          "expected": 52,
+          "unit": "occurrence count only"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.0,
+          "matched": 0,
+          "expected": 52,
+          "unit": "occurrence count only"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 0.0,
+          "matched": 0,
+          "expected": 52,
+          "unit": "occurrence count only"
+        },
+        {
+          "engine": "undoc",
+          "recall": 0.0,
+          "matched": 0,
+          "expected": 52,
+          "unit": "occurrence count only"
+        }
+      ]
+    },
+    {
+      "feature": "comments_text",
+      "label": "Comments \u00b7 exact text anchors",
+      "expected": 40,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 1.0,
+          "matched": 40,
+          "expected": 40,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 1.0,
+          "matched": 40,
+          "expected": 40,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 1.0,
+          "matched": 40,
+          "expected": 40,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        },
+        {
+          "engine": "undoc",
+          "recall": 0.0,
+          "matched": 0,
+          "expected": 40,
+          "unit": "distinct exact normalized paragraphs in matching story"
+        }
+      ]
+    },
+    {
+      "feature": "explicit_bold",
+      "label": "Bold \u00b7 source-run five-grams",
+      "expected": 548210,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 0.9823625982743839,
+          "matched": 538541,
+          "expected": 548210,
+          "unit": "normalized character 5-grams in explicitly marked source text; segmentation-sensitive"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.9694186534357272,
+          "matched": 531445,
+          "expected": 548210,
+          "unit": "normalized character 5-grams in explicitly marked source text; segmentation-sensitive"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 0.9824720453840682,
+          "matched": 538601,
+          "expected": 548210,
+          "unit": "normalized character 5-grams in explicitly marked source text; segmentation-sensitive"
+        },
+        {
+          "engine": "undoc",
+          "recall": 0.982355301800405,
+          "matched": 538537,
+          "expected": 548210,
+          "unit": "normalized character 5-grams in explicitly marked source text; segmentation-sensitive"
+        }
+      ]
+    },
+    {
+      "feature": "explicit_italic",
+      "label": "Italic \u00b7 source-run five-grams",
+      "expected": 378087,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 0.9926974479418759,
+          "matched": 375326,
+          "expected": 378087,
+          "unit": "normalized character 5-grams in explicitly marked source text; segmentation-sensitive"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.9803510832162968,
+          "matched": 370658,
+          "expected": 378087,
+          "unit": "normalized character 5-grams in explicitly marked source text; segmentation-sensitive"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 0.992149954904559,
+          "matched": 375119,
+          "expected": 378087,
+          "unit": "normalized character 5-grams in explicitly marked source text; segmentation-sensitive"
+        },
+        {
+          "engine": "undoc",
+          "recall": 0.9926948030479757,
+          "matched": 375325,
+          "expected": 378087,
+          "unit": "normalized character 5-grams in explicitly marked source text; segmentation-sensitive"
+        }
+      ]
+    },
+    {
+      "feature": "hyperlinks",
+      "label": "Links \u00b7 source-run five-grams",
+      "expected": 88320,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 0.9934103260869566,
+          "matched": 87738,
+          "expected": 88320,
+          "unit": "normalized character 5-grams in explicitly marked source text; segmentation-sensitive"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.9513813405797101,
+          "matched": 84026,
+          "expected": 88320,
+          "unit": "normalized character 5-grams in explicitly marked source text; segmentation-sensitive"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 0.9635529891304347,
+          "matched": 85101,
+          "expected": 88320,
+          "unit": "normalized character 5-grams in explicitly marked source text; segmentation-sensitive"
+        },
+        {
+          "engine": "undoc",
+          "recall": 0.6833220108695652,
+          "matched": 60351,
+          "expected": 88320,
+          "unit": "normalized character 5-grams in explicitly marked source text; segmentation-sensitive"
+        }
+      ]
+    },
+    {
+      "feature": "tables",
+      "label": "Tables \u00b7 exact text anchors",
+      "expected": 2267,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 0.9898544331715924,
+          "matched": 2244,
+          "expected": 2267,
+          "unit": "exact normalized content anchor"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.9642699602999559,
+          "matched": 2186,
+          "expected": 2267,
+          "unit": "exact normalized content anchor"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 0.9704455227172475,
+          "matched": 2200,
+          "expected": 2267,
+          "unit": "exact normalized content anchor"
+        },
+        {
+          "engine": "undoc",
+          "recall": 0.9770621967357741,
+          "matched": 2215,
+          "expected": 2267,
+          "unit": "exact normalized content anchor"
+        }
+      ]
+    },
+    {
+      "feature": "table_cells",
+      "label": "Table cells \u00b7 exact text anchors",
+      "expected": 62518,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 0.9974407370677245,
+          "matched": 62358,
+          "expected": 62518,
+          "unit": "exact normalized content anchor"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.9952013820019834,
+          "matched": 62218,
+          "expected": 62518,
+          "unit": "exact normalized content anchor"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 0.995745225375092,
+          "matched": 62252,
+          "expected": 62518,
+          "unit": "exact normalized content anchor"
+        },
+        {
+          "engine": "undoc",
+          "recall": 0.9965929812214083,
+          "matched": 62305,
+          "expected": 62518,
+          "unit": "exact normalized content anchor"
+        }
+      ]
+    },
+    {
+      "feature": "horizontal_merges",
+      "label": "Horizontal spans \u00b7 exact anchors",
+      "expected": 3706,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 0.9649217485159202,
+          "matched": 3576,
+          "expected": 3706,
+          "unit": "exact normalized content anchor and value"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.9835402050728548,
+          "matched": 3645,
+          "expected": 3706,
+          "unit": "exact normalized content anchor and value"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 0.9611440906637885,
+          "matched": 3562,
+          "expected": 3706,
+          "unit": "exact normalized content anchor and value"
+        },
+        {
+          "engine": "undoc",
+          "recall": 0.9921748515920129,
+          "matched": 3677,
+          "expected": 3706,
+          "unit": "exact normalized content anchor and value"
+        }
+      ]
+    },
+    {
+      "feature": "images",
+      "label": "Images \u00b7 occurrence-count proxy",
+      "expected": 1069,
+      "cells": [
+        {
+          "engine": "docx-core",
+          "recall": 0.872778297474275,
+          "matched": 933,
+          "expected": 1069,
+          "unit": "occurrence count only"
+        },
+        {
+          "engine": "docx-rs",
+          "recall": 0.9738072965388214,
+          "matched": 1041,
+          "expected": 1069,
+          "unit": "occurrence count only"
+        },
+        {
+          "engine": "office_oxide",
+          "recall": 0.9560336763330215,
+          "matched": 1022,
+          "expected": 1069,
+          "unit": "occurrence count only"
+        },
+        {
+          "engine": "undoc",
+          "recall": 0.9775491113189897,
+          "matched": 1045,
+          "expected": 1069,
+          "unit": "occurrence count only"
+        }
+      ]
+    }
+  ]
+}

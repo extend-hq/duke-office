@@ -1,0 +1,29 @@
+feature,expected_units,"rust-docx
+Nov 2 build","docx-rs
+0.4.22","office_oxide
+0.1.15","undoc
+0.27.1"
+Images · payload occurrences,1069,100.000000,97.380730,95.603368,97.567820
+Bold · aligned characters,680435,100.000000,94.577146,99.947681,98.015534
+Italic · aligned characters,433678,100.000000,Not scored,Not scored,Not scored
+Links · targets at aligned characters,101572,100.000000,Not scored,Not scored,Not scored
+Tables · literal text retained,2267,100.000000,96.426996,99.867667,97.706220
+Horizontal spans · literal text + span,3706,99.946033,98.354021,100.000000,99.217485
+Headings · text + level,6741,99.985165,53.004005,99.465955,86.218662
+Lists · paragraph membership,15361,99.980470,98.567802,91.758349,93.184037
+Vertical merges · start markers,1398,99.570815,99.928469,98.068670,94.134478
+Textboxes · exact text anchors,2652,99.773756,35.633484,99.622926,100.000000
+Nested tables · exact anchors,97,100.000000,97.938144,98.969072,97.938144
+Headers · exact paragraph anchors,807,100.000000,69.888476,99.504337,100.000000
+Footers · exact paragraph anchors,818,100.000000,61.858191,98.044010,100.000000
+Footnotes · exact text anchors,339,100.000000,0.000000,100.000000,92.035398
+Endnotes · exact text anchors,46,100.000000,0.000000,100.000000,95.652174
+Equations · occurrence-count proxy,52,100.000000,0.000000,0.000000,0.000000
+Comments · exact text anchors,40,100.000000,100.000000,100.000000,0.000000
+Bold · source-run five-grams,548210,98.236260,96.941865,98.247205,98.235530
+Italic · source-run five-grams,378087,99.269745,98.035108,99.214995,99.269480
+Links · source-run five-grams,88320,99.341033,95.138134,96.355299,68.332201
+Tables · exact text anchors,2267,98.985443,96.426996,97.044552,97.706220
+Table cells · exact text anchors,62518,99.744074,99.520138,99.574523,99.659298
+Horizontal spans · exact anchors,3706,96.492175,98.354021,96.114409,99.217485
+Images · occurrence-count proxy,1069,87.277830,97.380730,95.603368,97.754911
