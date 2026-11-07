@@ -10,3 +10,4 @@ output/
 /.playwright-cli/
 **/target/
 .python-deps/
+/.playwright-mcp/

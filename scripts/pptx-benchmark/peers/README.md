@@ -1,0 +1,15 @@
+# Additional Rust comparison adapters
+
+This separate benchmark crate pins pptxboss-core 2.3.0, BetterOffice's PPTX parser 0.5.1 and rustypptx 0.2.0. Its lockfile fixes transitive versions. Build with `cargo build --release --manifest-path scripts/pptx-benchmark/peers/Cargo.toml` and copy the executable to an immutable experiment directory before measurement.
+
+The CLI accepts an engine, input path, gzip output path and warm-repeat count. The input is read before timing. Each parse creates a new document; no completed model is reused. One cold parse is followed by warm samples averaging 1–10 parses. Explicit model destruction, output normalization, serialization, compression and payload hashing are outside the timer. The executable uses the same 64 MiB worker stack as the existing native benchmark.
+
+For pptxboss, opening the package is insufficient. The timed adapter loads slide content, notes, comments, charts, diagrams, hyperlinks, image payloads, core/application properties and declared layout/master parts through public APIs. It retains per-slide and auxiliary errors and unknown-content diagnostics. The document is configured for one thread. Image bytes are deduplicated by resolved part within each parse, not between parses. Comparison normalization occurs after timing; the compact JSON is not the entire native model.
+
+BetterOffice's full typed package API runs inside the timer. Media hashes are computed from its decoded byte buffers after timing; hashing the serialized base64 text would give an incorrect payload identity. Chart scoring uses the parser's flat numeric series, without duplicating its plot-group organization or filling missing cache points from the reference.
+
+rustypptx uses its byte API. Its global Rayon pool is initialized with one thread before timing. Image hashes are added from typed payloads because its JSON serializer omits the bytes. Dropped or unreadable slides remain missing in the independent source scores; the adapter does not reconstruct them. Its smaller model has fewer scored capabilities than the other parsers.
+
+Use `run.py --peer-binary PATH --engines rust-pptx,office_oxide,undoc,python-pptx,markitdown,pptxboss,betteroffice,rustypptx` with the usual frozen native binary and explicit corpus manifest. A dedicated phase archives both executables, the nested crate sources and lockfile, all measurement code, input identities and raw samples. `--deduplicate-phase NAME` permits compressed output hard links only after a fresh parse and an identical full native-model hash; it never reuses parse results or timings.
+
+Run `assess.py PHASE --exclude-empty`, then `peer_report.py PHASE`. Accuracy uses all independently reference-bearing inputs, including failed parses. Latency uses the common nonempty success cohort. The report retains all eight parser columns, 19 source-feature rows, partial-output diagnostics, selectable chart axes and measurement identities. Unsupported adapter dimensions are explicitly unscored. This is a source-extraction comparison, not a complete specification or rendering-fidelity claim.

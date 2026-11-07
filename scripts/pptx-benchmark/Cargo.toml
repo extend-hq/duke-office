@@ -1,0 +1,21 @@
+[package]
+name = "pptx-benchmark"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+rust-pptx = { path = "../../crates/rust-pptx" }
+office_oxide = "=0.1.16"
+undoc = { version = "=0.27.3", default-features = false, features = ["pptx", "ppt", "codepages"] }
+serde_json = "1"
+sha2 = "0.10"
+flate2 = "1"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
