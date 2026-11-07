@@ -23,10 +23,7 @@ pub enum StyleReferenceKind {
 }
 
 fn child<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
-    extract_direct_child_tag_ranges(xml)
-        .into_iter()
-        .find(|tag| tag.tag_name.rsplit(':').next() == Some(name))
-        .map(|tag| &xml[tag.start..tag.end])
+    crate::xml::direct_child_local(xml, name)
 }
 
 fn is_empty_element(xml: &str) -> bool {
@@ -300,10 +297,10 @@ fn gradient(
         {
             return None;
         }
-        let radius = cx
-            .abs()
-            .max((width - cx).abs())
-            .hypot(cy.abs().max((height - cy).abs()));
+        let radius = libm::hypot(
+            cx.abs().max((width - cx).abs()),
+            cy.abs().max((height - cy).abs()),
+        );
         let _ = write!(
             defs,
             r##"<radialGradient id="{id}" gradientUnits="userSpaceOnUse" cx="{cx}" cy="{cy}" r="{radius}" fx="{cx}" fy="{cy}" color-interpolation="sRGB">{stop_markup}</radialGradient>"##
@@ -311,12 +308,11 @@ fn gradient(
     } else {
         let linear = child(xml, "lin").unwrap_or("");
         let radians = (number(linear, "ang", 0.0)? / 60_000.0).to_radians();
-        let mut dx = radians.cos();
-        let mut dy = radians.sin();
+        let (mut dy, mut dx) = libm::sincos(radians);
         if !get_attribute_ref(linear, "scaled").is_some_and(|v| matches!(v, "0" | "false")) {
             dx /= width.max(f64::EPSILON);
             dy /= height.max(f64::EPSILON);
-            let length = dx.hypot(dy);
+            let length = libm::hypot(dx, dy);
             if length > 0.0 {
                 dx /= length;
                 dy /= length;
@@ -1005,7 +1001,7 @@ fn render_shape_paths(
     {
         return None;
     }
-    let (sin, cos) = rotation.to_radians().sin_cos();
+    let (sin, cos) = libm::sincos(rotation.to_radians());
     let sx = if enabled(transform, "flipH") {
         -1.0
     } else {

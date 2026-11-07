@@ -12,6 +12,7 @@ use crate::xml::escape_xml_text;
 mod effects;
 mod geometry;
 mod ink;
+mod math;
 pub mod model3d;
 mod raster;
 mod shapes;
@@ -19,9 +20,15 @@ pub mod smartart;
 pub mod text;
 mod xml;
 
+#[doc(hidden)]
+pub fn with_cached_xml<T>(parse: impl FnOnce() -> T) -> T {
+    xml::with_cached_xml(parse)
+}
+
 pub use shapes::{render_shape, render_text_fill, StyleReferenceKind, TextFill};
 pub use shapes::render_3d_path;
-pub use ink::render_ink;
+pub use ink::{render_ink, parse_ink, render_ink_in_frame, InkBounds, InkBrush, InkDrawing, InkPoint, InkStroke};
+pub use math::{parse_office_math, MathAttribute, MathElement, OfficeMath};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -236,11 +243,11 @@ fn blur_radius(xml: &str, name: &str) -> Option<f64> {
     (0.0..=10_000.0).contains(&radius).then_some(radius)
 }
 
-fn blip_effects(blip: &str) -> Vec<xml::TaggedRange> {
+fn blip_effects(blip: &str) -> Vec<xml::TaggedRange<'_>> {
     let mut effects = extract_direct_child_tag_ranges(blip);
     effects.sort_by_key(|effect| {
         !matches!(
-            effect.tag_name.as_str(),
+            effect.tag_name,
             "a:clrChange" | "a:alphaBiLevel" | "a:alphaCeiling" | "a:alphaFloor" | "a:biLevel"
         )
     });
@@ -251,7 +258,7 @@ fn blip_filter(blip: &str, colors: &impl PictureContext) -> Option<String> {
     let mut out = String::new();
     for child in blip_effects(blip) {
         let xml = &blip[child.start..child.end];
-        match child.tag_name.as_str() {
+        match child.tag_name {
             "a:extLst" => {}
             "a:grayscl" => grayscale(&mut out),
             "a:biLevel" => {
@@ -385,7 +392,7 @@ fn legacy_geometry_path(properties: &str, width: f64, height: f64) -> Option<Str
         }
         let mut output = String::new();
         for command in extract_direct_child_tag_ranges(path) {
-            let (expected, operation) = match command.tag_name.as_str() {
+            let (expected, operation) = match command.tag_name {
                 "a:moveTo" => (1, 'M'),
                 "a:lnTo" => (1, 'L'),
                 "a:cubicBezTo" => (3, 'C'),
@@ -692,16 +699,16 @@ fn effect_matrix(xml: &str, bounds: Bounds) -> Option<Matrix> {
     let ax = bounds.left + (bounds.right - bounds.left) * ax;
     let ay = bounds.top + (bounds.bottom - bounds.top) * ay;
     let a = sx;
-    let b = sx * ky.to_radians().tan();
-    let c = sy * kx.to_radians().tan();
+    let b = sx * libm::tan(ky.to_radians());
+    let c = sy * libm::tan(kx.to_radians());
     let d = sy;
     Some(Matrix([
         a,
         b,
         c,
         d,
-        ax - a * ax - c * ay + distance * direction.cos(),
-        ay - b * ax - d * ay + distance * direction.sin(),
+        ax - a * ax - c * ay + distance * libm::cos(direction),
+        ay - b * ax - d * ay + distance * libm::sin(direction),
     ]))
 }
 
@@ -765,7 +772,7 @@ fn apply_shape_effects(
     let children = extract_direct_child_tag_ranges(list);
     for effect in &children {
         let xml = &list[effect.start..effect.end];
-        match effect.tag_name.as_str() {
+        match effect.tag_name {
             "a:blur" => {
                 let deviation = blur_radius(xml, "rad")? / 2.0;
                 let grow = !get_attribute_ref(xml, "grow")
@@ -795,14 +802,19 @@ fn apply_shape_effects(
             _ => return None,
         }
     }
-    let _ = write!(defs, r##"<g id="picture-body">{source}</g>"##);
+    if children.iter().any(|effect| {
+        matches!(effect.tag_name, "a:innerShdw" | "a:outerShdw" | "a:reflection")
+            || (glow_from_source && effect.tag_name == "a:glow")
+    }) {
+        let _ = write!(defs, r##"<g id="picture-body">{source}</g>"##);
+    }
     let mut bounds = source_bounds.transformed(matrix);
     let mut underlay = String::new();
     let mut overlay = String::new();
     for (index, effect) in children.iter().enumerate() {
         let xml = &list[effect.start..effect.end];
         let id = format!("picture-effect-{index}");
-        match effect.tag_name.as_str() {
+        match effect.tag_name {
             "a:glow" => {
                 let radius = blur_radius(xml, "rad")?;
                 let deviation = radius / 6.0;
@@ -854,8 +866,7 @@ fn apply_shape_effects(
                     let start = percentage(xml, "stPos", 0.0)?.clamp(0.0, 1.0);
                     let end = percentage(xml, "endPos", 1.0)?.clamp(start, 1.0);
                     let fade = (number(xml, "fadeDir", 5_400_000.0)? / 60_000.0).to_radians();
-                    let dx = fade.cos();
-                    let dy = fade.sin();
+                    let (dy, dx) = libm::sincos(fade);
                     let length = (raw_bounds.right - raw_bounds.left) * dx.abs()
                         + (raw_bounds.bottom - raw_bounds.top) * dy.abs();
                     let center_x = (raw_bounds.left + raw_bounds.right) / 2.0;
@@ -883,8 +894,8 @@ fn apply_shape_effects(
                 let deviation = blur_radius(xml, "blurRad")? / 2.0;
                 let direction = (number(xml, "dir", 0.0)? / 60_000.0).to_radians();
                 let distance = number(xml, "dist", 0.0)?.max(0.0) / 9525.0;
-                let dx = -distance * direction.cos();
-                let dy = -distance * direction.sin();
+                let dx = -distance * libm::cos(direction);
+                let dy = -distance * libm::sin(direction);
                 let color = resolve_drawing_color_from_xml(Some(xml), colors)?;
                 let _ = write!(
                     defs,
@@ -1238,7 +1249,7 @@ pub fn render_picture(
             escape_xml_text(source)
         )
     };
-    let (sin, cos) = rotation.to_radians().sin_cos();
+    let (sin, cos) = libm::sincos(rotation.to_radians());
     let sx = if flip_h { -1.0 } else { 1.0 };
     let sy = if flip_v { -1.0 } else { 1.0 };
     let [a, b, c, d] = [cos * sx, sin * sx, -sin * sy, cos * sy];

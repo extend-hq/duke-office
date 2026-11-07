@@ -65,10 +65,7 @@ fn attribute(xml: &str, name: &[u8]) -> Option<String> {
 }
 
 fn child<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
-    let tag = crate::xml::extract_direct_child_tag_ranges(xml)
-        .into_iter()
-        .find(|tag| tag.tag_name.rsplit(':').next() == Some(name))?;
-    Some(&xml[tag.start..tag.end])
+    crate::xml::direct_child_local(xml, name)
 }
 
 pub fn parse_model3d(

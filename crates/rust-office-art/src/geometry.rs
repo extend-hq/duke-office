@@ -38,10 +38,7 @@ fn local(name: &str) -> &str {
 }
 
 fn child<'a>(xml: &'a str, name: &str) -> Option<&'a str> {
-    extract_direct_child_tag_ranges(xml)
-        .into_iter()
-        .find(|tag| local(&tag.tag_name) == name)
-        .map(|tag| &xml[tag.start..tag.end])
+    crate::xml::direct_child_local(xml, name)
 }
 
 fn preset(name: &str) -> Option<&'static str> {
@@ -50,7 +47,7 @@ fn preset(name: &str) -> Option<&'static str> {
         .get_or_init(|| {
             extract_direct_child_tag_ranges(PRESETS)
                 .into_iter()
-                .map(|tag| (tag.tag_name, &PRESETS[tag.start..tag.end]))
+                .map(|tag| (tag.tag_name.to_owned(), &PRESETS[tag.start..tag.end]))
                 .collect()
         })
         .get(name)
@@ -64,36 +61,49 @@ fn finite(value: f64) -> Option<f64> {
 struct Guides {
     values: HashMap<String, f64>,
     count: usize,
+    width: f64,
+    height: f64,
 }
 
 impl Guides {
     fn new(width: f64, height: f64) -> Self {
-        let short = width.min(height);
-        let mut values = HashMap::from([
-            ("w".to_string(), width),
-            ("h".to_string(), height),
-            ("l".to_string(), 0.0),
-            ("t".to_string(), 0.0),
-            ("r".to_string(), width),
-            ("b".to_string(), height),
-            ("hc".to_string(), width / 2.0),
-            ("vc".to_string(), height / 2.0),
-            ("ss".to_string(), short),
-            ("ls".to_string(), width.max(height)),
-            ("cd2".to_string(), FULL_ANGLE / 2.0),
-            ("cd4".to_string(), FULL_ANGLE / 4.0),
-            ("cd8".to_string(), FULL_ANGLE / 8.0),
-            ("3cd4".to_string(), FULL_ANGLE * 3.0 / 4.0),
-            ("3cd8".to_string(), FULL_ANGLE * 3.0 / 8.0),
-            ("5cd8".to_string(), FULL_ANGLE * 5.0 / 8.0),
-            ("7cd8".to_string(), FULL_ANGLE * 7.0 / 8.0),
-        ]);
-        for divisor in [2, 3, 4, 5, 6, 8, 10, 12, 16, 32] {
-            for (prefix, value) in [("wd", width), ("hd", height), ("ssd", short)] {
-                values.insert(format!("{prefix}{divisor}"), value / f64::from(divisor));
+        Self { values: HashMap::new(), count: 0, width, height }
+    }
+
+    fn builtin(&self, token: &str) -> Option<f64> {
+        let width = self.width;
+        let height = self.height;
+        Some(match token {
+            "w" | "r" => width,
+            "h" | "b" => height,
+            "l" | "t" => 0.0,
+            "hc" => width / 2.0,
+            "vc" => height / 2.0,
+            "ss" => width.min(height),
+            "ls" => width.max(height),
+            "cd2" => FULL_ANGLE / 2.0,
+            "cd4" => FULL_ANGLE / 4.0,
+            "cd8" => FULL_ANGLE / 8.0,
+            "3cd4" => FULL_ANGLE * 3.0 / 4.0,
+            "3cd8" => FULL_ANGLE * 3.0 / 8.0,
+            "5cd8" => FULL_ANGLE * 5.0 / 8.0,
+            "7cd8" => FULL_ANGLE * 7.0 / 8.0,
+            _ => {
+                let (value, suffix) = if let Some(suffix) = token.strip_prefix("wd") {
+                    (width, suffix)
+                } else if let Some(suffix) = token.strip_prefix("hd") {
+                    (height, suffix)
+                } else {
+                    (width.min(height), token.strip_prefix("ssd")?)
+                };
+                let divisor = match suffix {
+                    "2" => 2.0, "3" => 3.0, "4" => 4.0, "5" => 5.0, "6" => 6.0,
+                    "8" => 8.0, "10" => 10.0, "12" => 12.0, "16" => 16.0, "32" => 32.0,
+                    _ => return None,
+                };
+                value / divisor
             }
-        }
-        Self { values, count: 0 }
+        })
     }
 
     fn value(&self, token: &str) -> Option<f64> {
@@ -103,6 +113,7 @@ impl Guides {
         self.values
             .get(token)
             .copied()
+            .or_else(|| self.builtin(token))
             .or_else(|| token.parse().ok())
             .and_then(finite)
     }
@@ -142,15 +153,15 @@ impl Guides {
                 }
             }
             ("abs", [x]) => x.abs(),
-            ("at2", [x, y]) => y.atan2(*x).to_degrees() * 60_000.0,
-            ("cat2", [x, y, z]) => x * z.atan2(*y).cos(),
-            ("sat2", [x, y, z]) => x * z.atan2(*y).sin(),
-            ("cos", [x, y]) => x * angle(*y).cos(),
-            ("sin", [x, y]) => x * angle(*y).sin(),
-            ("tan", [x, y]) => x * angle(*y).tan(),
+            ("at2", [x, y]) => libm::atan2(*y, *x).to_degrees() * 60_000.0,
+            ("cat2", [x, y, z]) => x * libm::cos(libm::atan2(*z, *y)),
+            ("sat2", [x, y, z]) => x * libm::sin(libm::atan2(*z, *y)),
+            ("cos", [x, y]) => x * libm::cos(angle(*y)),
+            ("sin", [x, y]) => x * libm::sin(angle(*y)),
+            ("tan", [x, y]) => x * libm::tan(angle(*y)),
             ("min", [x, y]) => x.min(*y),
             ("max", [x, y]) => x.max(*y),
-            ("mod", [x, y, z]) => x.hypot(*y).hypot(*z),
+            ("mod", [x, y, z]) => libm::hypot(libm::hypot(*x, *y), *z),
             ("pin", [x, y, z]) => x.max(y.min(*z)),
             ("sqrt", [x]) if *x >= 0.0 => x.sqrt(),
             _ => return None,
@@ -225,9 +236,25 @@ impl PathBuilder {
             return Some(());
         }
         let ellipse = |angle: f64| {
+            let quarter = FULL_ANGLE / 4.0;
+            let normalized = angle.rem_euclid(FULL_ANGLE);
+            if normalized == 0.0 {
+                return [rx, 0.0];
+            }
+            if normalized == quarter {
+                return [0.0, ry];
+            }
+            if normalized == quarter * 2.0 {
+                return [-rx, 0.0];
+            }
+            if normalized == quarter * 3.0 {
+                return [0.0, -ry];
+            }
             let angle = (angle / 60_000.0).to_radians();
-            let parameter = (rx * angle.sin()).atan2(ry * angle.cos());
-            [rx * parameter.cos(), ry * parameter.sin()]
+            let (sin, cos) = libm::sincos(angle);
+            let parameter = libm::atan2(rx * sin, ry * cos);
+            let (sin, cos) = libm::sincos(parameter);
+            [rx * cos, ry * sin]
         };
         let offset = ellipse(start);
         let center = [current[0] - offset[0], current[1] - offset[1]];
@@ -470,7 +497,7 @@ pub(crate) fn text_warp_paths(xml: &str, width: f64, height: f64) -> Option<Vec<
         return None;
     }
     let presets = INDEX.get_or_init(|| extract_direct_child_tag_ranges(TEXT_PRESETS).into_iter()
-        .map(|tag| (tag.tag_name, &TEXT_PRESETS[tag.start..tag.end])).collect());
+        .map(|tag| (tag.tag_name.to_owned(), &TEXT_PRESETS[tag.start..tag.end])).collect());
     let preset = presets.get(get_attribute_ref(xml, "prst")?)?;
     let units = [65_536.0, 65_536.0];
     let mut guides = Guides::new(units[0], units[1]);

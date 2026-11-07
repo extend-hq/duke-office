@@ -8,7 +8,7 @@ use flate2::read::ZlibDecoder;
 use crate::{
     ColorValue, FillStyle, LineStyle, ParseError, ParseLimits, PresentationAsset,
     PresentationDocument, PresentationFormat, PresentationSize, PresentationSlide,
-    PresentationWarning, ShapeGeometry, SlideNode, TextParagraph, TextRun, Transform,
+    PresentationWarning, ShapeGeometry, SlideNode, SlideNote, TextParagraph, TextRun, Transform,
     VerticalAlignment,
 };
 
@@ -21,6 +21,8 @@ const RT_DOCUMENT: u16 = 1000;
 const RT_DOCUMENT_ATOM: u16 = 1001;
 const RT_SLIDE: u16 = 1006;
 const RT_SLIDE_ATOM: u16 = 1007;
+const RT_NOTES: u16 = 1008;
+const RT_NOTES_ATOM: u16 = 1009;
 const RT_MAIN_MASTER: u16 = 1016;
 const RT_SLIDE_PERSIST_ATOM: u16 = 1011;
 const RT_ENVIRONMENT: u16 = 1010;
@@ -728,16 +730,20 @@ impl ShapeCollector<'_> {
                 && transform.width as u64 >= self.slide_size.width_emu.saturating_mul(95) / 100
                 && transform.height as u64 >= self.slide_size.height_emu.saturating_mul(95) / 100;
             self.nodes.push(SlideNode::Image {
+                metadata: Default::default(),
                 model_3d: None,
+                ink: None,
                 id,
                 name: format!("Legacy picture {}", parts.spid),
                 transform,
                 asset_id: asset_id.clone(),
+                fallback_asset_id: None,
                 crop: None,
                 opacity: None,
                 preserve_aspect_ratio: !covers_slide,
                 effects: None,
                 picture_svg: None,
+                fallback_picture: None,
                 paint_bounds: None,
                 source_xml: None,
             });
@@ -749,6 +755,7 @@ impl ShapeCollector<'_> {
             .map(|body| paragraphs(body, self.font_family))
             .unwrap_or_default();
         self.nodes.push(SlideNode::Shape {
+            metadata: Default::default(),
             shape_svg: None,
             paint_bounds: None,
             source_xml: None,
@@ -892,11 +899,10 @@ fn slide_references(document: Record<'_>) -> Vec<SlideReference> {
     slides
 }
 
-fn master_references(document: Record<'_>) -> BTreeMap<u32, u32> {
-    let Some(master_list) = child_records(document.payload)
-        .into_iter()
-        .find(|record| record.record_type == RT_SLIDE_LIST_WITH_TEXT && record.instance == 1)
-    else {
+fn persist_references(document: Record<'_>, instance: u16) -> BTreeMap<u32, u32> {
+    let Some(master_list) = child_records(document.payload).into_iter().find(|record| {
+        record.record_type == RT_SLIDE_LIST_WITH_TEXT && record.instance == instance
+    }) else {
         return BTreeMap::new();
     };
     child_records(master_list.payload)
@@ -911,6 +917,83 @@ fn slide_master_id(slide: Record<'_>) -> Option<u32> {
         .into_iter()
         .find(|record| record.record_type == RT_SLIDE_ATOM)?;
     read_u32(atom.payload, 12)
+}
+
+fn collect_note_text(data: &[u8], depth: usize, max_depth: usize, notes: &mut Vec<SlideNote>) {
+    if depth > max_depth {
+        return;
+    }
+    for record in child_records(data) {
+        if record.record_type == OFFICE_ART_SP_CONTAINER {
+            let children = child_records(record.payload);
+            let placement = children
+                .iter()
+                .filter(|child| child.record_type == OFFICE_ART_CLIENT_DATA)
+                .flat_map(|child| child_records(child.payload))
+                .find(|child| child.record_type == RT_PLACEHOLDER_ATOM)
+                .and_then(|child| child.payload.get(4).copied());
+            if placement.is_some_and(|kind| !matches!(kind, 0 | 12)) {
+                continue;
+            }
+            for textbox in children
+                .iter()
+                .filter(|child| child.record_type == OFFICE_ART_CLIENT_TEXTBOX)
+            {
+                for text in child_records(textbox.payload)
+                    .into_iter()
+                    .filter_map(decode_text)
+                {
+                    let paragraphs = text
+                        .split(['\r', '\n', '\u{000b}'])
+                        .map(|text| TextParagraph {
+                            runs: vec![TextRun {
+                                text: text.to_owned(),
+                                ..Default::default()
+                            }],
+                            ..Default::default()
+                        })
+                        .collect();
+                    notes.push(SlideNote { text, paragraphs });
+                }
+            }
+        } else if record.version == 0x0f {
+            collect_note_text(record.payload, depth + 1, max_depth, notes);
+        }
+    }
+}
+
+fn slide_notes(
+    data: &[u8],
+    directory: &BTreeMap<u32, u32>,
+    references: &BTreeMap<u32, u32>,
+    slide: Record<'_>,
+    slide_id: u32,
+    max_depth: usize,
+) -> Result<Vec<SlideNote>, &'static str> {
+    let notes_id = child_records(slide.payload)
+        .into_iter()
+        .find(|record| record.record_type == RT_SLIDE_ATOM)
+        .and_then(|record| read_u32(record.payload, 16))
+        .unwrap_or(0);
+    if notes_id == 0 {
+        return Ok(Vec::new());
+    }
+    let notes = references
+        .get(&notes_id)
+        .and_then(|persist_id| directory.get(persist_id))
+        .and_then(|offset| record_at(data, *offset as usize))
+        .filter(|record| record.record_type == RT_NOTES)
+        .ok_or("The slide's notes reference does not resolve to a live notes container.")?;
+    let referenced_slide = child_records(notes.payload)
+        .into_iter()
+        .find(|record| record.record_type == RT_NOTES_ATOM)
+        .and_then(|record| read_u32(record.payload, 0));
+    if referenced_slide != Some(slide_id) || slide_id == 0 {
+        return Err("The notes container does not refer back to this slide.");
+    }
+    let mut result = Vec::new();
+    collect_note_text(notes.payload, 0, max_depth, &mut result);
+    Ok(result)
 }
 
 fn collect_fbse_offsets(document: Record<'_>, max_depth: usize) -> Vec<u32> {
@@ -1045,6 +1128,7 @@ fn normalize_fallback_slide(
         .into_iter()
         .enumerate()
         .map(|(node_index, body)| SlideNode::Shape {
+            metadata: Default::default(),
             shape_svg: None,
             paint_bounds: None,
             source_xml: None,
@@ -1087,6 +1171,8 @@ fn normalize_fallback_slide(
         master_id: None,
         layout_id: None,
         background: None,
+        transition: None,
+        timing: None,
         nodes,
         notes: Vec::new(),
         comments: Vec::new(),
@@ -1095,7 +1181,7 @@ fn normalize_fallback_slide(
     }
 }
 
-fn fallback_document(data: &[u8], limits: &ParseLimits) -> PresentationDocument {
+fn fallback_document(data: &[u8], source_part: &str, limits: &ParseLimits) -> PresentationDocument {
     let mut text_slides = child_records(data)
         .into_iter()
         .filter(|record| record.record_type == RT_SLIDE)
@@ -1111,7 +1197,11 @@ fn fallback_document(data: &[u8], limits: &ParseLimits) -> PresentationDocument 
         .into_iter()
         .take(limits.max_entries)
         .enumerate()
-        .map(|(index, chunks)| normalize_fallback_slide(index, chunks, None))
+        .map(|(index, chunks)| {
+            let mut slide = normalize_fallback_slide(index, chunks, None);
+            slide.source_part = Some(source_part.to_owned());
+            slide
+        })
         .collect();
     PresentationDocument {
         format: PresentationFormat::Ppt,
@@ -1137,6 +1227,7 @@ fn parse_live_document(
     data: &[u8],
     current_user: &[u8],
     pictures: Option<&[u8]>,
+    source_part: &str,
     limits: &ParseLimits,
 ) -> Result<PresentationDocument, ParseError> {
     let (directory, document_persist_id) = live_persist_directory(data, current_user, limits)?;
@@ -1157,7 +1248,8 @@ fn parse_live_document(
     let font_family = default_font_family(document, limits.max_xml_depth);
     let fbse_offsets = collect_fbse_offsets(document, limits.max_xml_depth);
     let (assets, picture_references) = picture_assets(pictures, &fbse_offsets, limits);
-    let masters = master_references(document);
+    let masters = persist_references(document, 1);
+    let notes_references = persist_references(document, 2);
     let references = slide_references(document);
     if references.len() > limits.max_entries {
         return Err(ParseError::ResourceLimit("legacy slide count".into()));
@@ -1228,6 +1320,24 @@ fn parse_live_document(
             warning.slide_index = Some(index);
             warnings.push(warning.clone());
         }
+        let mut slide_warnings = Vec::new();
+        let notes = match slide_notes(
+            data,
+            &directory,
+            &notes_references,
+            slide,
+            reference.slide_id,
+            limits.max_xml_depth,
+        ) {
+            Ok(notes) => notes,
+            Err(message) => {
+                let mut warning = PresentationWarning::warning("unresolved-notes", message);
+                warning.slide_index = Some(index);
+                warnings.push(warning.clone());
+                slide_warnings.push(warning);
+                Vec::new()
+            }
+        };
         slides.push(PresentationSlide {
             id: if reference.slide_id == 0 {
                 format!("slide-{}", index + 1)
@@ -1240,11 +1350,13 @@ fn parse_live_document(
             master_id: None,
             layout_id: None,
             background: None,
+            transition: None,
+            timing: None,
             nodes,
-            notes: Vec::new(),
+            notes,
             comments: Vec::new(),
-            source_part: Some(format!("/PowerPoint Document#{slide_offset:#x}")),
-            warnings: Vec::new(),
+            source_part: Some(format!("{source_part}#{slide_offset:#x}")),
+            warnings: slide_warnings,
         });
     }
     Ok(PresentationDocument {
@@ -1262,10 +1374,27 @@ fn parse_live_document(
 }
 
 pub fn parse(bytes: &[u8], limits: &ParseLimits) -> Result<PresentationDocument, ParseError> {
-    let cursor = Cursor::new(bytes.to_vec());
-    let mut compound = cfb::CompoundFile::open(cursor)
-        .map_err(|error| ParseError::Corrupt(format!("OLE: {error}")))?;
-    if compound.exists("/EncryptedSummary") {
+    let repaired;
+    let (mut compound, recovered_entries) = match cfb::CompoundFile::open(Cursor::new(bytes)) {
+        Ok(compound) => (compound, 0),
+        Err(error) => {
+            let original_error = || ParseError::Corrupt(format!("OLE: {error}"));
+            let (recovered, count) = crate::legacy_cfb::recover_unused_directory(bytes, limits.max_entries)
+                .ok_or_else(original_error)?;
+            repaired = recovered;
+            let compound = cfb::CompoundFile::open(Cursor::new(repaired.as_slice()))
+                .map_err(|_| original_error())?;
+            (compound, count)
+        }
+    };
+    let storage = if compound.is_storage("/PP97_DUALSTORAGE") {
+        "/PP97_DUALSTORAGE"
+    } else {
+        ""
+    };
+    if compound.exists("/EncryptedSummary")
+        || compound.exists(format!("{storage}/EncryptedSummary"))
+    {
         return Err(ParseError::Encrypted);
     }
     let entries = compound
@@ -1292,25 +1421,52 @@ pub fn parse(bytes: &[u8], limits: &ParseLimits) -> Result<PresentationDocument,
     if total_stream_bytes > limits.max_total_uncompressed_bytes {
         return Err(ParseError::ResourceLimit("OLE total stream size".into()));
     }
+    let source_part = format!("{storage}/PowerPoint Document");
+    let current_user_part = format!("{storage}/Current User");
+    let pictures_part = format!("{storage}/Pictures");
     let data = read_stream(
         &mut compound,
-        "/PowerPoint Document",
+        &source_part,
         limits.max_total_uncompressed_bytes,
     )?;
-    if !compound.exists("/Current User") {
-        return Ok(fallback_document(&data, limits));
+    if !compound.exists(&current_user_part) {
+        let mut document = fallback_document(&data, &source_part, limits);
+        add_directory_recovery_warning(&mut document, recovered_entries);
+        return Ok(document);
     }
-    let current_user = read_stream(&mut compound, "/Current User", limits.max_entry_bytes)?;
-    let pictures = if compound.exists("/Pictures") {
+    let current_user = read_stream(&mut compound, &current_user_part, limits.max_entry_bytes)?;
+    let pictures = if compound.exists(&pictures_part) {
         Some(read_stream(
             &mut compound,
-            "/Pictures",
+            &pictures_part,
             limits.max_total_uncompressed_bytes,
         )?)
     } else {
         None
     };
-    parse_live_document(&data, &current_user, pictures.as_deref(), limits)
+    let mut document = parse_live_document(
+        &data,
+        &current_user,
+        pictures.as_deref(),
+        &source_part,
+        limits,
+    )?;
+    add_directory_recovery_warning(&mut document, recovered_entries);
+    Ok(document)
+}
+
+fn add_directory_recovery_warning(document: &mut PresentationDocument, entries: usize) {
+    if entries != 0 {
+        document.warnings.push(PresentationWarning {
+            code: "recovered-unused-directory".into(),
+            message: format!("Recovered {entries} unreachable, uninitialized OLE directory entries"),
+            severity: "warning".into(),
+            slide_index: None,
+            node_id: None,
+            part_name: None,
+            feature: Some("legacy-container".into()),
+        });
+    }
 }
 
 #[cfg(test)]

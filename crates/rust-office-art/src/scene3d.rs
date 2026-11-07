@@ -31,11 +31,11 @@ struct Rotation([f64; 3]);
 impl Rotation {
     fn apply(self, V3(x, y, z): V3) -> V3 {
         let [lat, lon, rev] = self.0.map(f64::to_radians);
-        let (sl, cl) = lon.sin_cos();
+        let (sl, cl) = libm::sincos(lon);
         let (x, z) = (cl * x - sl * z, sl * x + cl * z);
-        let (sl, cl) = lat.sin_cos();
+        let (sl, cl) = libm::sincos(lat);
         let (y, z) = (cl * y + sl * z, -sl * y + cl * z);
-        let (sl, cl) = rev.sin_cos();
+        let (sl, cl) = libm::sincos(rev);
         V3(cl * x + sl * y, -sl * x + cl * y, z)
     }
 
@@ -97,7 +97,7 @@ impl Camera {
             if !(0.01..179.0).contains(&angle) {
                 return None;
             }
-            distance = width.max(height) / (2.0 * (angle.to_radians() / 2.0).tan());
+            distance = width.max(height) / (2.0 * libm::tan(angle.to_radians() / 2.0));
         }
         Some(Self {
             rotation: Rotation::from_xml(xml, *angles)?,
@@ -106,8 +106,8 @@ impl Camera {
             center: Point::new(width * (0.5 + ox), height * (0.5 + oy)),
             eye: V3(ex * 96.0 / 2540.0, ey * 96.0 / 2540.0, distance),
             skew: Point::new(
-                -skew / 100.0 * skew_angle.to_radians().cos(),
-                -skew / 100.0 * skew_angle.to_radians().sin(),
+                -skew / 100.0 * libm::cos(skew_angle.to_radians()),
+                -skew / 100.0 * libm::sin(skew_angle.to_radians()),
             ),
             zoom,
         })
@@ -267,7 +267,7 @@ impl Lighting {
                 reflection.dot(view)
             };
             let highlight = if dot > 0.0 {
-                alignment.max(0.0).powf(self.material.power) * self.material.specular
+                libm::pow(alignment.max(0.0), self.material.power) * self.material.specular
             } else {
                 0.0
             };
@@ -403,6 +403,10 @@ struct Contour {
     closed: bool,
 }
 
+fn distance(a: Point, b: Point) -> f64 {
+    libm::hypot(a.x - b.x, a.y - b.y)
+}
+
 fn flatten_cubic(
     points: &mut Vec<Point>,
     p0: Point,
@@ -416,10 +420,10 @@ fn flatten_cubic(
         return None;
     }
     let chord = p3 - p0;
-    let length = chord.hypot();
+    let length = libm::hypot(chord.x, chord.y);
     let distance = |p: Point| {
         if length < 1e-10 {
-            p.distance(p0)
+            distance(p, p0)
         } else {
             ((p - p0).cross(chord) / length).abs()
         }
@@ -461,7 +465,7 @@ fn contours(path: &str) -> Option<Vec<Contour>> {
             }
             PathEl::LineTo(p) if valid(p) => {
                 let points = &mut result.last_mut()?.points;
-                if points.last().is_none_or(|last| last.distance(p) > 1e-7) {
+                if points.last().is_none_or(|last| distance(*last, p) > 1e-7) {
                     points.push(p);
                     count += 1;
                 }
@@ -492,7 +496,7 @@ fn contours(path: &str) -> Option<Vec<Contour>> {
     for contour in &mut result {
         if contour.closed
             && contour.points.len() > 1
-            && contour.points[0].distance(*contour.points.last()?) < 1e-7
+            && distance(contour.points[0], *contour.points.last()?) < 1e-7
         {
             contour.points.pop();
         }
@@ -513,7 +517,7 @@ fn signed_area(points: &[Point]) -> f64 {
 fn outward(points: &[Point], index: usize, orientation: f64) -> Point {
     let a = points[index];
     let b = points[(index + 1) % points.len()];
-    let length = a.distance(b).max(1e-10);
+    let length = distance(a, b).max(1e-10);
     Point::new(
         orientation * (b.y - a.y) / length,
         orientation * (a.x - b.x) / length,

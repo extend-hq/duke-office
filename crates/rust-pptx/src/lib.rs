@@ -1,7 +1,10 @@
+mod animation_model;
 mod legacy;
+mod legacy_cfb;
 mod model;
 mod pptx;
 
+pub use animation_model::*;
 pub use model::*;
 pub use rust_office_art::ParseOptions;
 
@@ -44,7 +47,7 @@ impl Default for ParseLimits {
             max_entry_bytes: usize::MAX,
             max_total_uncompressed_bytes: usize::MAX,
             max_xml_depth: 256,
-            max_xml_nodes: 250_000,
+            max_xml_nodes: 500_000,
             max_xml_attributes: 1_000_000,
             max_xml_text_bytes: 64 * 1024 * 1024,
             max_xml_attribute_bytes: 32 * 1024 * 1024,

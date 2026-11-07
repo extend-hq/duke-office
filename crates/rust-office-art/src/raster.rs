@@ -11,7 +11,7 @@ pub(super) fn required(blip: &str, source: &str) -> bool {
         || source.starts_with("data:image/tif;")
         || extract_direct_child_tag_ranges(blip).iter().any(|child| {
             matches!(
-                child.tag_name.as_str(),
+                child.tag_name,
                 "a:hsl" | "a:tint" | "a:alphaCeiling" | "a:clrChange"
             )
         })
@@ -126,7 +126,7 @@ pub(super) fn render(blip: &str, source: &str, context: &impl PictureContext) ->
     let mut image = decode(source)?;
     for child in blip_effects(blip) {
         let xml = &blip[child.start..child.end];
-        match child.tag_name.as_str() {
+        match child.tag_name {
             "a:extLst" => {}
             "a:grayscl" | "a:biLevel" => {
                 let threshold = percentage(xml, "thresh", 0.5)?.clamp(0.0, 1.0) * 255.0;

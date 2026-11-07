@@ -13,9 +13,10 @@ fn shape(
     vertical_alignment: Option<VerticalAlignment>,
 ) -> SlideNode {
     SlideNode::Shape {
-            shape_svg: None,
-            paint_bounds: None,
-            source_xml: None,
+        metadata: Default::default(),
+        shape_svg: None,
+        paint_bounds: None,
+        source_xml: None,
         id: "shape-1".into(),
         name: "Styled shape".into(),
         transform: Transform {
@@ -102,7 +103,9 @@ fn absent_shape_styles_are_omitted() {
 #[test]
 fn image_fields_serialize_to_the_typescript_model_contract() {
     let node = SlideNode::Image {
+        metadata: Default::default(),
         model_3d: None,
+        ink: None,
         id: "image-1".into(),
         name: "Picture".into(),
         transform: Transform {
@@ -113,11 +116,13 @@ fn image_fields_serialize_to_the_typescript_model_contract() {
             ..Default::default()
         },
         asset_id: "asset-1".into(),
+        fallback_asset_id: None,
         crop: None,
         opacity: None,
         preserve_aspect_ratio: true,
         effects: None,
         picture_svg: None,
+        fallback_picture: None,
         paint_bounds: None,
         source_xml: None,
     };
@@ -132,6 +137,7 @@ fn image_fields_serialize_to_the_typescript_model_contract() {
 #[test]
 fn structured_nodes_serialize_to_the_typescript_model_contract() {
     let group = SlideNode::Group {
+        metadata: Default::default(),
         id: "group-1".into(),
         name: "Group".into(),
         transform: Transform::default(),
@@ -145,10 +151,12 @@ fn structured_nodes_serialize_to_the_typescript_model_contract() {
         }),
     };
     let table = SlideNode::Table {
+        metadata: Default::default(),
         id: "table-1".into(),
         name: "Table".into(),
         transform: Transform::default(),
         rows: vec![vec![TableCell {
+            merge: None,
             row_span: None,
             col_span: Some(2),
             fill: None,
@@ -162,6 +170,7 @@ fn structured_nodes_serialize_to_the_typescript_model_contract() {
         row_heights: vec![50],
     };
     let chart = SlideNode::Chart {
+        metadata: Default::default(),
         id: "chart-1".into(),
         name: "Chart".into(),
         transform: Transform::default(),
@@ -206,7 +215,9 @@ fn structured_nodes_serialize_to_the_typescript_model_contract() {
 fn rich_text_fields_serialize_to_the_typescript_model_contract() {
     let paragraph = TextParagraph {
         runs: vec![TextRun {
+            field: None,
             text: "Linked".into(),
+            math: None,
             font_family: Some("Aptos".into()),
             east_asian_font_family: Some("Yu Gothic".into()),
             complex_script_font_family: Some("Noto Naskh Arabic".into()),

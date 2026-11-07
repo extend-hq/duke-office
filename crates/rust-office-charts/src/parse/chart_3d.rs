@@ -830,7 +830,7 @@ pub(super) fn render(
                         value
                     }
                 })
-                .clamp(1., len * 2.)
+                .clamp(1., (len * 2.).max(1.))
         };
         scene.left = x.map_or(scene.left, |n| n * width);
         scene.top = y.map_or(scene.top, |n| n * height);

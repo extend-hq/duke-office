@@ -1,14 +1,27 @@
+#[path = "pptx_comments.rs"]
+mod comments;
+#[path = "pptx_fields.rs"]
+mod fields;
+#[path = "pptx_paint.rs"]
+mod paint;
+#[path = "pptx_timing.rs"]
+mod timing;
+
 use std::{
     cell::RefCell,
     collections::{BTreeMap, HashMap},
+    fmt::Write as _,
     io::{Cursor, Read},
+    rc::Rc,
     sync::OnceLock,
 };
 
 use base64::Engine;
+use compact_str::CompactString;
 use quick_xml::{
     events::{BytesStart, Event},
-    Reader,
+    name::ResolveResult,
+    NsReader, Reader,
 };
 use zip::ZipArchive;
 
@@ -23,6 +36,9 @@ use crate::{
 const DEFAULT_WIDTH: u64 = 9_144_000;
 const DEFAULT_HEIGHT: u64 = 6_858_000;
 
+#[path = "pptx_editing.rs"]
+mod editing;
+
 fn local_name(name: &[u8]) -> &[u8] {
     name.rsplit(|byte| *byte == b':').next().unwrap_or(name)
 }
@@ -34,7 +50,8 @@ fn attr(start: &BytesStart<'_>, name: &[u8]) -> Option<String> {
         .flatten()
         .find_map(|value| {
             (local_name(value.key.as_ref()) == name)
-                .then(|| String::from_utf8_lossy(value.value.as_ref()).into_owned())
+                .then(|| value.unescape_value().ok().map(|value| value.into_owned()))
+                .flatten()
         })
 }
 
@@ -90,6 +107,12 @@ const CHART_STYLE_REL_TYPE: &str =
 const CHART_COLOR_STYLE_REL_TYPE: &str =
     "http://schemas.microsoft.com/office/2011/relationships/chartColorStyle";
 
+fn office_relationship(kind: &str, name: &str) -> bool {
+    kind.strip_prefix("http://schemas.openxmlformats.org/officeDocument/2006/relationships/")
+        .or_else(|| kind.strip_prefix("http://purl.oclc.org/ooxml/officeDocument/relationships/"))
+        == Some(name)
+}
+
 fn is_chart_relationship_type(relationship_type: &str) -> bool {
     matches!(
         relationship_type.rsplit('/').next(),
@@ -112,70 +135,153 @@ struct ChartCompanionParts {
     theme_override_xml: Option<String>,
 }
 
-fn relationship_targets_by_type(
-    xml: &[u8],
-    base: &str,
-    max_depth: usize,
-) -> Result<Vec<(String, String)>, ParseError> {
+#[derive(Debug, Clone, Default)]
+struct Relationship {
+    target: String,
+    kind: CompactString,
+    external: bool,
+    order: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+struct Relationships {
+    entries: HashMap<String, Relationship>,
+}
+
+impl Relationships {
+    fn get(&self, id: &str) -> Option<&String> {
+        self.entries.get(id).map(|entry| &entry.target)
+    }
+
+    fn contains_key(&self, id: &str) -> bool {
+        self.entries.contains_key(id)
+    }
+
+    fn is_external(&self, id: &str) -> bool {
+        self.entries.get(id).is_some_and(|entry| entry.external)
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (&String, &String)> {
+        self.entries.iter().map(|(id, entry)| (id, &entry.target))
+    }
+
+    fn values(&self) -> impl Iterator<Item = &String> {
+        self.entries
+            .values()
+            .filter(|entry| !entry.external)
+            .map(|entry| &entry.target)
+    }
+
+    fn typed(&self) -> impl Iterator<Item = (&str, &String)> {
+        self.entries
+            .values()
+            .filter(|entry| !entry.external && !entry.kind.is_empty())
+            .map(|entry| (entry.kind.as_str(), &entry.target))
+    }
+
+    fn paths<'a>(
+        &'a self,
+        kind: &'a str,
+        legacy_prefix: &'a str,
+    ) -> impl Iterator<Item = &'a String> {
+        self.entries
+            .values()
+            .filter(move |entry| {
+                !entry.external
+                    && (office_relationship(&entry.kind, kind)
+                        || (entry.kind.is_empty() && entry.target.starts_with(legacy_prefix)))
+            })
+            .map(|entry| &entry.target)
+    }
+
+    fn related(&self, kind: &str, legacy_prefix: &str) -> Option<&String> {
+        self.entries
+            .values()
+            .filter(|entry| !entry.external && office_relationship(&entry.kind, kind))
+            .min_by_key(|entry| entry.order)
+            .map(|entry| &entry.target)
+            .or_else(|| {
+                self.entries
+                    .values()
+                    .filter(|entry| {
+                        !entry.external
+                            && entry.kind.is_empty()
+                            && entry.target.starts_with(legacy_prefix)
+                    })
+                    .min_by_key(|entry| entry.order)
+                    .map(|entry| &entry.target)
+            })
+    }
+
+    fn asset_paths(&self) -> impl Iterator<Item = &String> {
+        self.entries
+            .values()
+            .filter(|entry| {
+                !entry.external
+                    && (entry.target.starts_with("ppt/media/")
+                        || ["image", "audio", "video"]
+                            .iter()
+                            .any(|kind| office_relationship(&entry.kind, kind)))
+            })
+            .map(|entry| &entry.target)
+    }
+
+    fn internal(&self, id: &str) -> Option<&String> {
+        self.entries
+            .get(id)
+            .filter(|entry| !entry.external)
+            .map(|entry| &entry.target)
+    }
+}
+
+fn relationships(xml: &[u8], base: &str, max_depth: usize) -> Result<Relationships, ParseError> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(true);
-    let mut result = Vec::new();
+    let mut result = Relationships::default();
     let mut depth = 0usize;
     loop {
-        let event = reader.read_event();
-        match event {
-            Ok(Event::Start(ref start)) | Ok(Event::Empty(ref start)) => {
-                if matches!(event, Ok(Event::Start(_))) {
+        match reader.read_event() {
+            Ok(event @ (Event::Start(_) | Event::Empty(_))) => {
+                if matches!(event, Event::Start(_)) {
                     depth += 1;
                     if depth > max_depth {
                         return Err(ParseError::ResourceLimit("XML nesting depth".into()));
                     }
                 }
+                let start = match event {
+                    Event::Start(start) | Event::Empty(start) => start,
+                    _ => unreachable!(),
+                };
                 if local_name(start.name().as_ref()) == b"Relationship" {
-                    if let (Some(rel_type), Some(target)) =
-                        (attr(start, b"Type"), attr(start, b"Target"))
-                    {
-                        result.push((rel_type, normalize_target(base, &target)));
+                    let (mut id, mut target, mut kind, mut external) = (None, None, None, false);
+                    for attribute in start.attributes().with_checks(false).flatten() {
+                        let slot = match local_name(attribute.key.as_ref()) {
+                            b"Id" => &mut id,
+                            b"Target" => &mut target,
+                            b"Type" => &mut kind,
+                            b"TargetMode" => {
+                                external =
+                                    attribute.unescape_value().ok().as_deref() == Some("External");
+                                continue;
+                            }
+                            _ => continue,
+                        };
+                        if slot.is_none() {
+                            *slot = attribute.unescape_value().ok();
+                        }
                     }
-                }
-            }
-            Ok(Event::End(_)) => depth = depth.saturating_sub(1),
-            Ok(Event::Eof) => break,
-            Err(error) => return Err(ParseError::Corrupt(format!("relationship XML: {error}"))),
-            _ => {}
-        }
-    }
-    Ok(result)
-}
-
-fn relationships(
-    xml: &[u8],
-    base: &str,
-    max_depth: usize,
-) -> Result<HashMap<String, String>, ParseError> {
-    let mut reader = Reader::from_reader(xml);
-    reader.config_mut().trim_text(true);
-    let mut result = HashMap::new();
-    let mut depth = 0usize;
-    loop {
-        match reader.read_event() {
-            Ok(Event::Start(start)) => {
-                depth += 1;
-                if depth > max_depth {
-                    return Err(ParseError::ResourceLimit("XML nesting depth".into()));
-                }
-                if local_name(start.name().as_ref()) == b"Relationship" {
-                    if let (Some(id), Some(target)) = (attr(&start, b"Id"), attr(&start, b"Target"))
-                    {
-                        result.insert(id, normalize_target(base, &target));
-                    }
-                }
-            }
-            Ok(Event::Empty(start)) => {
-                if local_name(start.name().as_ref()) == b"Relationship" {
-                    if let (Some(id), Some(target)) = (attr(&start, b"Id"), attr(&start, b"Target"))
-                    {
-                        result.insert(id, normalize_target(base, &target));
+                    if let (Some(id), Some(target)) = (id, target) {
+                        let entry = Relationship {
+                            target: if external {
+                                target.into_owned()
+                            } else {
+                                normalize_target(base, &target)
+                            },
+                            kind: kind.as_deref().unwrap_or_default().into(),
+                            external,
+                            order: result.entries.len(),
+                        };
+                        result.entries.insert(id.into_owned(), entry);
                     }
                 }
             }
@@ -190,7 +296,7 @@ fn relationships(
 
 fn parse_presentation_xml(
     xml: &[u8],
-    rels: &HashMap<String, String>,
+    rels: &Relationships,
     limits: &ParseLimits,
 ) -> Result<(PresentationSize, Vec<String>), ParseError> {
     let mut reader = Reader::from_reader(xml);
@@ -234,7 +340,7 @@ fn parse_presentation_xml(
                                     )
                                 })
                         {
-                            if let Some(target) = rels.get(&id) {
+                            if let Some(target) = rels.internal(&id) {
                                 slides.push(target.clone());
                             }
                         }
@@ -268,7 +374,7 @@ fn parse_presentation_xml(
                                 })
                         })
                     {
-                        if let Some(target) = rels.get(&id) {
+                        if let Some(target) = rels.internal(&id) {
                             slides.push(target.clone());
                         }
                     }
@@ -400,33 +506,66 @@ fn deobfuscate_embedded_font(path: &str, data: &mut [u8]) -> bool {
 #[derive(Debug, Clone)]
 struct XmlNode {
     source_xml: Option<String>,
-    name: String,
-    attributes: Vec<(String, String)>,
+    name: CompactString,
+    attributes: Box<[(CompactString, CompactString)]>,
     text: String,
-    children: Vec<XmlNode>,
+    children: Box<[XmlNode]>,
+    subtree_names: u64,
 }
 
 impl XmlNode {
+    fn name_bit(name: &[u8]) -> u64 {
+        let hash = name.iter().fold(2166136261u32, |hash, byte| {
+            (hash ^ u32::from(*byte)).wrapping_mul(16777619)
+        });
+        1 << (hash % 64)
+    }
+
     fn from_start(
         start: &BytesStart<'_>,
         decoder: quick_xml::encoding::Decoder,
-    ) -> Result<Self, quick_xml::Error> {
+        budget: &mut XmlBudget,
+        limits: &ParseLimits,
+        context: &str,
+    ) -> Result<Self, ParseError> {
+        budget.consume_node_count(limits)?;
+        // Raw tag bytes bound both attribute count and total raw attribute bytes.
+        // Near a limit, reject before decoding or allocating attribute values.
+        let preflight = start.len() > limits.max_xml_attributes.saturating_sub(budget.attributes)
+            || start.len()
+                > limits
+                    .max_xml_attribute_bytes
+                    .saturating_sub(budget.attribute_bytes);
+        if preflight {
+            for attribute in start.attributes().with_checks(false).flatten() {
+                budget.consume_attribute(&attribute);
+            }
+            budget.check_attributes(limits)?;
+        }
+        let attributes = start
+            .attributes()
+            .with_checks(false)
+            .flatten()
+            .map(|attribute| {
+                if !preflight {
+                    budget.consume_attribute(&attribute);
+                }
+                Ok((
+                    CompactString::from(String::from_utf8_lossy(local_name(
+                        attribute.key.as_ref(),
+                    ))),
+                    CompactString::from(attribute.decode_and_unescape_value(decoder)?),
+                ))
+            })
+            .collect::<Result<Vec<_>, quick_xml::Error>>()
+            .map_err(|error| ParseError::Corrupt(format!("{context}: {error}")))?;
         Ok(Self {
             source_xml: None,
-            name: String::from_utf8_lossy(local_name(start.name().as_ref())).into_owned(),
-            attributes: start
-                .attributes()
-                .with_checks(false)
-                .flatten()
-                .map(|attribute| {
-                    Ok((
-                        String::from_utf8_lossy(local_name(attribute.key.as_ref())).into_owned(),
-                        attribute.decode_and_unescape_value(decoder)?.into_owned(),
-                    ))
-                })
-                .collect::<Result<_, quick_xml::Error>>()?,
+            name: CompactString::from(String::from_utf8_lossy(local_name(start.name().as_ref()))),
+            attributes: attributes.into_boxed_slice(),
             text: String::new(),
-            children: Vec::new(),
+            children: Box::default(),
+            subtree_names: Self::name_bit(local_name(start.name().as_ref())),
         })
     }
 
@@ -445,12 +584,19 @@ impl XmlNode {
     }
 
     fn descendant(&self, name: &str) -> Option<&XmlNode> {
+        self.descendant_with_bit(name, Self::name_bit(name.as_bytes()))
+    }
+
+    fn descendant_with_bit(&self, name: &str, bit: u64) -> Option<&XmlNode> {
+        if self.subtree_names & bit == 0 {
+            return None;
+        }
         if self.name == name {
             return Some(self);
         }
         self.children
             .iter()
-            .find_map(|child| child.descendant(name))
+            .find_map(|child| child.descendant_with_bit(name, bit))
     }
 
     fn collect_descendants<'a>(&'a self, name: &str, output: &mut Vec<&'a XmlNode>) {
@@ -486,17 +632,30 @@ impl XmlBudget {
         start: &BytesStart<'_>,
         limits: &ParseLimits,
     ) -> Result<(), ParseError> {
+        self.consume_node_count(limits)?;
+        for attribute in start.attributes().with_checks(false).flatten() {
+            self.consume_attribute(&attribute);
+        }
+        self.check_attributes(limits)
+    }
+
+    fn consume_node_count(&mut self, limits: &ParseLimits) -> Result<(), ParseError> {
         self.nodes = self.nodes.saturating_add(1);
         if self.nodes > limits.max_xml_nodes {
             return Err(ParseError::ResourceLimit("XML node count".into()));
         }
-        for attribute in start.attributes().with_checks(false).flatten() {
-            self.attributes = self.attributes.saturating_add(1);
-            self.attribute_bytes = self
-                .attribute_bytes
-                .saturating_add(attribute.key.as_ref().len())
-                .saturating_add(attribute.value.as_ref().len());
-        }
+        Ok(())
+    }
+
+    fn consume_attribute(&mut self, attribute: &quick_xml::events::attributes::Attribute<'_>) {
+        self.attributes = self.attributes.saturating_add(1);
+        self.attribute_bytes = self
+            .attribute_bytes
+            .saturating_add(attribute.key.as_ref().len())
+            .saturating_add(attribute.value.as_ref().len());
+    }
+
+    fn check_attributes(&self, limits: &ParseLimits) -> Result<(), ParseError> {
         if self.attributes > limits.max_xml_attributes {
             return Err(ParseError::ResourceLimit("XML attribute count".into()));
         }
@@ -532,13 +691,159 @@ impl XmlBudget {
     }
 }
 
+#[derive(Default)]
+struct NamespaceDeclarations {
+    values: Vec<(usize, String, String)>,
+    encoded: Option<Vec<u8>>,
+}
+
+impl NamespaceDeclarations {
+    fn len(&self) -> usize {
+        self.values.len()
+    }
+
+    fn push(&mut self, value: (usize, String, String)) {
+        self.values.push(value);
+        self.encoded = None;
+    }
+
+    fn truncate(&mut self, length: usize) {
+        if length < self.values.len() {
+            self.values.truncate(length);
+            self.encoded = None;
+        }
+    }
+
+    fn encoded(&mut self) -> &[u8] {
+        let values = &self.values;
+        self.encoded.get_or_insert_with(|| {
+            let active: BTreeMap<_, _> = values
+                .iter()
+                .map(|(_, prefix, uri)| (prefix, uri))
+                .collect();
+            let mut result = String::new();
+            for (prefix, uri) in active {
+                if prefix.is_empty() {
+                    result.push_str(" xmlns=\"");
+                } else {
+                    let _ = write!(result, " xmlns:{prefix}=\"");
+                }
+                result.push_str(&quick_xml::escape::escape(uri));
+                result.push('"');
+            }
+            result.into_bytes()
+        })
+    }
+}
+
+fn collect_namespaces(
+    start: &BytesStart<'_>,
+    depth: usize,
+    namespaces: &mut NamespaceDeclarations,
+) {
+    if memchr::memmem::find(start.as_ref(), b"xmlns").is_none() {
+        return;
+    }
+    for attribute in start.attributes().with_checks(false).flatten() {
+        let key = attribute.key.as_ref();
+        let prefix = if key == b"xmlns" {
+            Some(&b""[..])
+        } else {
+            key.strip_prefix(b"xmlns:")
+        };
+        if let (Some(prefix), Ok(value)) = (prefix, attribute.unescape_value()) {
+            namespaces.push((
+                depth,
+                String::from_utf8_lossy(prefix).into_owned(),
+                value.into_owned(),
+            ));
+        }
+    }
+}
+
+fn scoped_source(source: &[u8], namespaces: &mut NamespaceDeclarations, wrapper_name: &str) -> Vec<u8> {
+    let declarations = namespaces.encoded();
+    let mut result = Vec::with_capacity(source.len() + declarations.len() + wrapper_name.len() * 2 + 5);
+    result.push(b'<');
+    result.extend_from_slice(wrapper_name.as_bytes());
+    result.extend_from_slice(declarations);
+    result.push(b'>');
+    result.extend_from_slice(source);
+    result.extend_from_slice(b"</");
+    result.extend_from_slice(wrapper_name.as_bytes());
+    result.push(b'>');
+    result
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum ImageExtensionScope {
+    None,
+    Blip,
+    List,
+    Extension,
+}
+
+fn image_extension_scope(
+    start: &BytesStart<'_>,
+    parent: ImageExtensionScope,
+    namespaces: &[(usize, String, String)],
+) -> ImageExtensionScope {
+    let next = match (local_name(start.name().as_ref()), parent) {
+        (b"blip", _) => ImageExtensionScope::Blip,
+        (b"extLst", ImageExtensionScope::Blip) => ImageExtensionScope::List,
+        (b"ext", ImageExtensionScope::List) => ImageExtensionScope::Extension,
+        _ => return ImageExtensionScope::None,
+    };
+    let name = start.name();
+    let prefix = name
+        .as_ref()
+        .iter()
+        .position(|byte| *byte == b':')
+        .map(|end| &name.as_ref()[..end])
+        .unwrap_or_default();
+    let namespace = namespaces
+        .iter()
+        .rev()
+        .find(|(_, candidate, _)| candidate.as_bytes() == prefix);
+    if namespace.is_some_and(|(_, _, uri)| {
+        matches!(
+            uri.as_str(),
+            "http://schemas.openxmlformats.org/drawingml/2006/main"
+                | "http://purl.oclc.org/ooxml/drawingml/main"
+        )
+    }) {
+        next
+    } else {
+        ImageExtensionScope::None
+    }
+}
+
 fn parse_xml_tree(xml: &[u8], limits: &ParseLimits, context: &str) -> Result<XmlNode, ParseError> {
+    struct Frame {
+        node: XmlNode,
+        children: Vec<XmlNode>,
+        image_extension_scope: ImageExtensionScope,
+        editing_scope: editing::Scope,
+    }
+
+    let xml = xml.strip_prefix(b"\xef\xbb\xbf").unwrap_or(xml);
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(false);
-    let mut stack = Vec::<XmlNode>::new();
+    let mut stack = Vec::<Frame>::new();
     let mut source_starts = Vec::new();
     let mut root = None;
     let mut budget = XmlBudget::default();
+    let track_image_extensions = memchr::memmem::find(xml, b"svgBlip").is_some();
+    let track_editing = memchr::memmem::find(xml, b"cNv").is_some();
+    let track_existing_namespaces = std::str::from_utf8(xml).is_ok_and(|xml| {
+        xml.contains("oMath")
+            || xml.contains("transition")
+            || xml.contains("timing")
+            || xml.contains("fld")
+    }) || track_image_extensions;
+    let track_namespaces = track_existing_namespaces || track_editing;
+    let mut namespaces = NamespaceDeclarations::default();
+    let mut namespace_scopes = Vec::new();
     loop {
         let source_start = reader.buffer_position() as usize;
         match reader.read_event() {
@@ -546,34 +851,116 @@ fn parse_xml_tree(xml: &[u8], limits: &ParseLimits, context: &str) -> Result<Xml
                 if stack.len() >= limits.max_xml_depth {
                     return Err(ParseError::ResourceLimit("XML nesting depth".into()));
                 }
-                budget.consume_node(&start, limits)?;
+                let node =
+                    XmlNode::from_start(&start, reader.decoder(), &mut budget, limits, context)?;
+                if track_namespaces {
+                    namespace_scopes.push(namespaces.len());
+                    collect_namespaces(&start, stack.len(), &mut namespaces);
+                }
+                let editing_scope = if track_editing {
+                    stack.last().map(|frame| frame.editing_scope).unwrap_or_default()
+                        .next(&start, &namespaces.values)
+                } else { editing::Scope::None };
+                let parent_scope = stack
+                    .last()
+                    .map(|frame| frame.image_extension_scope)
+                    .unwrap_or(ImageExtensionScope::None);
+                let image_extension_scope = if track_image_extensions {
+                    image_extension_scope(&start, parent_scope, &namespaces.values)
+                } else {
+                    ImageExtensionScope::None
+                };
                 source_starts.push(
-                    matches!(
+                    (editing_scope.is_properties() || matches!(
                         local_name(start.name().as_ref()),
-                        b"pic" | b"sp" | b"cxnSp" | b"fmtScheme" | b"model3d"
-                    )
-                    .then_some(source_start),
+                        b"pic"
+                            | b"sp"
+                            | b"cxnSp"
+                            | b"fmtScheme"
+                            | b"model3d"
+                            | b"oleObj"
+                            | b"contentPart"
+                            | b"control"
+                            | b"oMath"
+                            | b"oMathPara"
+                            | b"transition"
+                            | b"timing"
+                            | b"fld"
+                    ) || (parent_scope == ImageExtensionScope::Extension
+                        && node.name == "svgBlip")
+                        || (track_existing_namespaces
+                            && local_name(start.name().as_ref()) == b"AlternateContent"
+                            && stack.len() == 1))
+                        .then_some(source_start),
                 );
-                stack.push(
-                    XmlNode::from_start(&start, reader.decoder())
-                        .map_err(|error| ParseError::Corrupt(format!("{context}: {error}")))?,
-                );
+                stack.push(Frame {
+                    node,
+                    children: Vec::new(),
+                    image_extension_scope,
+                    editing_scope,
+                });
             }
             Ok(Event::Empty(start)) => {
-                budget.consume_node(&start, limits)?;
-                let mut node = XmlNode::from_start(&start, reader.decoder())
-                    .map_err(|error| ParseError::Corrupt(format!("{context}: {error}")))?;
-                if matches!(
+                let mut node =
+                    XmlNode::from_start(&start, reader.decoder(), &mut budget, limits, context)?;
+                let namespace_count = namespaces.len();
+                if track_namespaces {
+                    collect_namespaces(&start, stack.len(), &mut namespaces);
+                }
+                let editing_scope = if track_editing {
+                    stack.last().map(|frame| frame.editing_scope).unwrap_or_default()
+                        .next(&start, &namespaces.values)
+                } else { editing::Scope::None };
+                if editing_scope.retain(&node) || matches!(
                     node.name.as_str(),
-                    "pic" | "sp" | "cxnSp" | "fmtScheme" | "model3d"
-                ) {
-                    node.source_xml = Some(budget.retain_source_xml(
-                        &xml[source_start..reader.buffer_position() as usize],
-                        limits,
-                        context,
-                    )?);
+                    "pic"
+                        | "sp"
+                        | "cxnSp"
+                        | "fmtScheme"
+                        | "model3d"
+                        | "oleObj"
+                        | "contentPart"
+                        | "control"
+                        | "oMath"
+                        | "oMathPara"
+                        | "transition"
+                        | "timing"
+                        | "fld"
+                ) || (node.name == "svgBlip"
+                    && stack.last().is_some_and(|frame| {
+                        frame.image_extension_scope == ImageExtensionScope::Extension
+                    }))
+                {
+                    let source = &xml[source_start..reader.buffer_position() as usize];
+                    let qualified;
+                    let source = if editing_scope.is_properties() {
+                        qualified = scoped_source(source, &mut namespaces, "nonvisualSource");
+                        qualified.as_slice()
+                    } else if matches!(node.name.as_str(), "oMath" | "oMathPara") {
+                        qualified = scoped_source(source, &mut namespaces, "officeMathSource");
+                        qualified.as_slice()
+                    } else if node.name == "fld" {
+                        qualified = scoped_source(source, &mut namespaces, "textFieldSource");
+                        qualified.as_slice()
+                    } else if node.name == "svgBlip" {
+                        qualified = scoped_source(source, &mut namespaces, "imageExtensionSource");
+                        qualified.as_slice()
+                    } else if matches!(
+                        node.name.as_str(),
+                        "transition" | "timing" | "AlternateContent"
+                    ) {
+                        qualified = scoped_source(source, &mut namespaces, "animationSource");
+                        qualified.as_slice()
+                    } else {
+                        source
+                    };
+                    node.source_xml = Some(budget.retain_source_xml(source, limits, context)?);
+                }
+                if track_namespaces {
+                    namespaces.truncate(namespace_count);
                 }
                 if let Some(parent) = stack.last_mut() {
+                    parent.node.subtree_names |= node.subtree_names;
                     parent.children.push(node);
                 } else if root.replace(node).is_some() {
                     return Err(ParseError::Corrupt(format!(
@@ -587,27 +974,56 @@ fn parse_xml_tree(xml: &[u8], limits: &ParseLimits, context: &str) -> Result<Xml
                         .unescape()
                         .map_err(|error| ParseError::Corrupt(format!("{context}: {error}")))?;
                     budget.consume_text(value.len(), limits)?;
-                    node.text.push_str(&value);
+                    node.node.text.push_str(&value);
                 }
             }
             Ok(Event::CData(text)) => {
                 if let Some(node) = stack.last_mut() {
                     budget.consume_text(text.len(), limits)?;
-                    node.text.push_str(&String::from_utf8_lossy(text.as_ref()));
+                    node.node
+                        .text
+                        .push_str(&String::from_utf8_lossy(text.as_ref()));
                 }
             }
             Ok(Event::End(_)) => {
-                let mut node = stack.pop().ok_or_else(|| {
+                let Frame {
+                    mut node, children, editing_scope, ..
+                } = stack.pop().ok_or_else(|| {
                     ParseError::Corrupt(format!("{context} contains an unmatched closing tag"))
                 })?;
-                if let Some(Some(start)) = source_starts.pop() {
-                    node.source_xml = Some(budget.retain_source_xml(
-                        &xml[start..reader.buffer_position() as usize],
-                        limits,
-                        context,
-                    )?);
+                node.children = children.into_boxed_slice();
+                if let Some(start) = source_starts.pop().flatten()
+                    .filter(|_| !editing_scope.is_properties() || editing_scope.retain(&node)) {
+                    let source = &xml[start..reader.buffer_position() as usize];
+                    let qualified;
+                    let source = if editing_scope.is_properties() {
+                        qualified = scoped_source(source, &mut namespaces, "nonvisualSource");
+                        qualified.as_slice()
+                    } else if matches!(node.name.as_str(), "oMath" | "oMathPara") {
+                        qualified = scoped_source(source, &mut namespaces, "officeMathSource");
+                        qualified.as_slice()
+                    } else if node.name == "fld" {
+                        qualified = scoped_source(source, &mut namespaces, "textFieldSource");
+                        qualified.as_slice()
+                    } else if node.name == "svgBlip" {
+                        qualified = scoped_source(source, &mut namespaces, "imageExtensionSource");
+                        qualified.as_slice()
+                    } else if matches!(
+                        node.name.as_str(),
+                        "transition" | "timing" | "AlternateContent"
+                    ) {
+                        qualified = scoped_source(source, &mut namespaces, "animationSource");
+                        qualified.as_slice()
+                    } else {
+                        source
+                    };
+                    node.source_xml = Some(budget.retain_source_xml(source, limits, context)?);
+                }
+                if track_namespaces {
+                    namespaces.truncate(namespace_scopes.pop().unwrap_or(0));
                 }
                 if let Some(parent) = stack.last_mut() {
+                    parent.node.subtree_names |= node.subtree_names;
                     parent.children.push(node);
                 } else if root.replace(node).is_some() {
                     return Err(ParseError::Corrupt(format!(
@@ -707,6 +1123,90 @@ fn node_identity(node: &XmlNode, slide_index: usize, node_index: usize) -> (Stri
     )
 }
 
+fn nonvisual_properties(node: &XmlNode) -> Option<&XmlNode> {
+    node.children.iter().find(|child| {
+        matches!(
+            child.name.as_str(),
+            "nvSpPr"
+                | "nvPicPr"
+                | "nvGrpSpPr"
+                | "nvGraphicFramePr"
+                | "nvCxnSpPr"
+                | "nvContentPartPr"
+        )
+    })
+}
+
+fn object_action(node: &XmlNode, rels: &Relationships) -> crate::ObjectAction {
+    let string = |name| node.attr(name).map(str::to_owned);
+    let sound = node.child("snd");
+    crate::ObjectAction {
+        relationship_id: string("id"),
+        target: node.attr("id").and_then(|id| rels.get(id)).cloned(),
+        external: node
+            .attr("id")
+            .filter(|id| rels.contains_key(*id))
+            .map(|id| rels.is_external(id)),
+        action: string("action"),
+        tooltip: string("tooltip"),
+        target_frame: string("tgtFrame"),
+        invalid_url: string("invalidUrl"),
+        history: node.attr("history").and_then(bool_value),
+        highlight_click: node.attr("highlightClick").and_then(bool_value),
+        end_sound: node.attr("endSnd").and_then(bool_value),
+        sound_asset_id: sound
+            .and_then(|sound| sound.attr("embed"))
+            .and_then(|id| rels.internal(id))
+            .cloned(),
+        sound_name: sound
+            .and_then(|sound| sound.attr("name"))
+            .map(str::to_owned),
+        sound_builtin: sound
+            .and_then(|sound| sound.attr("builtIn"))
+            .and_then(bool_value),
+    }
+}
+
+fn node_metadata(
+    node: &XmlNode,
+    context: &NodeParseContext<'_, '_>,
+) -> Option<crate::NodeMetadata> {
+    let properties = nonvisual_properties(node)?.child("cNvPr")?;
+    let click_action = properties
+        .child("hlinkClick")
+        .map(|action| Box::new(object_action(action, context.rels)));
+    let description = properties.attr("descr").map(str::to_owned);
+    let title = properties.attr("title").map(str::to_owned);
+    Some(crate::NodeMetadata {
+        editing: nonvisual_properties(node).and_then(|properties| {
+            properties.children.iter().filter_map(|child| child.source_xml.as_deref())
+                .find_map(|xml| context.editing_cache.borrow_mut().parse(xml))
+        }),
+        source_id: properties.attr("id").map(str::to_owned),
+        hidden: properties.attr("hidden").and_then(bool_value),
+        alt_text: description
+            .as_ref()
+            .filter(|text| !text.is_empty())
+            .or_else(|| title.as_ref().filter(|text| !text.is_empty()))
+            .cloned(),
+        description,
+        accessibility_title: title,
+        decorative: properties
+            .child("extLst")
+            .and_then(|extensions| extensions.descendant("decorative"))
+            .and_then(|decorative| decorative.attr("val"))
+            .and_then(bool_value),
+        hyperlink: click_action
+            .as_ref()
+            .and_then(|action| action.target.clone()),
+        click_action,
+        hover_action: properties
+            .child("hlinkHover")
+            .map(|action| Box::new(object_action(action, context.rels))),
+        source_part: context.source_part.map(str::to_owned),
+    })
+}
+
 fn color_element(node: &XmlNode) -> Option<&XmlNode> {
     if matches!(
         node.name.as_str(),
@@ -724,7 +1224,7 @@ struct ThemeDataInternal {
     colors: BTreeMap<String, String>,
     major_fonts: BTreeMap<String, String>,
     minor_fonts: BTreeMap<String, String>,
-    rels: HashMap<String, String>,
+    rels: Relationships,
     fill_styles: Vec<XmlNode>,
     background_fill_styles: Vec<XmlNode>,
     line_styles: Vec<XmlNode>,
@@ -796,6 +1296,7 @@ struct ColorContext<'a> {
     theme: Option<&'a ThemeDataInternal>,
     color_map: &'a BTreeMap<String, String>,
     diagnostics: &'a ParseDiagnostics,
+    paint_key: Rc<paint::ColorKey>,
 }
 
 fn preset_color(value: &str) -> Option<&'static str> {
@@ -1148,7 +1649,7 @@ fn parse_color(node: &XmlNode, context: Option<&ColorContext<'_>>) -> Option<Col
 fn parse_theme(
     xml: &[u8],
     path: &str,
-    rels: HashMap<String, String>,
+    rels: Relationships,
     limits: &ParseLimits,
 ) -> Result<ThemeDataInternal, ParseError> {
     let root = parse_xml_tree(xml, limits, path)?;
@@ -1157,7 +1658,7 @@ fn parse_theme(
     if let Some(color_scheme) = color_scheme {
         for entry in &color_scheme.children {
             if let Some(color) = parse_color(entry, None) {
-                colors.insert(entry.name.clone(), color.value);
+                colors.insert(entry.name.to_string(), color.value);
             }
         }
     }
@@ -1193,19 +1694,19 @@ fn parse_theme(
         format_scheme_xml: format_scheme.and_then(|node| node.source_xml.clone()),
         fill_styles: format_scheme
             .and_then(|scheme| scheme.child("fillStyleLst"))
-            .map(|list| list.children.clone())
+            .map(|list| list.children.to_vec())
             .unwrap_or_default(),
         background_fill_styles: format_scheme
             .and_then(|scheme| scheme.child("bgFillStyleLst"))
-            .map(|list| list.children.clone())
+            .map(|list| list.children.to_vec())
             .unwrap_or_default(),
         line_styles: format_scheme
             .and_then(|scheme| scheme.child("lnStyleLst"))
-            .map(|list| list.children.clone())
+            .map(|list| list.children.to_vec())
             .unwrap_or_default(),
         effect_styles: format_scheme
             .and_then(|scheme| scheme.child("effectStyleLst"))
-            .map(|list| list.children.clone())
+            .map(|list| list.children.to_vec())
             .unwrap_or_default(),
     })
 }
@@ -1216,7 +1717,13 @@ fn color_map(root: &XmlNode) -> BTreeMap<String, String> {
             .and_then(|override_node| override_node.child("overrideClrMapping"))
     });
     mapping
-        .map(|mapping| mapping.attributes.iter().cloned().collect())
+        .map(|mapping| {
+            mapping
+                .attributes
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.to_string()))
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -1305,7 +1812,7 @@ fn parse_blip_effects(
 fn parse_blip_fill(
     fill: &XmlNode,
     context: Option<&ColorContext<'_>>,
-    rels: &HashMap<String, String>,
+    rels: &Relationships,
 ) -> Option<FillStyle> {
     let blip = fill.child("blip")?;
     let relationship = blip.attr("embed").or_else(|| blip.attr("link"))?;
@@ -1332,7 +1839,7 @@ fn parse_blip_fill(
 fn parse_fill_with_placeholder(
     properties: &XmlNode,
     context: Option<&ColorContext<'_>>,
-    rels: &HashMap<String, String>,
+    rels: &Relationships,
     placeholder: Option<&ColorValue>,
 ) -> Option<FillStyle> {
     if named_fill(properties, "noFill").is_some() {
@@ -1387,7 +1894,7 @@ fn parse_fill_with_placeholder(
 fn parse_fill(
     properties: &XmlNode,
     context: Option<&ColorContext<'_>>,
-    rels: &HashMap<String, String>,
+    rels: &Relationships,
 ) -> Option<FillStyle> {
     parse_fill_with_placeholder(properties, context, rels, None)
 }
@@ -1486,26 +1993,7 @@ fn style_matrix_line(reference: &XmlNode, context: Option<&ColorContext<'_>>) ->
         })
 }
 
-#[derive(Debug, Clone, Default)]
-struct RunStyle {
-    font_family: Option<String>,
-    east_asian_font_family: Option<String>,
-    complex_script_font_family: Option<String>,
-    symbol_font_family: Option<String>,
-    font_size_pt: Option<f64>,
-    bold: Option<bool>,
-    italic: Option<bool>,
-    underline: Option<bool>,
-    strike: Option<bool>,
-    color: Option<ColorValue>,
-    baseline: Option<f64>,
-    language: Option<String>,
-    alternative_language: Option<String>,
-    right_to_left: Option<bool>,
-    hyperlink: Option<String>,
-    character_spacing_pt: Option<f64>,
-    kerning_threshold_pt: Option<f64>,
-}
+type RunStyle = crate::TextRunProperties;
 
 impl RunStyle {
     fn overlay(mut self, other: RunStyle) -> Self {
@@ -1583,7 +2071,7 @@ fn run_font_family(
 fn parse_run_style(
     properties: Option<&XmlNode>,
     colors: Option<&ColorContext<'_>>,
-    rels: &HashMap<String, String>,
+    rels: &Relationships,
 ) -> RunStyle {
     let Some(properties) = properties else {
         return RunStyle::default();
@@ -1642,6 +2130,8 @@ fn parse_run_style(
 fn text_run(text: String, style: RunStyle) -> TextRun {
     TextRun {
         text,
+        math: None,
+        field: None,
         font_family: style.font_family,
         east_asian_font_family: style.east_asian_font_family,
         complex_script_font_family: style.complex_script_font_family,
@@ -1872,10 +2362,11 @@ fn style_level_properties(style: Option<&XmlNode>, level: usize) -> Option<&XmlN
 }
 
 struct TextParseContext<'a, 'color> {
+    source_part: Option<&'a str>,
     presentation_text_style: Option<&'a XmlNode>,
     shape_default_style: RunStyle,
     colors: Option<&'a ColorContext<'color>>,
-    rels: &'a HashMap<String, String>,
+    rels: &'a Relationships,
 }
 
 fn parse_text_paragraphs(
@@ -1935,8 +2426,21 @@ fn parse_text_paragraphs(
                 context.rels,
             ));
             let mut runs = Vec::new();
-            for child in &paragraph.children {
+            let mut children = paragraph.children.iter();
+            let mut branches = Vec::new();
+            loop {
+                let Some(child) = children.next() else {
+                    if let Some(previous) = branches.pop() { children = previous; continue; }
+                    break;
+                };
                 match child.name.as_str() {
+                    "AlternateContent" => {
+                        if let Some(branch) = ["Choice", "Fallback"].into_iter().flat_map(|name| child.children_named(name)).find(|branch| branch.children.iter().any(|child| matches!(child.name.as_str(), "r" | "fld" | "br" | "tab" | "t" | "m" | "oMath" | "oMathPara" | "AlternateContent"))) {
+                            branches.push(children);
+                            children = branch.children.iter();
+                        }
+                    }
+                    "fld" if fields::push_run(child, &default_style, context, &mut runs) => {}
                     "r" | "fld" => {
                         let style = default_style.clone().overlay(parse_run_style(
                             child.child("rPr"),
@@ -1965,13 +2469,38 @@ fn parse_text_paragraphs(
                         ));
                         runs.push(text_run("\t".into(), style));
                     }
+                    "m" | "oMath" | "oMathPara" => {
+                        let source = if matches!(child.name.as_str(), "oMath" | "oMathPara") { Some(child) }
+                            else { child.descendant("oMathPara").or_else(|| child.descendant("oMath")) };
+                        if let Some(source) = source {
+                            let source_xml = source.source_xml.as_deref().unwrap_or_default();
+                            let math = rust_office_art::parse_office_math(source_xml).unwrap_or_else(||
+                                rust_office_art::OfficeMath::unparsed(source_xml.into(), source.text_content(), source.name == "oMathPara"));
+                            if !math.unsupported.is_empty() {
+                                if let Some(colors) = context.colors {
+                                    colors.diagnostics.warn("math-fallback", "Equation has features retained in the source that are not rendered in MathML.", Some("math"));
+                                }
+                            }
+                            let style = default_style.clone().overlay(parse_run_style(child.descendant("rPr"), context.colors, context.rels));
+                            let mut run = text_run(math.text.clone(), style);
+                            run.font_size_pt = math.font_size_pt.or(run.font_size_pt);
+                            run.math = Some(Box::new(math));
+                            runs.push(run);
+                        }
+                    }
                     "t" => runs.push(text_run(child.text_content(), default_style.clone())),
                     _ => {}
                 }
             }
+            let alignment = runs.iter().filter_map(|run| run.math.as_deref()).find_map(|math| math.justification.as_deref()).and_then(|value| match value {
+                    "center" | "centerGroup" => Some("center".to_owned()),
+                    "left" => Some("left".to_owned()),
+                    "right" => Some("right".to_owned()),
+                    _ => None,
+                }).or(paragraph_style.alignment);
             TextParagraph {
                 runs,
-                alignment: paragraph_style.alignment,
+                alignment,
                 level: paragraph_style
                     .level
                     .or(Some(level))
@@ -2097,9 +2626,9 @@ fn shape_tree(root: &XmlNode) -> Option<&XmlNode> {
 }
 
 #[derive(Clone)]
-struct PlaceholderKey {
-    index: Option<String>,
-    kind: Option<String>,
+struct PlaceholderKey<'a> {
+    index: Option<&'a str>,
+    kind: Option<&'a str>,
 }
 
 fn normalized_placeholder_kind(kind: &str) -> &str {
@@ -2110,14 +2639,11 @@ fn normalized_placeholder_kind(kind: &str) -> &str {
     }
 }
 
-fn placeholder_key(node: &XmlNode) -> Option<PlaceholderKey> {
+fn placeholder_key(node: &XmlNode) -> Option<PlaceholderKey<'_>> {
     let placeholder = node.descendant("ph")?;
     Some(PlaceholderKey {
-        index: placeholder.attr("idx").map(str::to_owned),
-        kind: placeholder
-            .attr("type")
-            .map(normalized_placeholder_kind)
-            .map(str::to_owned),
+        index: placeholder.attr("idx"),
+        kind: placeholder.attr("type").map(normalized_placeholder_kind),
     })
 }
 
@@ -2129,17 +2655,17 @@ fn find_placeholder<'a>(root: &'a XmlNode, source: &XmlNode) -> Option<&'a XmlNo
             "sp" | "cxnSp" | "pic" | "graphicFrame"
         )
     });
-    if let Some(index) = key.index.as_deref() {
+    if let Some(index) = key.index {
         if let Some(candidate) = candidates.clone().find(|candidate| {
-            placeholder_key(candidate).and_then(|value| value.index) == Some(index.to_owned())
+            placeholder_key(candidate).and_then(|value| value.index) == Some(index)
         }) {
             return Some(candidate);
         }
     }
-    key.kind.as_deref().and_then(|kind| {
-        candidates.into_iter().find(|candidate| {
-            placeholder_key(candidate).and_then(|value| value.kind) == Some(kind.to_owned())
-        })
+    key.kind.and_then(|kind| {
+        candidates
+            .into_iter()
+            .find(|candidate| placeholder_key(candidate).and_then(|value| value.kind) == Some(kind))
     })
 }
 
@@ -2148,7 +2674,7 @@ fn master_text_style<'a>(master: Option<&'a XmlNode>, source: &XmlNode) -> Optio
     // `p:ph@type` defaults to "obj" (ECMA-376 CT_Placeholder), so a typeless
     // placeholder such as python-pptx's `<p:ph idx="1"/>` content placeholder
     // takes the body style. Only non-placeholder shapes use otherStyle.
-    match placeholder_key(source).map(|key| key.kind.unwrap_or_else(|| "body".to_owned())) {
+    match placeholder_key(source).map(|key| key.kind.unwrap_or("body")) {
         Some(kind) if kind == "title" => styles.child("titleStyle"),
         Some(kind) if kind == "body" => styles.child("bodyStyle"),
         _ => styles.child("otherStyle"),
@@ -2342,7 +2868,7 @@ fn custom_geometry_path(node: &XmlNode) -> Option<String> {
 fn shape_fill(
     node: &XmlNode,
     colors: Option<&ColorContext<'_>>,
-    rels: &HashMap<String, String>,
+    rels: &Relationships,
 ) -> Option<Option<FillStyle>> {
     // The slide already paints its background, so a background-fill shape is
     // transparent in the normalized composition. Falling through to fillRef
@@ -2384,12 +2910,15 @@ fn shape_line(node: &XmlNode, colors: Option<&ColorContext<'_>>) -> Option<Optio
 
 #[derive(Clone, Copy)]
 struct NodeParseContext<'a, 'color> {
+    shape_cache: &'a RefCell<paint::ShapeCache>,
+    editing_cache: &'a RefCell<editing::Cache>,
+    source_part: Option<&'a str>,
     options: &'a ParseOptions,
     slide_index: usize,
     paint_scale: (f64, f64),
-    rels: &'a HashMap<String, String>,
+    rels: &'a Relationships,
     related_parts: &'a HashMap<String, Vec<u8>>,
-    related_relationships: &'a HashMap<String, HashMap<String, String>>,
+    related_relationships: &'a HashMap<String, Relationships>,
     assets: &'a BTreeMap<String, PresentationAsset>,
     chart_companions: &'a HashMap<String, ChartCompanionParts>,
     legacy_chart_defaults: bool,
@@ -2398,8 +2927,8 @@ struct NodeParseContext<'a, 'color> {
     diagnostics: &'a ParseDiagnostics,
     layout_root: Option<&'a XmlNode>,
     master_root: Option<&'a XmlNode>,
-    layout_rels: Option<&'a HashMap<String, String>>,
-    master_rels: Option<&'a HashMap<String, String>>,
+    layout_rels: Option<&'a Relationships>,
+    master_rels: Option<&'a Relationships>,
     presentation_text_style: Option<&'a XmlNode>,
     table_styles: Option<&'a XmlNode>,
 }
@@ -2448,6 +2977,7 @@ fn parse_shape_node(
         .overlay(shape_font_style(layout, context.colors))
         .overlay(shape_font_style(Some(node), context.colors));
     let text_context = TextParseContext {
+        source_part: context.source_part,
         presentation_text_style: context.presentation_text_style,
         shape_default_style,
         colors: context.colors,
@@ -2462,17 +2992,12 @@ fn parse_shape_node(
         ],
         &transform,
     );
-    let rendered = rust_office_art::render_shape(
-        &properties_xml,
-        &style_xml,
+    let rendered = paint::render_shape(
+        properties_xml,
+        style_xml,
         transform.width as f64 * context.paint_scale.0 / 9525.0,
         transform.height as f64 * context.paint_scale.1 / 9525.0,
-        &OfficeArtColors {
-            colors: context.colors,
-            limits: context.limits,
-            assets: context.assets,
-            relationships: context.rels,
-        },
+        context,
     );
     if rendered.is_none() && transform.width > 0 && transform.height > 0 {
         context.diagnostics.warn("unsupported-shape-appearance", "Shape paint could not be rendered by the shared engine; structured geometry, fill, line and source XML remain available.", Some("shape"));
@@ -2481,6 +3006,7 @@ fn parse_shape_node(
         .map(|paint| (Some(paint.svg), paint.paint_bounds))
         .unwrap_or_default();
     SlideNode::Shape {
+        metadata: Default::default(),
         id,
         name,
         transform,
@@ -2537,12 +3063,44 @@ fn parse_shape_node(
 
 fn collect_model_assets(
     node: &XmlNode,
-    rels: &HashMap<String, String>,
+    rels: &Relationships,
     paths: &mut BTreeMap<String, String>,
 ) {
-    if node.name == "model3d" {
-        if let Some(path) = node.attr("embed").and_then(|id| rels.get(id)) {
-            paths.insert(path.clone(), "model3d".into());
+    static MASK: OnceLock<u64> = OnceLock::new();
+    let mask = *MASK.get_or_init(|| {
+        [
+            "model3d",
+            "oleObj",
+            "audioFile",
+            "videoFile",
+            "quickTimeFile",
+            "wavAudioFile",
+            "media",
+            "snd",
+            "sndTgt",
+            "contentPart",
+            "control",
+        ]
+        .iter()
+        .fold(0, |mask, name| mask | XmlNode::name_bit(name.as_bytes()))
+    });
+    if node.subtree_names & mask == 0 {
+        return;
+    }
+    let relationship = match node.name.as_str() {
+        "model3d" | "wavAudioFile" | "snd" | "sndTgt" => node.attr("embed"),
+        "oleObj" | "contentPart" | "control" => node.attr("id"),
+        "audioFile" | "videoFile" | "quickTimeFile" => node.attr("link"),
+        "media" => node.attr("link").or_else(|| node.attr("embed")),
+        _ => None,
+    };
+    if let Some(path) = relationship.and_then(|id| rels.internal(id)) {
+        if node.name == "model3d" {
+            paths.insert(path.clone(), node.name.to_string());
+        } else {
+            paths
+                .entry(path.clone())
+                .or_insert_with(|| node.name.to_string());
         }
     }
     for child in &node.children {
@@ -2611,7 +3169,7 @@ struct OfficeArtColors<'a, 'b> {
     colors: Option<&'a ColorContext<'b>>,
     limits: &'a ParseLimits,
     assets: &'a BTreeMap<String, PresentationAsset>,
-    relationships: &'a HashMap<String, String>,
+    relationships: &'a Relationships,
 }
 
 impl rust_office_art::PictureContext for OfficeArtColors<'_, '_> {
@@ -2687,7 +3245,7 @@ fn office_art_node_xml_with_color(
     prefix: &str,
     output: &mut String,
     placeholder: Option<&ColorValue>,
-    relationships: Option<&HashMap<String, String>>,
+    relationships: Option<&Relationships>,
 ) {
     let prefix = if node.name == "useLocalDpi" {
         "a14"
@@ -2702,14 +3260,17 @@ fn office_art_node_xml_with_color(
     } else {
         &node.name
     };
-    output.push_str(&format!("<{prefix}:{name}"));
+    output.push('<');
+    output.push_str(prefix);
+    output.push(':');
+    output.push_str(name);
     for (name, value) in &node.attributes {
         if value.starts_with("http://schemas.") || value.starts_with("http://purl.org/") {
             continue;
         }
         let relationship = matches!(name.as_str(), "embed" | "link");
         let resolved = relationship
-            .then(|| relationships.and_then(|rels| rels.get(value)))
+            .then(|| relationships.and_then(|rels| rels.get(value.as_str())))
             .flatten();
         let value = if let Some(resolved) = resolved {
             resolved.as_str()
@@ -2720,29 +3281,32 @@ fn office_art_node_xml_with_color(
         } else {
             value
         };
-        output.push_str(&format!(
-            " {}{}=\"{}\"",
-            if relationship { "r:" } else { "" },
-            name,
-            quick_xml::escape::escape(value)
-        ));
+        output.push(' ');
+        if relationship {
+            output.push_str("r:");
+        }
+        output.push_str(name);
+        output.push_str("=\"");
+        output.push_str(&quick_xml::escape::escape(value));
+        output.push('"');
     }
     output.push('>');
     output.push_str(&quick_xml::escape::escape(&node.text));
     if let Some(alpha) = replacement.and_then(|color| color.alpha) {
-        output.push_str(&format!(
-            r#"<a:alpha val="{}"/>"#,
-            (alpha * 100000.0).round()
-        ));
+        let _ = write!(output, r#"<a:alpha val="{}"/>"#, (alpha * 100000.0).round());
     }
     for child in &node.children {
         office_art_node_xml_with_color(child, "a", output, placeholder, relationships);
     }
-    output.push_str(&format!("</{prefix}:{name}>"));
+    output.push_str("</");
+    output.push_str(prefix);
+    output.push(':');
+    output.push_str(name);
+    output.push('>');
 }
 
 fn shape_appearance_xml(
-    sources: &[(Option<&XmlNode>, Option<&HashMap<String, String>>)],
+    sources: &[(Option<&XmlNode>, Option<&Relationships>)],
     frame: &Transform,
 ) -> (String, String) {
     let mut properties = format!(
@@ -2905,18 +3469,61 @@ fn parse_model3d_node(
         );
     }
     SlideNode::Image {
+        metadata: Default::default(),
         model_3d,
+        ink: None,
         id,
         name,
         transform,
         asset_id: asset_id.unwrap_or_else(|| "missing-asset".into()),
+        fallback_asset_id: None,
         crop: None,
         opacity: None,
         preserve_aspect_ratio: false,
         effects: None,
         picture_svg: None,
+        fallback_picture: None,
         paint_bounds: None,
         source_xml: model.source_xml.clone(),
+    }
+}
+
+fn svg_image_relationship(node: &XmlNode) -> Option<String> {
+    let source = node.source_xml.as_deref()?;
+    let mut reader = NsReader::from_reader(source.as_bytes());
+    let mut depth = 0;
+    loop {
+        let (namespace, event) = reader.read_resolved_event().ok()?;
+        match event {
+            Event::Start(start) | Event::Empty(start) if depth == 1 => {
+                if !matches!(namespace, ResolveResult::Bound(ns) if ns.as_ref() == b"http://schemas.microsoft.com/office/drawing/2016/SVG/main")
+                    || start.local_name().as_ref() != b"svgBlip"
+                {
+                    return None;
+                }
+                return start
+                    .attributes()
+                    .with_checks(false)
+                    .flatten()
+                    .find_map(|attribute| {
+                        let (namespace, name) = reader.resolve_attribute(attribute.key);
+                        (name.as_ref() == b"embed"
+                            && matches!(namespace, ResolveResult::Bound(ns) if matches!(ns.as_ref(),
+                        b"http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+                        | b"http://purl.oclc.org/ooxml/officeDocument/relationships")))
+                        .then(|| {
+                            attribute
+                                .unescape_value()
+                                .ok()
+                                .map(|value| value.into_owned())
+                        })
+                        .flatten()
+                    });
+            }
+            Event::Start(_) => depth += 1,
+            Event::End(_) | Event::Eof => return None,
+            _ => {}
+        }
     }
 }
 
@@ -2943,25 +3550,37 @@ fn parse_image_node(
         let fill = source?.child("blipFill")?;
         let blip = fill.child("blip")?;
         let rels = rels?;
-        let alternative = blip
-            .descendant("svgBlip")
-            .and_then(|svg| svg.attr("embed"))
-            .and_then(|id| rels.get(id))
-            .filter(|id| context.assets.contains_key(*id));
-        let asset_id = alternative
-            .or_else(|| {
-                blip.attr("embed")
-                    .or_else(|| blip.attr("link"))
-                    .and_then(|id| rels.get(id))
-            })?
-            .clone();
-        Some((fill, asset_id))
+        let alternative = blip.child("extLst").and_then(|extensions| {
+            extensions.children_named("ext").find_map(|extension| {
+                extension.children_named("svgBlip").find_map(|svg| {
+                    svg_image_relationship(svg)
+                        .and_then(|id| rels.get(&id))
+                        .filter(|id| context.assets.contains_key(*id))
+                })
+            })
+        });
+        let original = blip
+            .attr("embed")
+            .or_else(|| blip.attr("link"))
+            .and_then(|id| rels.get(id));
+        let fallback_asset_id = alternative.and_then(|selected| {
+            original
+                .filter(|id| *id != selected && context.assets.contains_key(*id))
+                .cloned()
+        });
+        let asset_id = alternative.or(original)?.clone();
+        Some((fill, asset_id, fallback_asset_id))
     });
-    let asset_id = resolved_fill.as_ref().map(|(_, asset_id)| asset_id.clone());
+    let asset_id = resolved_fill
+        .as_ref()
+        .map(|(_, asset_id, _)| asset_id.clone());
+    let fallback_asset_id = resolved_fill
+        .as_ref()
+        .and_then(|(_, _, fallback)| fallback.clone());
     let crop = resolved_fill
         .as_ref()
-        .and_then(|(fill, _)| image_crop(fill));
-    let opacity = resolved_fill.as_ref().and_then(|(fill, _)| {
+        .and_then(|(fill, _, _)| image_crop(fill));
+    let opacity = resolved_fill.as_ref().and_then(|(fill, _, _)| {
         fill.child("blip")
             .and_then(|blip| blip.child("alphaModFix"))
             .and_then(|effect| effect.attr("amt"))
@@ -2970,16 +3589,21 @@ fn parse_image_node(
     });
     let preserve_aspect_ratio = resolved_fill
         .as_ref()
-        .map(|(fill, _)| fill.child("stretch").is_none())
+        .map(|(fill, _, _)| fill.child("stretch").is_none())
         .unwrap_or(true);
-    let effects = resolved_fill.as_ref().and_then(|(fill, _)| {
+    let effects = resolved_fill.as_ref().and_then(|(fill, _, _)| {
         fill.child("blip")
             .and_then(|blip| parse_blip_effects(blip, context.colors))
     });
     let transform = inherited_shape_transform(node, layout, master);
     let sources = [Some(node), layout, master];
-    let rendered = resolved_fill.as_ref().and_then(|(fill, asset_id)| {
+    let render_asset = |fill: &XmlNode, asset_id: &str| {
         let asset = context.assets.get(asset_id)?;
+        if !picture_needs_rendering(fill, &sources, &transform)
+            && !matches!(asset.content_type.as_str(), "image/tiff" | "image/tif")
+        {
+            return None;
+        }
         let bytes = asset.data.as_ref()?;
         let source = format!(
             "data:{};base64,{}",
@@ -2999,13 +3623,31 @@ fn parse_image_node(
                 relationships: context.rels,
             },
         )
+    };
+    let rendered = resolved_fill
+        .as_ref()
+        .and_then(|(fill, asset_id, _)| render_asset(fill, asset_id));
+    let fallback_picture = resolved_fill.as_ref().and_then(|(fill, _, fallback)| {
+        render_asset(fill, fallback.as_deref()?).map(|picture| {
+            Box::new(crate::PictureArtwork {
+                svg: picture.svg,
+                paint_bounds: picture.paint_bounds,
+            })
+        })
     });
     if rendered.is_none()
         && resolved_fill
             .as_ref()
-            .is_some_and(|(fill, _)| picture_needs_rendering(fill, &sources, &transform))
+            .is_some_and(|(fill, _, _)| picture_needs_rendering(fill, &sources, &transform))
     {
-        context.diagnostics.warn("unsupported-picture-appearance", "Picture appearance is retained in source XML; the available asset and basic effects are used as fallback.", Some("image"));
+        let message = if fallback_picture.is_some() {
+            "Preferred image appearance could not be generated; compatibility-image artwork is available."
+        } else {
+            "Picture appearance is retained in source XML; the available asset and basic effects are used as fallback."
+        };
+        context
+            .diagnostics
+            .warn("unsupported-picture-appearance", message, Some("image"));
     }
     let (picture_svg, paint_bounds) = rendered
         .map(|paint| (Some(paint.svg), paint.paint_bounds))
@@ -3018,16 +3660,20 @@ fn parse_image_node(
         );
     }
     SlideNode::Image {
+        metadata: Default::default(),
         model_3d: None,
+        ink: None,
         id,
         name,
         transform,
         asset_id: asset_id.unwrap_or_else(|| "missing-asset".into()),
+        fallback_asset_id,
         crop,
         opacity,
         preserve_aspect_ratio,
         effects,
         picture_svg,
+        fallback_picture,
         paint_bounds,
         source_xml: node.source_xml.clone(),
     }
@@ -3337,12 +3983,14 @@ fn parse_table_cell(
         }
     }
     let text_context = TextParseContext {
+        source_part: context.source_part,
         presentation_text_style: context.presentation_text_style,
         shape_default_style: text_style,
         colors: context.colors,
         rels: context.rels,
     };
     TableCell {
+        merge: None,
         row_span: cell
             .attr("rowSpan")
             .and_then(|value| value.parse().ok())
@@ -3390,6 +4038,22 @@ fn is_merge_continuation(cell: &XmlNode) -> bool {
         .any(|value| bool_value(value).unwrap_or(false))
 }
 
+#[derive(Clone, Copy)]
+struct TableMergeOrigin {
+    position: crate::TableCellPosition,
+    rows: usize,
+    columns: usize,
+}
+
+impl TableMergeOrigin {
+    fn covers(self, row: usize, column: usize) -> bool {
+        row >= self.position.row
+            && column >= self.position.column
+            && row - self.position.row < self.rows
+            && column - self.position.column < self.columns
+    }
+}
+
 fn parse_table_node(
     frame: &XmlNode,
     table: &XmlNode,
@@ -3417,22 +4081,16 @@ fn parse_table_node(
                 .unwrap_or(0)
         });
     let style = selected_table_style(table, context.table_styles);
+    let mut previous_origins: Vec<Option<TableMergeOrigin>> = Vec::new();
     let rows = row_nodes
         .iter()
         .enumerate()
         .map(|(row_index, row)| {
-            let mut logical_column = 0usize;
-            row.children_named("tc")
-                .filter_map(|cell| {
-                    let column_index = logical_column;
-                    logical_column = logical_column.saturating_add(
-                        cell.attr("gridSpan")
-                            .and_then(|value| value.parse::<usize>().ok())
-                            .unwrap_or(1),
-                    );
-                    if is_merge_continuation(cell) {
-                        return None;
-                    }
+            let mut origins: Vec<Option<TableMergeOrigin>> = Vec::new();
+            let cells = row
+                .children_named("tc")
+                .enumerate()
+                .map(|(column_index, cell)| {
                     let regions = table_style_regions(
                         table,
                         style,
@@ -3441,7 +4099,7 @@ fn parse_table_node(
                         row_count,
                         column_count,
                     );
-                    Some(parse_table_cell(
+                    let mut parsed = parse_table_cell(
                         cell,
                         context,
                         &regions,
@@ -3449,9 +4107,51 @@ fn parse_table_node(
                         column_index,
                         row_count,
                         column_count,
-                    ))
+                    );
+                    let origin = if is_merge_continuation(cell) {
+                        let horizontal = cell.attr("hMerge").and_then(bool_value).unwrap_or(false);
+                        let vertical = cell.attr("vMerge").and_then(bool_value).unwrap_or(false);
+                        let left = origins
+                            .last()
+                            .copied()
+                            .flatten()
+                            .filter(|origin| origin.covers(row_index, column_index));
+                        let above = previous_origins
+                            .get(column_index)
+                            .copied()
+                            .flatten()
+                            .filter(|origin| origin.covers(row_index, column_index));
+                        let origin = match (horizontal, vertical) {
+                            (true, false) => left,
+                            (false, true) => above,
+                            (true, true) => left
+                                .zip(above)
+                                .filter(|(left, above)| left.position == above.position)
+                                .map(|(left, _)| left),
+                            _ => None,
+                        };
+                        parsed.merge = Some(Box::new(crate::TableCellMerge {
+                            horizontal,
+                            vertical,
+                            origin: origin.map(|origin| origin.position),
+                        }));
+                        origin
+                    } else {
+                        Some(TableMergeOrigin {
+                            position: crate::TableCellPosition {
+                                row: row_index,
+                                column: column_index,
+                            },
+                            rows: parsed.row_span.unwrap_or(1),
+                            columns: parsed.col_span.unwrap_or(1),
+                        })
+                    };
+                    origins.push(origin);
+                    parsed
                 })
-                .collect()
+                .collect();
+            previous_origins = origins;
+            cells
         })
         .collect::<Vec<Vec<TableCell>>>();
     let row_heights = table
@@ -3459,6 +4159,7 @@ fn parse_table_node(
         .filter_map(|row| row.attr("h").and_then(|value| value.parse().ok()))
         .collect();
     SlideNode::Table {
+        metadata: Default::default(),
         id,
         name,
         transform: parse_transform(frame.child("xfrm")),
@@ -3592,8 +4293,8 @@ fn render_shared_chart(
         })
         .flatten();
     let options = rust_office_charts::RenderOptions {
-        width: Some(frame.width as f64 / 9525.),
-        height: Some(frame.height as f64 / 9525.),
+        width: Some(frame.width as f64 * context.paint_scale.0 / 9525.),
+        height: Some(frame.height as f64 * context.paint_scale.1 / 9525.),
         theme_colors: theme_colors.as_ref(),
         font_family: theme
             .and_then(|theme| theme.minor_fonts.get("latin"))
@@ -3619,30 +4320,43 @@ fn parse_chart_part(
     let root = parse_xml_tree(xml, context.limits, part_name)?;
     let chart_types = [
         ("barChart", "bar"),
+        ("bar3DChart", "bar"),
         ("lineChart", "line"),
+        ("line3DChart", "line"),
         ("pieChart", "pie"),
+        ("pie3DChart", "pie"),
+        ("ofPieChart", "pie"),
         ("doughnutChart", "doughnut"),
         ("areaChart", "area"),
+        ("area3DChart", "area"),
         ("scatterChart", "scatter"),
         ("radarChart", "radar"),
         ("bubbleChart", "bubble"),
         ("stockChart", "stock"),
         ("surfaceChart", "surface"),
+        ("surface3DChart", "surface"),
     ];
-    let (chart_node, chart_type) = chart_types
+    let plots: Vec<_> = root
+        .child("chart")
+        .and_then(|chart| chart.child("plotArea"))
+        .into_iter()
+        .flat_map(|area| &area.children)
+        .filter_map(|node| {
+            chart_types
+                .iter()
+                .find(|(name, _)| node.name == *name)
+                .map(|(_, kind)| (node, *kind))
+        })
+        .collect();
+    let chart_type = match plots.as_slice() {
+        [] if root.descendant("chartData").is_some() => "chartEx",
+        [] => "ooxml",
+        [(_, kind)] => *kind,
+        _ => "combo",
+    };
+    let series = plots
         .iter()
-        .find_map(|(element, kind)| root.descendant(element).map(|node| (node, *kind)))
-        .unwrap_or_else(|| {
-            // Modern chartEx parts (`cx:chartSpace`) carry their cached data in
-            // `chartData`; classic parts always declare one of the types above.
-            if root.descendant("chartData").is_some() {
-                (&root, "chartEx")
-            } else {
-                (&root, "ooxml")
-            }
-        });
-    let series = chart_node
-        .children_named("ser")
+        .flat_map(|(plot, _)| plot.children_named("ser"))
         .map(|series| {
             let name = series
                 .child("tx")
@@ -3709,10 +4423,13 @@ struct ParsedSmartArtData {
     background: Option<FillStyle>,
 }
 
-fn paragraphs_have_text(paragraphs: &[TextParagraph]) -> bool {
-    paragraphs
-        .iter()
-        .any(|paragraph| paragraph.runs.iter().any(|run| !run.text.trim().is_empty()))
+fn paragraphs_have_content(paragraphs: &[TextParagraph]) -> bool {
+    paragraphs.iter().any(|paragraph| {
+        paragraph
+            .runs
+            .iter()
+            .any(|run| !run.text.trim().is_empty() || run.field.is_some())
+    })
 }
 
 fn parse_smartart_data(xml: &[u8], context: &NodeParseContext<'_, '_>) -> ParsedSmartArtData {
@@ -3745,18 +4462,23 @@ fn parse_smartart_data(xml: &[u8], context: &NodeParseContext<'_, '_>) -> Parsed
         ) {
             continue;
         }
-        let text_body = point
-            .text_body_xml
-            .as_deref()
-            .and_then(|xml| parse_xml_tree(xml.as_bytes(), context.limits, "SmartArt text").ok());
+        let text_body = point.text_body_xml.as_deref().and_then(|xml| {
+            parse_xml_tree(
+                fields::canonical_fragment(xml).as_bytes(),
+                context.limits,
+                "SmartArt text",
+            )
+            .ok()
+        });
         let text_context = TextParseContext {
+            source_part: context.source_part,
             presentation_text_style: context.presentation_text_style,
             shape_default_style: RunStyle::default(),
             colors: context.colors,
             rels: context.rels,
         };
         let paragraphs = parse_text_paragraphs(text_body.as_ref(), None, None, None, &text_context);
-        if paragraphs_have_text(&paragraphs) {
+        if paragraphs_have_content(&paragraphs) {
             parsed
                 .semantic_labels
                 .push((point.model_id.clone(), paragraphs));
@@ -3788,7 +4510,7 @@ fn parse_materialized_smartart(
         context: &NodeParseContext<'_, '_>,
     ) -> Option<SlideNode> {
         let shape = parse_xml_tree(
-            entry.source_xml.as_bytes(),
+            fields::canonical_fragment(&entry.source_xml).as_bytes(),
             context.limits,
             "SmartArt drawing",
         )
@@ -3811,6 +4533,7 @@ fn parse_materialized_smartart(
             | SlideNode::Group { id, name, .. }
             | SlideNode::Table { id, name, .. }
             | SlideNode::Chart { id, name, .. }
+            | SlideNode::Media { id, name, .. }
             | SlideNode::Unknown { id, name, .. } => (id, name),
         };
         *id = format!("{frame_id}:smartart:{model_id}");
@@ -3871,6 +4594,7 @@ fn parse_materialized_smartart(
         context.diagnostics.warn("unsupported-smartart-content", "Some cached SmartArt drawing elements are retained by the shared reader but cannot be rendered.", Some("smartart"));
     }
     Some(SlideNode::Group {
+        metadata: Default::default(),
         id: frame_id,
         name: frame_name,
         transform: frame.clone(),
@@ -3934,6 +4658,7 @@ fn smartart_fallback_group(
         Vec::with_capacity(count.saturating_add(usize::from(data.background.is_some())));
     if let Some(fill) = data.background.clone() {
         children.push(SlideNode::Shape {
+            metadata: Default::default(),
             shape_svg: None,
             paint_bounds: None,
             source_xml: None,
@@ -3970,6 +4695,7 @@ fn smartart_fallback_group(
         let horizontal_inset = (cell_width / 20).max(0);
         let vertical_inset = (cell_height / 12).max(0);
         children.push(SlideNode::Shape {
+            metadata: Default::default(),
             shape_svg: None,
             paint_bounds: None,
             source_xml: None,
@@ -4033,6 +4759,7 @@ fn smartart_fallback_group(
         Some("smartart"),
     );
     Some(SlideNode::Group {
+        metadata: Default::default(),
         id: frame_id,
         name: frame_name,
         transform: frame.clone(),
@@ -4075,6 +4802,7 @@ fn parse_smartart_frame(
         .get(data_path)
         .unwrap_or(context.rels);
     let data_context = NodeParseContext {
+        source_part: Some(data_path),
         rels: data_rels,
         ..*context
     };
@@ -4104,6 +4832,7 @@ fn parse_smartart_frame(
             };
             parse_xml_tree(drawing_xml, context.limits, drawing_path)?;
             let drawing_context = NodeParseContext {
+                source_part: Some(drawing_path),
                 rels: context
                     .related_relationships
                     .get(*drawing_path)
@@ -4143,12 +4872,227 @@ fn parse_smartart_frame(
     ))
 }
 
+fn media_time_ms(value: &str) -> Option<f64> {
+    let split = value
+        .find(|c: char| !c.is_ascii_digit() && c != '.')
+        .unwrap_or(value.len());
+    let (number, unit) = value.split_at(split);
+    let valid = !number.is_empty()
+        && number.split('.').count() <= 2
+        && number
+            .split('.')
+            .all(|part| !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()));
+    if !valid {
+        return None;
+    }
+    let scale = match unit {
+        "" | "ms" => 1.0,
+        "s" => 1000.0,
+        "min" => 60_000.0,
+        "h" => 3_600_000.0,
+        "µs" => 0.001,
+        "ns" => 0.000001,
+        _ => return None,
+    };
+    let result = number.parse::<f64>().ok()? * scale;
+    result.is_finite().then_some(result)
+}
+
+fn media_playback(media: &XmlNode) -> crate::MediaPlayback {
+    let time = |child, attribute| {
+        media
+            .child(child)
+            .and_then(|node| node.attr(attribute))
+            .and_then(media_time_ms)
+    };
+    crate::MediaPlayback {
+        trim_start_ms: time("trim", "st"),
+        trim_end_ms: time("trim", "end"),
+        fade_in_ms: time("fade", "in"),
+        fade_out_ms: time("fade", "out"),
+        bookmarks: media
+            .child("bmkLst")
+            .into_iter()
+            .flat_map(|list| list.children_named("bmk"))
+            .filter_map(|bookmark| {
+                Some(crate::MediaBookmark {
+                    name: bookmark.attr("name")?.to_owned(),
+                    time_ms: media_time_ms(bookmark.attr("time")?)?,
+                })
+            })
+            .collect(),
+    }
+}
+
+fn media_source(
+    id: Option<&str>,
+    context: &NodeParseContext<'_, '_>,
+) -> (Option<String>, Option<String>) {
+    let Some((id, path)) = id.and_then(|id| context.rels.get(id).map(|path| (id, path))) else {
+        context.diagnostics.warn(
+            "missing-media-source",
+            "The media relationship could not be resolved.",
+            Some("media"),
+        );
+        return (None, None);
+    };
+    if context.rels.is_external(id) {
+        (None, Some(path.clone()))
+    } else {
+        if !context.assets.contains_key(path) {
+            context.diagnostics.warn(
+                "missing-media-asset",
+                "The embedded media payload could not be resolved.",
+                Some("media"),
+            );
+        }
+        (Some(path.clone()), None)
+    }
+}
+
+fn parse_picture_or_media(
+    node: &XmlNode,
+    node_index: usize,
+    context: &NodeParseContext<'_, '_>,
+) -> SlideNode {
+    let properties = nonvisual_properties(node).and_then(|node| node.child("nvPr"));
+    let classic = properties.and_then(|properties| {
+        properties.children.iter().find(|child| {
+            matches!(
+                child.name.as_str(),
+                "audioCd" | "wavAudioFile" | "audioFile" | "videoFile" | "quickTimeFile"
+            )
+        })
+    });
+    let extension = properties
+        .and_then(|properties| properties.child("extLst"))
+        .and_then(|extensions| extensions.descendant("media"));
+    let poster = parse_image_node(node, node_index, context);
+    if classic.is_none() && extension.is_none() {
+        return poster;
+    }
+    let relationship = extension
+        .and_then(|media| media.attr("link").or_else(|| media.attr("embed")))
+        .or_else(|| classic.and_then(|media| media.attr("link").or_else(|| media.attr("embed"))));
+    let (asset_id, source_url) =
+        if classic.is_some_and(|media| media.name == "audioCd") && relationship.is_none() {
+            (None, None)
+        } else {
+            media_source(relationship, context)
+        };
+    let media_type = match classic.map(|media| media.name.as_str()) {
+        Some("audioCd" | "wavAudioFile" | "audioFile") => crate::MediaType::Audio,
+        Some("videoFile" | "quickTimeFile") => crate::MediaType::Video,
+        _ => match asset_id
+            .as_ref()
+            .and_then(|id| context.assets.get(id))
+            .map(|asset| asset.content_type.as_str())
+        {
+            Some(kind) if kind.starts_with("audio/") => crate::MediaType::Audio,
+            Some(kind) if kind.starts_with("video/") => crate::MediaType::Video,
+            _ => crate::MediaType::Unknown,
+        },
+    };
+    let SlideNode::Image {
+        id,
+        name,
+        transform,
+        asset_id: poster_id,
+        ..
+    } = &poster
+    else {
+        unreachable!()
+    };
+    SlideNode::Media {
+        metadata: Default::default(),
+        id: id.clone(),
+        name: name.clone(),
+        transform: transform.clone(),
+        media_type,
+        asset_id,
+        source_url,
+        poster_asset_id: (poster_id != "missing-asset").then(|| poster_id.clone()),
+        poster: Some(Box::new(poster)),
+        playback: extension.map(media_playback),
+        embedded_object: None,
+        source_xml: None,
+    }
+}
+
+fn parse_embedded_object(
+    frame: &XmlNode,
+    object: &XmlNode,
+    node_index: usize,
+    context: &NodeParseContext<'_, '_>,
+) -> SlideNode {
+    let (id, name) = node_identity(frame, context.slide_index, node_index);
+    let (asset_id, source_url) = media_source(object.attr("id"), context);
+    let poster = object
+        .descendant("pic")
+        .or_else(|| {
+            frame
+                .descendant("graphicData")
+                .and_then(|data| data.descendant("pic"))
+        })
+        .map(|picture| {
+            let mut poster = parse_image_node(picture, node_index, context);
+            if let SlideNode::Image {
+                id: poster_id,
+                name: poster_name,
+                ..
+            } = &mut poster
+            {
+                *poster_id = id.clone();
+                *poster_name = name.clone();
+            }
+            Box::new(poster)
+        });
+    let poster_asset_id = poster.as_deref().and_then(|poster| match poster {
+        SlideNode::Image { asset_id, .. } if asset_id != "missing-asset" => Some(asset_id.clone()),
+        _ => None,
+    });
+    SlideNode::Media {
+        metadata: Default::default(),
+        id,
+        name,
+        transform: parse_transform(frame.child("xfrm")),
+        media_type: crate::MediaType::Ole,
+        asset_id,
+        source_url,
+        poster_asset_id,
+        poster,
+        playback: None,
+        embedded_object: Some(crate::EmbeddedObject {
+            control: None,
+            program_id: object.attr("progId").map(str::to_owned),
+            name: object.attr("name").map(str::to_owned),
+            relationship_id: object.attr("id").map(str::to_owned),
+            linked: object.child("link").is_some(),
+            show_as_icon: object.attr("showAsIcon").and_then(bool_value),
+            preview_width_emu: object.attr("imgW").and_then(|value| value.parse().ok()),
+            preview_height_emu: object.attr("imgH").and_then(|value| value.parse().ok()),
+            follow_color_scheme: object
+                .child("embed")
+                .and_then(|embed| embed.attr("followColorScheme"))
+                .map(str::to_owned),
+            update_automatic: object
+                .child("link")
+                .and_then(|link| link.attr("updateAutomatic"))
+                .and_then(bool_value),
+        }),
+        source_xml: object.source_xml.clone(),
+    }
+}
+
 fn parse_graphic_frame(
     node: &XmlNode,
     node_index: usize,
     context: &NodeParseContext<'_, '_>,
 ) -> Result<SlideNode, ParseError> {
     let graphic_data = node.descendant("graphicData");
+    if let Some(object) = graphic_data.and_then(|data| data.descendant("oleObj")) {
+        return Ok(parse_embedded_object(node, object, node_index, context));
+    }
     if let Some(model) = graphic_data.and_then(|value| value.child("model3d")) {
         return Ok(parse_model3d_node(node, model, node_index, context));
     }
@@ -4190,6 +5134,7 @@ fn parse_graphic_frame(
         }
         let (id, name) = node_identity(node, context.slide_index, node_index);
         return Ok(SlideNode::Chart {
+            metadata: Default::default(),
             id,
             name,
             transform,
@@ -4224,6 +5169,7 @@ fn parse_graphic_frame(
         Some("graphic-frame"),
     );
     Ok(SlideNode::Unknown {
+        metadata: Default::default(),
         id,
         name,
         transform: parse_transform(node.child("xfrm")),
@@ -4273,6 +5219,7 @@ fn parse_group_node(
         }
     }
     Ok(SlideNode::Group {
+        metadata: Default::default(),
         id,
         name,
         transform,
@@ -4281,15 +5228,73 @@ fn parse_group_node(
     })
 }
 
+fn parse_content_part(
+    node: &XmlNode,
+    node_index: usize,
+    context: &NodeParseContext<'_, '_>,
+) -> SlideNode {
+    let (id, name) = node_identity(node, context.slide_index, node_index);
+    let transform = parse_transform(node.child("xfrm"));
+    let asset_id = node
+        .attr("id")
+        .and_then(|id| context.rels.internal(id))
+        .cloned();
+    let source = asset_id
+        .as_ref()
+        .and_then(|path| context.related_parts.get(path))
+        .and_then(|bytes| std::str::from_utf8(bytes).ok());
+    let drawing = source.and_then(rust_office_art::parse_ink);
+    let rendered = drawing.as_ref().and_then(|drawing| {
+        rust_office_art::render_ink_in_frame(
+            drawing,
+            transform.width as f64 * context.paint_scale.0 / 9525.0,
+            transform.height as f64 * context.paint_scale.1 / 9525.0,
+        )
+    });
+    if rendered.is_none() {
+        context.diagnostics.warn(
+            "ink-fallback",
+            "Ink source is retained; a compatible saved preview is used when available.",
+            Some("ink"),
+        );
+    }
+    let (picture_svg, paint_bounds) = rendered
+        .map(|paint| (Some(paint.svg), paint.paint_bounds))
+        .unwrap_or_default();
+    SlideNode::Image {
+        metadata: Default::default(),
+        model_3d: None,
+        ink: Some(Box::new(crate::InkContent {
+            asset_id: asset_id.clone(),
+            source_xml: source.map(str::to_owned),
+            drawing: drawing.map(Box::new),
+        })),
+        id,
+        name,
+        transform,
+        asset_id: asset_id.unwrap_or_else(|| "missing-asset".into()),
+        fallback_asset_id: None,
+        crop: None,
+        opacity: None,
+        preserve_aspect_ratio: false,
+        effects: None,
+        picture_svg,
+        fallback_picture: None,
+        paint_bounds,
+        source_xml: node.source_xml.clone(),
+    }
+}
+
 fn parse_slide_node(
     node: &XmlNode,
     node_index: usize,
     context: &NodeParseContext<'_, '_>,
 ) -> Result<Option<SlideNode>, ParseError> {
-    match node.name.as_str() {
+    let mut parsed = match node.name.as_str() {
         "sp" | "cxnSp" => Ok(Some(parse_shape_node(node, node_index, context))),
-        "pic" => Ok(Some(parse_image_node(node, node_index, context))),
+        "pic" => Ok(Some(parse_picture_or_media(node, node_index, context))),
         "model3d" => Ok(Some(parse_model3d_node(node, node, node_index, context))),
+        "contentPart" => Ok(Some(parse_content_part(node, node_index, context))),
         "grpSp" => Ok(Some(parse_group_node(node, node_index, context)?)),
         "graphicFrame" => Ok(Some(parse_graphic_frame(node, node_index, context)?)),
         // Markup-compatibility wrapper used by PowerPoint for modern content
@@ -4299,12 +5304,58 @@ fn parse_slide_node(
         "AlternateContent" => {
             let mut fallback: Option<SlideNode> = None;
             let mut model_without_preview = None;
+            let mut ink_without_preview = None;
+            let mut media_without_preview = None;
             for branch_name in ["Choice", "Fallback"] {
                 for branch in node.children_named(branch_name) {
                     for child in &branch.children {
                         let Some(mut parsed) = parse_slide_node(child, node_index, context)? else {
                             continue;
                         };
+                        if matches!(
+                            &parsed,
+                            SlideNode::Image {
+                                ink: Some(_),
+                                picture_svg: None,
+                                fallback_picture: None,
+                                ..
+                            }
+                        ) {
+                            if ink_without_preview.is_none() {
+                                ink_without_preview = Some(parsed);
+                            }
+                            continue;
+                        }
+                        if let SlideNode::Image { ink, .. } = &mut parsed {
+                            if let Some(SlideNode::Image { ink: original, .. }) =
+                                ink_without_preview.take()
+                            {
+                                *ink = original;
+                            }
+                        }
+                        if matches!(&parsed, SlideNode::Media { poster: None, .. }) {
+                            if media_without_preview.is_none() {
+                                media_without_preview = Some(parsed);
+                            }
+                            continue;
+                        }
+                        if matches!(&parsed, SlideNode::Image { .. }) {
+                            if let Some(mut media) = media_without_preview.take() {
+                                if let SlideNode::Media {
+                                    poster,
+                                    poster_asset_id,
+                                    ..
+                                } = &mut media
+                                {
+                                    if let SlideNode::Image { asset_id, .. } = &parsed {
+                                        *poster_asset_id =
+                                            (asset_id != "missing-asset").then(|| asset_id.clone());
+                                    }
+                                    *poster = Some(Box::new(parsed));
+                                }
+                                return Ok(Some(media));
+                            }
+                        }
                         if matches!(&parsed, SlideNode::Image { asset_id, source_xml: Some(xml), .. }
                             if asset_id == "missing-asset" && rust_office_art::model3d::model3d_xml(xml).is_some())
                         {
@@ -4338,7 +5389,10 @@ fn parse_slide_node(
                     }
                 }
             }
-            Ok(model_without_preview.or(fallback))
+            Ok(media_without_preview
+                .or(model_without_preview)
+                .or(ink_without_preview)
+                .or(fallback))
         }
         "nvGrpSpPr" | "grpSpPr" | "extLst" => Ok(None),
         feature => {
@@ -4349,13 +5403,17 @@ fn parse_slide_node(
             );
             Ok(None)
         }
+    }?;
+    if let (Some(parsed), Some(metadata)) = (parsed.as_mut(), node_metadata(node, context)) {
+        *parsed.metadata_mut() = metadata;
     }
+    Ok(parsed)
 }
 
 fn part_background(
     root: &XmlNode,
     colors: Option<&ColorContext<'_>>,
-    rels: &HashMap<String, String>,
+    rels: &Relationships,
 ) -> Option<FillStyle> {
     let background = root.child("cSld")?.child("bg")?;
     background
@@ -4369,10 +5427,266 @@ fn part_background(
 }
 
 struct ParsedSlideContent {
+    transition: Option<Box<crate::SlideTransition>>,
+    timing: Option<Box<crate::SlideTiming>>,
     name: Option<String>,
     hidden: Option<bool>,
     background: Option<FillStyle>,
     nodes: Vec<SlideNode>,
+}
+
+fn vml_length(value: &str) -> Option<i64> {
+    let value = value.trim();
+    let (number, factor) = if let Some(v) = value.strip_suffix("pt") {
+        (v, 12700.0)
+    } else if let Some(v) = value.strip_suffix("px") {
+        (v, 9525.0)
+    } else if let Some(v) = value.strip_suffix("in") {
+        (v, 914400.0)
+    } else if let Some(v) = value.strip_suffix("cm") {
+        (v, 360000.0)
+    } else if let Some(v) = value.strip_suffix("mm") {
+        (v, 36000.0)
+    } else {
+        (value, 9525.0)
+    };
+    let emu = number.parse::<f64>().ok()? * factor;
+    (emu.is_finite() && emu.abs() <= i64::MAX as f64).then_some(emu.round() as i64)
+}
+
+fn clean_vml_conditionals(xml: &str) -> String {
+    let mut result = String::with_capacity(xml.len());
+    let mut rest = xml;
+    while let Some(at) = rest.find("<![") {
+        result.push_str(&rest[..at]);
+        rest = &rest[at..];
+        if rest.starts_with("<![if ") || rest.starts_with("<![endif]") {
+            if let Some(end) = rest.find("]>") {
+                rest = &rest[end + 2..];
+                continue;
+            }
+        }
+        result.push_str("<![");
+        rest = &rest[3..];
+    }
+    result.push_str(rest);
+    result
+}
+
+fn control_vml_preview(
+    control: &XmlNode,
+    context: &NodeParseContext<'_, '_>,
+) -> Option<(Transform, Option<String>, String)> {
+    let shape_id = control.attr("spid")?;
+    let mut paths = context
+        .rels
+        .values()
+        .filter(|path| context.related_parts.contains_key(*path))
+        .collect::<Vec<_>>();
+    paths.sort();
+    for path in paths {
+        let Some(xml) = context
+            .related_parts
+            .get(path)
+            .and_then(|bytes| std::str::from_utf8(bytes).ok())
+        else {
+            continue;
+        };
+        if !xml.contains("urn:schemas-microsoft-com:vml") {
+            continue;
+        }
+        let cleaned = clean_vml_conditionals(xml);
+        let root = match parse_xml_tree(cleaned.as_bytes(), context.limits, path) {
+            Ok(root) => root,
+            Err(_) => continue,
+        };
+        for shape in root.children_named("shape") {
+            if !shape
+                .attr("spid")
+                .or_else(|| shape.attr("id"))
+                .is_some_and(|id| id == shape_id || id.strip_prefix("_x0000_s") == Some(shape_id))
+            {
+                continue;
+            }
+            let styles = shape
+                .attr("style")
+                .unwrap_or_default()
+                .split(';')
+                .filter_map(|part| part.split_once(':'))
+                .map(|(k, v)| (k.trim(), v.trim()))
+                .collect::<HashMap<_, _>>();
+            let transform = Transform {
+                x: styles
+                    .get("left")
+                    .and_then(|v| vml_length(v))
+                    .unwrap_or_default(),
+                y: styles
+                    .get("top")
+                    .and_then(|v| vml_length(v))
+                    .unwrap_or_default(),
+                width: styles
+                    .get("width")
+                    .and_then(|v| vml_length(v))
+                    .unwrap_or_default(),
+                height: styles
+                    .get("height")
+                    .and_then(|v| vml_length(v))
+                    .unwrap_or_default(),
+                rotation: styles
+                    .get("rotation")
+                    .and_then(|v| v.parse::<f64>().ok())
+                    .filter(|v| v.is_finite()),
+                ..Default::default()
+            };
+            let asset = shape
+                .child("imagedata")
+                .and_then(|image| image.attr("relid").or_else(|| image.attr("id")))
+                .and_then(|id| context.related_relationships.get(path)?.internal(id))
+                .cloned();
+            return Some((transform, asset, xml.to_owned()));
+        }
+    }
+    None
+}
+
+fn parse_control(control: &XmlNode, index: usize, context: &NodeParseContext<'_, '_>) -> SlideNode {
+    let id = control
+        .attr("spid")
+        .map(str::to_owned)
+        .unwrap_or_else(|| format!("control-{}-{index}", context.slide_index));
+    let name = control.attr("name").unwrap_or_default().to_owned();
+    let (asset_id, source_url) = media_source(control.attr("id"), context);
+    let source = asset_id
+        .as_ref()
+        .and_then(|path| context.related_parts.get(path))
+        .and_then(|bytes| std::str::from_utf8(bytes).ok());
+    let root = source
+        .and_then(|xml| parse_xml_tree(xml.as_bytes(), context.limits, "embedded control").ok());
+    let root = root.as_ref().filter(|root| root.name == "ocx");
+    let mut binary_asset_ids = asset_id
+        .as_ref()
+        .and_then(|path| context.related_relationships.get(path))
+        .map(|rels| {
+            rels.values()
+                .filter(|path| context.assets.contains_key(*path))
+                .cloned()
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    binary_asset_ids.sort();
+    let mut transform = Transform {
+        width: control
+            .attr("imgW")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_default(),
+        height: control
+            .attr("imgH")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or_default(),
+        ..Default::default()
+    };
+    let mut poster = control
+        .child("pic")
+        .map(|picture| parse_image_node(picture, index, context));
+    if let Some(SlideNode::Image {
+        transform: frame, ..
+    }) = poster.as_ref()
+    {
+        transform = frame.clone();
+    }
+    if poster.is_none() {
+        if let Some((frame, asset, xml)) = control_vml_preview(control, context) {
+            transform = frame;
+            if let Some(asset_id) = asset {
+                poster = Some(SlideNode::Image {
+                    metadata: Default::default(),
+                    model_3d: None,
+                    ink: None,
+                    id: id.clone(),
+                    name: name.clone(),
+                    transform: transform.clone(),
+                    asset_id,
+                    fallback_asset_id: None,
+                    crop: None,
+                    opacity: None,
+                    preserve_aspect_ratio: false,
+                    effects: None,
+                    picture_svg: None,
+                    fallback_picture: None,
+                    paint_bounds: None,
+                    source_xml: Some(xml),
+                });
+            }
+        }
+    }
+    if poster.is_none() {
+        context.diagnostics.warn(
+            "missing-control-preview",
+            "Embedded control has no supported saved preview.",
+            Some("control"),
+        );
+    }
+    if root.is_none() {
+        context.diagnostics.warn(
+            "missing-control-definition",
+            "Embedded control definition is missing or cannot be parsed.",
+            Some("control"),
+        );
+    }
+    let poster_asset_id = poster.as_ref().and_then(|poster| match poster {
+        SlideNode::Image { asset_id, .. } => Some(asset_id.clone()),
+        _ => None,
+    });
+    let properties = root
+        .map(|root| {
+            root.children_named("ocxPr")
+                .map(|property| crate::ControlProperty {
+                    name: property.attr("name").unwrap_or_default().to_owned(),
+                    value: property.attr("value").map(str::to_owned),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    SlideNode::Media {
+        metadata: Some(Box::new(crate::NodeMetadata {
+            source_id: Some(id.clone()),
+            source_part: context.source_part.map(str::to_owned),
+            ..Default::default()
+        })),
+        id,
+        name: name.clone(),
+        transform,
+        media_type: crate::MediaType::Control,
+        asset_id,
+        source_url,
+        poster_asset_id,
+        poster: poster.map(Box::new),
+        playback: None,
+        embedded_object: Some(crate::EmbeddedObject {
+            control: Some(Box::new(crate::EmbeddedControl {
+                class_id: root.and_then(|n| n.attr("classid")).map(str::to_owned),
+                persistence: root.and_then(|n| n.attr("persistence")).map(str::to_owned),
+                source_xml: source.map(str::to_owned),
+                properties,
+                binary_asset_ids,
+            })),
+            name: Some(name),
+            relationship_id: control.attr("id").map(str::to_owned),
+            show_as_icon: control.attr("showAsIcon").and_then(bool_value),
+            preview_width_emu: control.attr("imgW").and_then(|v| v.parse().ok()),
+            preview_height_emu: control.attr("imgH").and_then(|v| v.parse().ok()),
+            ..Default::default()
+        }),
+        source_xml: control.source_xml.clone(),
+    }
+}
+
+fn append_controls(root: &XmlNode, nodes: &mut Vec<SlideNode>, context: &NodeParseContext<'_, '_>) {
+    if let Some(controls) = root.child("cSld").and_then(|slide| slide.child("controls")) {
+        for (index, control) in controls.children_named("control").enumerate() {
+            nodes.push(parse_control(control, index, context));
+        }
+    }
 }
 
 fn parse_part_nodes(
@@ -4388,6 +5702,7 @@ fn parse_part_nodes(
             nodes.push(node);
         }
     }
+    append_controls(root, &mut nodes, context);
     Ok(nodes)
 }
 
@@ -4407,6 +5722,7 @@ fn parse_decorative_part_nodes(
             nodes.push(node);
         }
     }
+    append_controls(root, &mut nodes, context);
     Ok(nodes)
 }
 
@@ -4416,6 +5732,7 @@ fn prefix_node_ids(node: &mut SlideNode, prefix: &str) {
         | SlideNode::Image { id, .. }
         | SlideNode::Table { id, .. }
         | SlideNode::Chart { id, .. }
+        | SlideNode::Media { id, .. }
         | SlideNode::Unknown { id, .. } => *id = format!("{prefix}:{id}"),
         SlideNode::Group { id, children, .. } => {
             *id = format!("{prefix}:{id}");
@@ -4452,6 +5769,12 @@ fn parse_slide(
     {
         if let (Some(master), Some(master_rels)) = (context.master_root, context.master_rels) {
             let master_context = NodeParseContext {
+                shape_cache: context.shape_cache,
+                editing_cache: context.editing_cache,
+                source_part: context.layout_rels.and_then(|rels| {
+                    rels.related("slideMaster", "ppt/slideMasters/")
+                        .map(String::as_str)
+                }),
                 slide_index: context.slide_index,
                 paint_scale: context.paint_scale,
                 rels: master_rels,
@@ -4480,6 +5803,12 @@ fn parse_slide(
     }
     if let (Some(layout), Some(layout_rels)) = (context.layout_root, context.layout_rels) {
         let layout_context = NodeParseContext {
+            shape_cache: context.shape_cache,
+            editing_cache: context.editing_cache,
+            source_part: context
+                .rels
+                .related("slideLayout", "ppt/slideLayouts/")
+                .map(String::as_str),
             slide_index: context.slide_index,
             paint_scale: context.paint_scale,
             rels: layout_rels,
@@ -4506,7 +5835,16 @@ fn parse_slide(
         nodes.extend(inherited);
     }
     nodes.extend(parse_part_nodes(root, context)?);
+    let (transition, timing) = timing::parse(
+        root,
+        context.rels,
+        context.assets,
+        context.colors,
+        context.limits,
+    )?;
     Ok(ParsedSlideContent {
+        transition,
+        timing,
         name: root
             .child("cSld")
             .and_then(|slide| slide.attr("name"))
@@ -4554,6 +5892,69 @@ fn parse_core_metadata(xml: &[u8]) -> PresentationMetadata {
     metadata
 }
 
+fn parse_notes(
+    xml: &[u8],
+    limits: &ParseLimits,
+    part_name: &str,
+    rels: &Relationships,
+) -> Result<Vec<SlideNote>, ParseError> {
+    let root = parse_xml_tree(xml, limits, part_name)?;
+    let mut shapes = Vec::new();
+    root.collect_descendants("sp", &mut shapes);
+    let mut paragraphs = Vec::new();
+    let context = TextParseContext {
+        source_part: Some(part_name),
+        presentation_text_style: None,
+        shape_default_style: RunStyle::default(),
+        colors: None,
+        rels,
+    };
+    for shape in shapes {
+        let placeholder = shape
+            .child("nvSpPr")
+            .and_then(|properties| properties.child("nvPr"))
+            .and_then(|properties| properties.child("ph"))
+            .and_then(|placeholder| placeholder.attr("type"));
+        if matches!(
+            placeholder,
+            Some("sldImg" | "sldNum" | "dt" | "hdr" | "ftr")
+        ) {
+            continue;
+        }
+        if let Some(body) = shape.child("txBody") {
+            paragraphs.extend(parse_text_paragraphs(
+                Some(body),
+                None,
+                None,
+                None,
+                &context,
+            ));
+        }
+    }
+    let text = paragraphs
+        .iter()
+        .map(|paragraph| {
+            paragraph
+                .runs
+                .iter()
+                .map(|run| run.text.as_str())
+                .collect::<String>()
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    Ok(
+        if text.trim().is_empty()
+            && !paragraphs
+                .iter()
+                .any(|paragraph| paragraph.runs.iter().any(|run| run.field.is_some()))
+        {
+            Vec::new()
+        } else {
+            vec![SlideNote { text, paragraphs }]
+        },
+    )
+}
+
 fn parse_text_values(xml: &[u8]) -> Vec<String> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(true);
@@ -4580,21 +5981,6 @@ fn parse_text_values(xml: &[u8]) -> Vec<String> {
         }
     }
     values
-}
-
-fn parse_comments(xml: &[u8]) -> Vec<SlideComment> {
-    parse_text_values(xml)
-        .into_iter()
-        .enumerate()
-        .map(|(index, text)| SlideComment {
-            id: format!("comment-{}", index + 1),
-            text,
-            author: None,
-            created_at: None,
-            x: None,
-            y: None,
-        })
-        .collect()
 }
 
 fn content_type(path: &str) -> String {
@@ -4630,7 +6016,7 @@ fn content_type(path: &str) -> String {
 struct ParsedXmlPart {
     path: String,
     root: XmlNode,
-    rels: HashMap<String, String>,
+    rels: Relationships,
 }
 
 fn relationship_part_path(path: &str) -> String {
@@ -4651,7 +6037,7 @@ fn load_xml_part(
     let root = parse_xml_tree(&xml, limits, path)?;
     let rels = match read_entry(archive, &relationship_part_path(path), limits)? {
         Some(xml) => relationships(&xml, path, limits.max_xml_depth)?,
-        None => HashMap::new(),
+        None => Relationships::default(),
     };
     Ok(Some(ParsedXmlPart {
         path: path.to_owned(),
@@ -4670,15 +6056,13 @@ fn load_theme_part(
     };
     let rels = match read_entry(archive, &relationship_part_path(path), limits)? {
         Some(xml) => relationships(&xml, path, limits.max_xml_depth)?,
-        None => HashMap::new(),
+        None => Relationships::default(),
     };
     Ok(Some(parse_theme(&xml, path, rels, limits)?))
 }
 
-fn related_path(rels: &HashMap<String, String>, prefix: &str) -> Option<String> {
-    rels.values()
-        .find(|target| target.starts_with(prefix))
-        .cloned()
+fn related_path(rels: &Relationships, kind: &str, prefix: &str) -> Option<String> {
+    rels.related(kind, prefix).cloned()
 }
 
 fn missing_part_warning(path: &str, slide_index: Option<usize>) -> PresentationWarning {
@@ -4692,6 +6076,14 @@ fn missing_part_warning(path: &str, slide_index: Option<usize>) -> PresentationW
 }
 
 pub fn parse(
+    bytes: &[u8],
+    limits: &ParseLimits,
+    options: &ParseOptions,
+) -> Result<PresentationDocument, ParseError> {
+    rust_office_art::with_cached_xml(|| parse_cached(bytes, limits, options))
+}
+
+fn parse_cached(
     bytes: &[u8],
     limits: &ParseLimits,
     options: &ParseOptions,
@@ -4718,12 +6110,21 @@ pub fn parse(
         .unwrap_or(XmlNode {
             source_xml: None,
             name: "Types".into(),
-            attributes: Vec::new(),
+            attributes: Box::default(),
             text: String::new(),
-            children: Vec::new(),
+            children: Box::default(),
+            subtree_names: XmlNode::name_bit(b"Types"),
         });
-    let legacy_chart_defaults = read_entry(&mut archive, "docProps/app.xml", limits)?
-        .and_then(|xml| parse_xml_tree(&xml, limits, "docProps/app.xml").ok())
+    let package_rels = match read_entry(&mut archive, "_rels/.rels", limits)? {
+        Some(xml) => relationships(&xml, "", limits.max_xml_depth)?,
+        None => Relationships::default(),
+    };
+    let app_path = package_rels
+        .related("extended-properties", "\0")
+        .map(String::as_str)
+        .unwrap_or("docProps/app.xml");
+    let legacy_chart_defaults = read_entry(&mut archive, app_path, limits)?
+        .and_then(|xml| parse_xml_tree(&xml, limits, app_path).ok())
         .and_then(|root| {
             root.child("AppVersion")?
                 .text
@@ -4734,22 +6135,39 @@ pub fn parse(
                 .ok()
         })
         .is_some_and(|version| (1..=12).contains(&version));
-    let presentation = read_entry(&mut archive, "ppt/presentation.xml", limits)?
-        .ok_or_else(|| ParseError::Corrupt("missing ppt/presentation.xml".into()))?;
-    let rel_bytes = read_entry(&mut archive, "ppt/_rels/presentation.xml.rels", limits)?
-        .ok_or_else(|| ParseError::Corrupt("missing presentation relationships".into()))?;
-    let rels = relationships(&rel_bytes, "ppt/presentation.xml", limits.max_xml_depth)?;
+    let presentation_path = package_rels
+        .related("officeDocument", "\0")
+        .map(String::as_str)
+        .unwrap_or("ppt/presentation.xml");
+    let presentation = read_entry(&mut archive, presentation_path, limits)?
+        .ok_or_else(|| ParseError::Corrupt(format!("missing {presentation_path}")))?;
+    let rel_bytes = read_entry(
+        &mut archive,
+        &relationship_part_path(presentation_path),
+        limits,
+    )?
+    .unwrap_or_default();
+    let rels = relationships(&rel_bytes, presentation_path, limits.max_xml_depth)?;
+    let mut comment_authors = None;
+    let mut modern_comment_authors = None;
     let (size, slide_paths) = parse_presentation_xml(&presentation, &rels, limits)?;
-    let presentation_root = parse_xml_tree(&presentation, limits, "ppt/presentation.xml")?;
+    let presentation_root = parse_xml_tree(&presentation, limits, presentation_path)?;
+    if presentation_root.name != "presentation" {
+        return Err(ParseError::Corrupt("invalid presentation root".into()));
+    }
     let presentation_text_style = presentation_root.child("defaultTextStyle");
-    let table_styles_path =
-        related_path(&rels, "ppt/tableStyles").unwrap_or_else(|| "ppt/tableStyles.xml".to_owned());
+    let table_styles_path = related_path(&rels, "tableStyles", "ppt/tableStyles")
+        .unwrap_or_else(|| "ppt/tableStyles.xml".to_owned());
     let table_styles_root = match read_entry(&mut archive, &table_styles_path, limits)? {
         Some(xml) => Some(parse_xml_tree(&xml, limits, &table_styles_path)?),
         None => None,
     };
     let embedded_font_refs = parse_embedded_font_references(&presentation);
-    if slide_paths.is_empty() {
+    if slide_paths.is_empty()
+        && presentation_root
+            .child("sldIdLst")
+            .is_some_and(|list| list.children_named("sldId").next().is_some())
+    {
         return Err(ParseError::Corrupt(
             "presentation has no related slides".into(),
         ));
@@ -4762,6 +6180,8 @@ pub fn parse(
     let mut master_parts = BTreeMap::<String, ParsedXmlPart>::new();
     let mut theme_parts = BTreeMap::<String, ThemeDataInternal>::new();
     let mut document_warnings = Vec::new();
+    let shape_cache = RefCell::new(paint::ShapeCache::default());
+    let editing_cache = RefCell::new(editing::Cache::default());
     for (index, slide_path) in slide_paths.iter().enumerate() {
         let xml = read_entry(&mut archive, slide_path, limits)?
             .ok_or_else(|| ParseError::Corrupt(format!("missing {slide_path}")))?;
@@ -4770,10 +6190,10 @@ pub fn parse(
             read_entry(&mut archive, &relationship_part_path(slide_path), limits)?;
         let slide_rels = match slide_relationship_xml.as_deref() {
             Some(bytes) => relationships(bytes, slide_path, limits.max_xml_depth)?,
-            None => HashMap::new(),
+            None => Relationships::default(),
         };
 
-        let layout_path = related_path(&slide_rels, "ppt/slideLayouts/");
+        let layout_path = related_path(&slide_rels, "slideLayout", "ppt/slideLayouts/");
         if let Some(path) = layout_path.as_deref() {
             if !layout_parts.contains_key(path) {
                 match load_xml_part(&mut archive, path, limits)? {
@@ -4784,13 +6204,10 @@ pub fn parse(
                 }
             }
         }
-        let layout = layout_path
-            .as_ref()
-            .and_then(|path| layout_parts.get(path))
-            .cloned();
+        let layout = layout_path.as_ref().and_then(|path| layout_parts.get(path));
         let master_path = layout
             .as_ref()
-            .and_then(|part| related_path(&part.rels, "ppt/slideMasters/"));
+            .and_then(|part| related_path(&part.rels, "slideMaster", "ppt/slideMasters/"));
         if let Some(path) = master_path.as_deref() {
             if !master_parts.contains_key(path) {
                 match load_xml_part(&mut archive, path, limits)? {
@@ -4801,13 +6218,10 @@ pub fn parse(
                 }
             }
         }
-        let master = master_path
-            .as_ref()
-            .and_then(|path| master_parts.get(path))
-            .cloned();
+        let master = master_path.as_ref().and_then(|path| master_parts.get(path));
         let theme_path = master
             .as_ref()
-            .and_then(|part| related_path(&part.rels, "ppt/theme/"));
+            .and_then(|part| related_path(&part.rels, "theme", "ppt/theme/"));
         if let Some(path) = theme_path.as_deref() {
             if !theme_parts.contains_key(path) {
                 match load_theme_part(&mut archive, path, limits)? {
@@ -4818,10 +6232,7 @@ pub fn parse(
                 }
             }
         }
-        let theme = theme_path
-            .as_ref()
-            .and_then(|path| theme_parts.get(path))
-            .cloned();
+        let theme = theme_path.as_ref().and_then(|path| theme_parts.get(path));
 
         let mut related_paths = BTreeMap::<String, bool>::new();
         for target in slide_rels.values().filter(|target| {
@@ -4829,16 +6240,52 @@ pub fn parse(
         }) {
             related_paths.insert(target.clone(), target.starts_with("ppt/charts/"));
         }
-        if let Some(bytes) = slide_relationship_xml.as_deref() {
-            for (relationship_type, target) in
-                relationship_targets_by_type(bytes, slide_path, limits.max_xml_depth)?
-            {
+        let comments_path = related_path(&slide_rels, "comments", "ppt/comments/").or_else(|| {
+            slide_rels
+                .entries
+                .values()
+                .filter(|entry| {
+                    !entry.external
+                        && entry.kind
+                            == "http://schemas.microsoft.com/office/2018/10/relationships/comments"
+                })
+                .min_by_key(|entry| entry.order)
+                .map(|entry| entry.target.clone())
+        });
+        {
+            for (relationship_type, target) in slide_rels.typed() {
                 let is_chart = is_chart_relationship_type(&relationship_type);
-                if is_chart || is_diagram_relationship_type(&relationship_type) {
+                if is_chart
+                    || is_diagram_relationship_type(&relationship_type)
+                    || relationship_type.rsplit('/').next() == Some("control")
+                    || (relationship_type.rsplit('/').next() == Some("vmlDrawing")
+                        && slide_root.descendant("control").is_some())
+                {
                     related_paths
-                        .entry(target)
+                        .entry(target.clone())
                         .and_modify(|existing| *existing |= is_chart)
                         .or_insert(is_chart);
+                }
+            }
+        }
+        for (root, rels) in [
+            (Some(&slide_root), Some(&slide_rels)),
+            (layout.map(|part| &part.root), layout.map(|part| &part.rels)),
+            (master.map(|part| &part.root), master.map(|part| &part.rels)),
+        ] {
+            if let (Some(root), Some(rels)) = (root, rels) {
+                let mut content_parts = Vec::new();
+                root.collect_descendants("contentPart", &mut content_parts);
+                root.collect_descendants("control", &mut content_parts);
+                if content_parts.iter().any(|node| node.name == "control") {
+                    for path in rels.values().filter(|path| path.ends_with(".vml")) {
+                        related_paths.entry(path.clone()).or_insert(false);
+                    }
+                }
+                for content in content_parts {
+                    if let Some(path) = content.attr("id").and_then(|id| rels.internal(id)) {
+                        related_paths.entry(path.clone()).or_insert(false);
+                    }
                 }
             }
         }
@@ -4862,13 +6309,20 @@ pub fn parse(
                     continue;
                 };
                 let part_rels = relationships(&rels_xml, &target, limits.max_xml_depth)?;
-                for path in part_rels
-                    .values()
-                    .filter(|path| path.starts_with("ppt/media/"))
-                {
+                for path in part_rels.asset_paths() {
                     asset_paths.insert(path.clone(), path.clone());
                 }
                 if !is_chart_part {
+                    for (kind, path) in part_rels.typed() {
+                        if matches!(
+                            kind.rsplit('/').next(),
+                            Some("activeXControlBinary" | "image")
+                        ) {
+                            asset_paths
+                                .entry(path.clone())
+                                .or_insert_with(|| kind.to_owned());
+                        }
+                    }
                     for path in part_rels
                         .values()
                         .filter(|path| path.starts_with("ppt/diagrams/"))
@@ -4877,23 +6331,18 @@ pub fn parse(
                             related_paths.entry(path.clone()).or_insert(false);
                         }
                     }
-                    for (kind, path) in
-                        relationship_targets_by_type(&rels_xml, &target, limits.max_xml_depth)?
-                    {
-                        if is_diagram_relationship_type(&kind) && !related_parts.contains_key(&path)
+                    for (kind, path) in part_rels.typed() {
+                        if is_diagram_relationship_type(&kind) && !related_parts.contains_key(path)
                         {
-                            related_paths.entry(path).or_insert(false);
+                            related_paths.entry(path.clone()).or_insert(false);
                         }
                     }
                     related_relationships.insert(target.clone(), part_rels);
                     continue;
                 }
-                related_relationships.insert(target.clone(), part_rels);
                 let mut companions = ChartCompanionParts::default();
-                for (rel_type, rel_target) in
-                    relationship_targets_by_type(&rels_xml, &target, limits.max_xml_depth)?
-                {
-                    let slot = match rel_type.as_str() {
+                for (rel_type, rel_target) in part_rels.typed() {
+                    let slot = match rel_type {
                         CHART_STYLE_REL_TYPE => &mut companions.style_xml,
                         CHART_COLOR_STYLE_REL_TYPE => &mut companions.colors_xml,
                         kind if kind.rsplit('/').next() == Some("themeOverride") => {
@@ -4907,6 +6356,7 @@ pub fn parse(
                         }
                     }
                 }
+                related_relationships.insert(target.clone(), part_rels);
                 if companions.style_xml.is_some()
                     || companions.colors_xml.is_some()
                     || companions.theme_override_xml.is_some()
@@ -4924,10 +6374,7 @@ pub fn parse(
         .into_iter()
         .flatten()
         {
-            for target in rels
-                .values()
-                .filter(|target| target.starts_with("ppt/media/"))
-            {
+            for target in rels.asset_paths() {
                 asset_paths
                     .entry(target.clone())
                     .or_insert_with(|| target.clone());
@@ -4945,30 +6392,68 @@ pub fn parse(
             options,
             &content_types,
         )?;
-        let notes = if let Some(target) = slide_rels
-            .values()
-            .find(|target| target.starts_with("ppt/notesSlides/"))
-        {
+        let notes = if let Some(target) = slide_rels.related("notesSlide", "ppt/notesSlides/") {
+            let notes_rels =
+                match read_entry(&mut archive, &relationship_part_path(target), limits)? {
+                    Some(xml) => relationships(&xml, target, limits.max_xml_depth)?,
+                    None => Relationships::default(),
+                };
             read_entry(&mut archive, target, limits)?
-                .map(|xml| {
-                    let text = parse_text_values(&xml).join("\n");
-                    if text.is_empty() {
-                        Vec::new()
-                    } else {
-                        vec![SlideNote { text }]
-                    }
-                })
+                .map(|xml| parse_notes(&xml, limits, target, &notes_rels))
+                .transpose()?
                 .unwrap_or_default()
         } else {
             Vec::new()
         };
-        let comments = if let Some(target) = slide_rels
-            .values()
-            .find(|target| target.starts_with("ppt/comments/"))
-        {
-            read_entry(&mut archive, target, limits)?
-                .map(|xml| parse_comments(&xml))
-                .unwrap_or_default()
+        let comments = if let Some(target) = comments_path {
+            if let Some(xml) = read_entry(&mut archive, &target, limits)? {
+                let modern = comments::is_modern(&xml);
+                let author_cache = if modern {
+                    &mut modern_comment_authors
+                } else {
+                    &mut comment_authors
+                };
+                if author_cache.is_none() {
+                    let mut authors = HashMap::new();
+                    for (kind, path) in rels.typed() {
+                        let selected = if modern {
+                            kind == "http://schemas.microsoft.com/office/2018/10/relationships/authors"
+                        } else {
+                            office_relationship(&kind, "commentAuthors")
+                        };
+                        if selected {
+                            if let Some(xml) = read_entry(&mut archive, path, limits)? {
+                                authors.extend(if modern {
+                                    comments::modern_authors(&xml, limits, path)?
+                                } else {
+                                    comments::authors(&xml, limits, path)?
+                                });
+                            }
+                        }
+                    }
+                    *author_cache = Some(authors);
+                }
+                let comment_rels = if modern {
+                    match read_entry(&mut archive, &relationship_part_path(&target), limits)? {
+                        Some(xml) => relationships(&xml, &target, limits.max_xml_depth)?,
+                        None => Relationships::default(),
+                    }
+                } else {
+                    Relationships::default()
+                };
+                let empty_authors = HashMap::new();
+                let authors = author_cache.as_ref().unwrap();
+                comments::parse(
+                    &xml,
+                    limits,
+                    &target,
+                    if modern { &empty_authors } else { authors },
+                    if modern { authors } else { &empty_authors },
+                    &comment_rels,
+                )?
+            } else {
+                Vec::new()
+            }
         } else {
             Vec::new()
         };
@@ -4984,11 +6469,15 @@ pub fn parse(
         let diagnostics = ParseDiagnostics::new(Some(index), slide_path);
         let content = {
             let colors = ColorContext {
-                theme: theme.as_ref(),
+                theme,
                 color_map: &slide_color_map,
                 diagnostics: &diagnostics,
+                paint_key: paint::ColorKey::new(theme, &slide_color_map),
             };
             let context = NodeParseContext {
+                shape_cache: &shape_cache,
+                editing_cache: &editing_cache,
+                source_part: Some(slide_path),
                 slide_index: index,
                 paint_scale: (1.0, 1.0),
                 rels: &slide_rels,
@@ -5019,6 +6508,8 @@ pub fn parse(
             master_id: master_path,
             layout_id: layout_path,
             background: content.background,
+            transition: content.transition,
+            timing: content.timing,
             nodes: content.nodes,
             notes,
             comments,
@@ -5027,11 +6518,11 @@ pub fn parse(
         });
     }
 
-    let declared_master_paths = rels
-        .values()
-        .filter(|target| target.starts_with("ppt/slideMasters/"))
+    let mut declared_master_paths = rels
+        .paths("slideMaster", "ppt/slideMasters/")
         .cloned()
         .collect::<Vec<_>>();
+    declared_master_paths.sort_unstable();
     for path in declared_master_paths {
         if master_parts.contains_key(&path) {
             continue;
@@ -5043,29 +6534,19 @@ pub fn parse(
             None => document_warnings.push(missing_part_warning(&path, None)),
         }
     }
-    let declared_layout_paths = master_parts
+    let mut declared_layout_paths = master_parts
         .values()
-        .flat_map(|part| part.rels.values())
-        .filter(|target| target.starts_with("ppt/slideLayouts/"))
+        .flat_map(|part| part.rels.paths("slideLayout", "ppt/slideLayouts/"))
         .cloned()
         .collect::<Vec<_>>();
-    for path in declared_layout_paths {
-        if layout_parts.contains_key(&path) {
-            continue;
-        }
-        match load_xml_part(&mut archive, &path, limits)? {
-            Some(part) => {
-                layout_parts.insert(path, part);
-            }
-            None => document_warnings.push(missing_part_warning(&path, None)),
-        }
-    }
-    let declared_theme_paths = master_parts
+    declared_layout_paths.sort_unstable();
+    let layout_warning_offset = document_warnings.len();
+    let mut declared_theme_paths = master_parts
         .values()
-        .flat_map(|part| part.rels.values())
-        .filter(|target| target.starts_with("ppt/theme/"))
+        .flat_map(|part| part.rels.paths("theme", "ppt/theme/"))
         .cloned()
         .collect::<Vec<_>>();
+    declared_theme_paths.sort_unstable();
     for path in declared_theme_paths {
         if theme_parts.contains_key(&path) {
             continue;
@@ -5080,9 +6561,12 @@ pub fn parse(
     for target in master_parts
         .values()
         .chain(layout_parts.values())
-        .flat_map(|part| part.rels.values())
-        .chain(theme_parts.values().flat_map(|theme| theme.rels.values()))
-        .filter(|target| target.starts_with("ppt/media/"))
+        .flat_map(|part| part.rels.asset_paths())
+        .chain(
+            theme_parts
+                .values()
+                .flat_map(|theme| theme.rels.asset_paths()),
+        )
     {
         asset_paths
             .entry(target.clone())
@@ -5105,17 +6589,21 @@ pub fn parse(
     let empty_chart_companions = HashMap::new();
     let mut masters = Vec::new();
     for part in master_parts.values() {
-        let theme_path = related_path(&part.rels, "ppt/theme/");
+        let theme_path = related_path(&part.rels, "theme", "ppt/theme/");
         let theme = theme_path.as_ref().and_then(|path| theme_parts.get(path));
         let part_color_map = color_map(&part.root);
         let diagnostics = ParseDiagnostics::new(None, &part.path);
-        let nodes = {
+        let (nodes, transition, timing) = {
             let colors = ColorContext {
                 theme,
                 color_map: &part_color_map,
                 diagnostics: &diagnostics,
+                paint_key: paint::ColorKey::new(theme, &part_color_map),
             };
             let context = NodeParseContext {
+                shape_cache: &shape_cache,
+                editing_cache: &editing_cache,
+                source_part: Some(&part.path),
                 slide_index: 0,
                 paint_scale: (1.0, 1.0),
                 rels: &part.rels,
@@ -5135,7 +6623,10 @@ pub fn parse(
                 presentation_text_style,
                 table_styles: table_styles_root.as_ref(),
             };
-            parse_part_nodes(&part.root, &context)?
+            let nodes = parse_part_nodes(&part.root, &context)?;
+            let (transition, timing) =
+                timing::parse(&part.root, &part.rels, &assets, Some(&colors), limits)?;
+            (nodes, transition, timing)
         };
         document_warnings.extend(diagnostics.take());
         masters.push(crate::SlideMaster {
@@ -5146,27 +6637,65 @@ pub fn parse(
                 .and_then(|slide| slide.attr("name"))
                 .map(str::to_owned),
             theme_id: theme_path,
+            transition,
+            timing,
             nodes,
         });
     }
 
-    let mut layouts = Vec::new();
-    for part in layout_parts.values() {
-        let master_path = related_path(&part.rels, "ppt/slideMasters/");
+    let layout_paths: std::collections::BTreeSet<_> = declared_layout_paths
+        .iter()
+        .chain(layout_parts.keys())
+        .cloned()
+        .collect();
+    let mut missing_layout_warnings = Vec::new();
+    let mut layouts = Vec::with_capacity(layout_paths.len());
+    for path in layout_paths {
+        let part = if let Some(part) = layout_parts.remove(&path) {
+            part
+        } else if let Some(part) = load_xml_part(&mut archive, &path, limits)? {
+            let mut part_asset_paths = BTreeMap::new();
+            for target in part.rels.asset_paths() {
+                part_asset_paths.insert(target.clone(), target.clone());
+            }
+            collect_model_assets(&part.root, &part.rels, &mut part_asset_paths);
+            load_picture_assets(
+                &mut archive,
+                &part_asset_paths,
+                &mut assets,
+                limits,
+                options,
+                &content_types,
+            )?;
+            part
+        } else {
+            missing_layout_warnings.extend(
+                declared_layout_paths
+                    .iter()
+                    .filter(|declared| *declared == &path)
+                    .map(|_| missing_part_warning(&path, None)),
+            );
+            continue;
+        };
+        let master_path = related_path(&part.rels, "slideMaster", "ppt/slideMasters/");
         let master = master_path.as_ref().and_then(|path| master_parts.get(path));
         let theme = master
-            .and_then(|part| related_path(&part.rels, "ppt/theme/"))
+            .and_then(|part| related_path(&part.rels, "theme", "ppt/theme/"))
             .and_then(|path| theme_parts.get(&path));
         let master_color_map = master.map(|part| color_map(&part.root)).unwrap_or_default();
         let part_color_map = merge_color_maps(&master_color_map, &color_map(&part.root));
         let diagnostics = ParseDiagnostics::new(None, &part.path);
-        let nodes = {
+        let (nodes, transition, timing) = {
             let colors = ColorContext {
                 theme,
                 color_map: &part_color_map,
                 diagnostics: &diagnostics,
+                paint_key: paint::ColorKey::new(theme, &part_color_map),
             };
             let context = NodeParseContext {
+                shape_cache: &shape_cache,
+                editing_cache: &editing_cache,
+                source_part: Some(&part.path),
                 slide_index: 0,
                 paint_scale: (1.0, 1.0),
                 rels: &part.rels,
@@ -5186,7 +6715,10 @@ pub fn parse(
                 presentation_text_style,
                 table_styles: table_styles_root.as_ref(),
             };
-            parse_part_nodes(&part.root, &context)?
+            let nodes = parse_part_nodes(&part.root, &context)?;
+            let (transition, timing) =
+                timing::parse(&part.root, &part.rels, &assets, Some(&colors), limits)?;
+            (nodes, transition, timing)
         };
         document_warnings.extend(diagnostics.take());
         layouts.push(crate::SlideLayout {
@@ -5197,15 +6729,21 @@ pub fn parse(
                 .and_then(|slide| slide.attr("name"))
                 .map(str::to_owned),
             master_id: master_path,
+            transition,
+            timing,
             nodes,
         });
     }
+    document_warnings.splice(
+        layout_warning_offset..layout_warning_offset,
+        missing_layout_warnings,
+    );
 
     let mut embedded_fonts = Vec::new();
     let mut font_warnings = Vec::new();
     for font in embedded_font_refs {
         for (rel_id, style, weight) in font.variants {
-            let Some(path) = rels.get(&rel_id) else {
+            let Some(path) = rels.internal(&rel_id) else {
                 font_warnings.push(PresentationWarning::warning(
                     "missing-font",
                     format!(
@@ -5250,8 +6788,12 @@ pub fn parse(
             });
         }
     }
+    let core_path = package_rels.typed().find_map(|(kind, path)| {
+        (kind == "http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties")
+            .then_some(path.as_str())
+    }).unwrap_or("docProps/core.xml");
     let metadata =
-        read_entry(&mut archive, "docProps/core.xml", limits)?.map(|xml| parse_core_metadata(&xml));
+        read_entry(&mut archive, core_path, limits)?.map(|xml| parse_core_metadata(&xml));
     document_warnings.extend(font_warnings);
     Ok(PresentationDocument {
         format: PresentationFormat::Pptx,
@@ -5293,7 +6835,16 @@ mod tests {
         let fill = xml(
             br#"<a:blipFill xmlns:a="a" xmlns:r="r"><a:blip r:embed="rId1"><a:alphaModFix amt="14000"/></a:blip><a:stretch/></a:blipFill>"#,
         );
-        let rels = HashMap::from([("rId1".into(), "ppt/media/image.png".into())]);
+        let rels = Relationships {
+            entries: HashMap::from([(
+                "rId1".into(),
+                Relationship {
+                    target: "ppt/media/image.png".into(),
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
         assert!(matches!(
             parse_blip_fill(&fill, None, &rels),
             Some(FillStyle::Image { opacity: Some(value), .. }) if (value - 0.14).abs() < f64::EPSILON
@@ -5304,7 +6855,7 @@ mod tests {
     fn background_fill_shapes_do_not_fall_through_to_theme_styles() {
         let shape = xml(br#"<p:sp xmlns:p="p" useBgFill="1"><p:spPr/></p:sp>"#);
         assert!(matches!(
-            shape_fill(&shape, None, &HashMap::new()),
+            shape_fill(&shape, None, &Relationships::default()),
             Some(Some(FillStyle::None))
         ));
     }

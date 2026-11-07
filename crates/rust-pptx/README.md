@@ -4,6 +4,8 @@ by Extend
 
 Parse PowerPoint presentations from bytes. The parser detects OOXML presentations and legacy PowerPoint binary presentations and returns a structured model of slides, shapes, text, charts, and embedded assets. Input size, entry size, and total expanded size are unlimited by default, subject to available memory. Entry-count and XML-complexity limits remain enabled; callers can configure size limits through `ParseLimits`.
 
+The default XML element limit is 500,000 per part. Explicit caller limits remain strict. XML trees use compact child and attribute storage, and unused declared layouts are converted one at a time to reduce temporary memory. Generated artwork and retained assets also contribute to memory use; the element limit is not a total-memory limit.
+
 Install with `cargo add rust-pptx`. The Rust library target is named `rust_pptx`.
 
 ```rust
@@ -16,7 +18,17 @@ fn parse(bytes: &[u8]) -> Result<PresentationDocument, ParseError> {
 
 The WebAssembly bindings are available as `rust-pptx-wasm`.
 
+Legacy binary presentations follow the current edit/persist graph, including the newer stream in dual-storage containers. Speaker notes follow the live notes references and retain plain text and paragraph boundaries; unresolved or mismatched references produce explicit warnings. Notes-page headers, footers, dates and slide numbers are excluded from speaker notes. Legacy rich-text formatting and notes-page rendering remain incomplete.
+
 Use `parse_presentation_with_options(&bytes, &ParseLimits::default(), &ParseOptions { include_3d_models: true })` to include original embedded 3D models. Image nodes then expose `model3d`, containing the model asset bytes, part name, content type, relationship IDs, optional preview metadata and source XML preserving camera, transform and lighting settings. The saved 2D preview remains the image's `assetId`. Missing previews do not discard the model asset. The option defaults to `false`: `parse_presentation` omits `model3d` and 3D model payloads from the asset map. This does not decode meshes or render new camera views.
+
+DrawingML text runs can retain typed field identity, open type strings, cached-value presence, paragraph properties and scoped source XML. Run styles apply field defaults before explicit field formatting. Empty fields survive in notes and semantic SmartArt fallbacks; fields are not dynamically evaluated. See the [field contract and remaining layout boundaries](../../docs/pptx-fields.md).
+
+Tables retain their complete source cell grid. Covered cells inside merged regions keep their text and formatting with explicit merge flags and an optional origin position. Display and visible-text consumers must skip covered cells. See the [table grid contract and measurement scope](../../docs/pptx-tables.md).
+
+OOXML object metadata retains typed editing locks, connector target IDs and connection-site indices, explicit object-property booleans, and qualified source XML. React can resolve endpoints within their original source part, including nested groups and inherited nodes. This does not reroute connectors or enforce editing restrictions in the viewer. See the [object editing contract](../../docs/pptx-editing.md).
+
+Pictures retain an optional `fallbackAssetId` when a selected embedded SVG has a distinct saved representation in the main blip. The association follows picture fill inheritance and media posters. See the [image representation contract and renderer boundaries](../../docs/pptx-images.md).
 
 Picture and shape paint is produced by `rust-office-art` when supported. Image nodes keep their original `assetId` and `sourceXml` alongside optional `pictureSvg`; shape nodes expose optional `shapeSvg`. Both can include `paintBounds`, measured in CSS pixels relative to the unrotated layout frame. Group resizing determines the paint frame before local rotation. Zero-axis connectors use a one-pixel paint layout basis while retaining zero in their source transform. The SVG already contains local rotation, flips, clipping and effects. Consumers should position it using the paint bounds without applying those operations twice. Shape text remains structured so viewers can lay it out separately. Themes retain `formatSchemeXml` for inspecting styles that are not fully represented by the simplified model.
 

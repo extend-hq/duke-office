@@ -34,7 +34,7 @@ impl<C: PictureContext> Graph<'_, C> {
             }
             self.remaining -= 1;
             let node = &xml[child.start..child.end];
-            current = match child.tag_name.as_str() {
+            current = match child.tag_name {
                 "a:cont" => self.container(node, &current, depth + 1)?,
                 "a:blend" | "a:alphaMod" => {
                     let nested = direct_child_tag(node, "a:cont")?;

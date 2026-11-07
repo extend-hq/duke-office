@@ -3,6 +3,7 @@ use std::fmt::Write;
 use base64::Engine;
 
 use roxmltree::{Document, Node};
+use serde::{Deserialize, Serialize};
 
 use crate::{PaintBounds, RenderedPicture};
 
@@ -258,13 +259,15 @@ fn token(input: &[u8], cursor: &mut usize) -> Option<(Option<u8>, Option<f64>)> 
     ))
 }
 
-#[derive(Clone, Copy)]
-struct Point {
-    x: f64,
-    y: f64,
-    pressure: f64,
-    contact: bool,
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InkPoint {
+    pub x: f64,
+    pub y: f64,
+    pub pressure: f64,
+    pub contact: bool,
 }
+type Point = InkPoint;
 
 fn points(text: &str, channels: &[Channel], remaining: &mut usize) -> Option<Vec<Point>> {
     let x = channels.iter().position(|channel| channel.name == "X")?;
@@ -363,14 +366,44 @@ fn points(text: &str, channels: &[Channel], remaining: &mut usize) -> Option<Vec
     (!result.is_empty()).then_some(result)
 }
 
-struct Brush {
-    width: f64,
-    height: f64,
-    color: String,
-    opacity: f64,
-    rectangle: bool,
-    pencil: bool,
-    ignore_pressure: bool,
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InkBrush {
+    pub width: f64,
+    pub height: f64,
+    pub color: String,
+    pub opacity: f64,
+    pub rectangle: bool,
+    pub pencil: bool,
+    pub ignore_pressure: bool,
+}
+type Brush = InkBrush;
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InkStroke {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    pub points: Vec<InkPoint>,
+    pub brush: InkBrush,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_offset: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InkBounds {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InkDrawing {
+    pub source_bounds: InkBounds,
+    pub strokes: Vec<InkStroke>,
 }
 
 fn brush(
@@ -805,16 +838,9 @@ fn segment(path: &mut String, a: Point, b: Point, brush: &Brush) {
     }
 }
 
-/// Render bounded InkML traces in their declared physical coordinate frame.
-pub fn render_ink(xml: &str, width: f64, height: f64) -> Option<RenderedPicture> {
-    if xml.len() > 1024 * 1024
-        || !width.is_finite()
-        || !height.is_finite()
-        || !(0.0..=1e6).contains(&width)
-        || !(0.0..=1e6).contains(&height)
-        || width == 0.0
-        || height == 0.0
-    {
+/// Decode physical coordinates and pressure without discarding the original trace order.
+pub fn parse_ink(xml: &str) -> Option<InkDrawing> {
+    if xml.len() > 1024 * 1024 {
         return None;
     }
     let document = Document::parse_with_options(
@@ -832,11 +858,8 @@ pub fn render_ink(xml: &str, width: f64, height: f64) -> Option<RenderedPicture>
     {
         return None;
     }
-    let mut body = String::new();
     let mut remaining = MAX_POINTS;
-    let mut remaining_specks = MAX_POINTS;
-    let mut remaining_raster_pixels = 16 * 1024 * 1024;
-    let (mut left, mut top, mut right, mut bottom) = (0.0_f64, 0.0_f64, width, height);
+    let mut strokes = Vec::new();
     let mut count = 0;
     for trace in document.descendants().filter(|node| {
         named(*node, "trace")
@@ -868,6 +891,88 @@ pub fn render_ink(xml: &str, width: f64, height: f64) -> Option<RenderedPicture>
             .filter_map(|node| node.text())
             .collect::<String>();
         let points = points(&text, &channels, &mut remaining)?;
+        strokes.push(InkStroke {
+            id: trace
+                .attribute(("http://www.w3.org/XML/1998/namespace", "id"))
+                .map(str::to_owned),
+            points,
+            brush,
+            time_offset: trace.attribute("timeOffset").map(str::to_owned),
+        });
+    }
+    let mut points = strokes
+        .iter()
+        .flat_map(|stroke| &stroke.points)
+        .filter(|point| point.contact);
+    if count == 0 {
+        return None;
+    }
+    let first = points.next().copied().unwrap_or(Point {
+        x: 0.0,
+        y: 0.0,
+        pressure: 0.5,
+        contact: false,
+    });
+    let (mut left, mut top, mut right, mut bottom) = (first.x, first.y, first.x, first.y);
+    for point in points {
+        left = left.min(point.x);
+        top = top.min(point.y);
+        right = right.max(point.x);
+        bottom = bottom.max(point.y);
+    }
+    Some(InkDrawing {
+        source_bounds: InkBounds {
+            x: left,
+            y: top,
+            width: right - left,
+            height: bottom - top,
+        },
+        strokes,
+    })
+}
+
+fn render_drawing(strokes: &[InkStroke], width: f64, height: f64) -> Option<RenderedPicture> {
+    if strokes.len() > 1024
+        || strokes
+            .iter()
+            .map(|stroke| stroke.points.len())
+            .try_fold(0usize, usize::checked_add)?
+            > MAX_POINTS
+    {
+        return None;
+    }
+    for stroke in strokes {
+        let brush = &stroke.brush;
+        if !brush.width.is_finite()
+            || !brush.height.is_finite()
+            || !(0.0..=1e6).contains(&brush.width)
+            || !(0.0..=1e6).contains(&brush.height)
+            || !brush.opacity.is_finite()
+            || !(0.0..=1.0).contains(&brush.opacity)
+            || brush.color.len() != 7
+            || !brush.color.starts_with('#')
+            || !brush.color[1..].bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            return None;
+        }
+        if stroke.points.iter().any(|point| {
+            !point.x.is_finite()
+                || !point.y.is_finite()
+                || point.x.abs() > 1e6
+                || point.y.abs() > 1e6
+                || !point.pressure.is_finite()
+                || !(0.0..=1.0).contains(&point.pressure)
+        }) {
+            return None;
+        }
+    }
+    let mut body = String::new();
+    let mut remaining_specks = MAX_POINTS;
+    let mut remaining_raster_pixels = 16 * 1024 * 1024;
+    let (mut left, mut top, mut right, mut bottom) = (0.0_f64, 0.0_f64, width, height);
+    for stroke in strokes {
+        let points = &stroke.points;
+        let brush = &stroke.brush;
         let mut path = String::new();
         for (index, point) in points.iter().copied().enumerate() {
             if !point.contact {
@@ -911,9 +1016,6 @@ pub fn render_ink(xml: &str, width: f64, height: f64) -> Option<RenderedPicture>
             return None;
         }
     }
-    if count == 0 {
-        return None;
-    }
     let paint_width = right - left;
     let paint_height = bottom - top;
     let svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{paint_width}\" height=\"{paint_height}\" viewBox=\"{left} {top} {paint_width} {paint_height}\">{body}</svg>");
@@ -928,4 +1030,54 @@ pub fn render_ink(xml: &str, width: f64, height: f64) -> Option<RenderedPicture>
             layout_height_px: height,
         }),
     })
+}
+
+/// Render bounded InkML traces in their declared physical coordinate frame.
+pub fn render_ink(xml: &str, width: f64, height: f64) -> Option<RenderedPicture> {
+    if !width.is_finite()
+        || !height.is_finite()
+        || !(0.0..=1e6).contains(&width)
+        || !(0.0..=1e6).contains(&height)
+        || width == 0.0
+        || height == 0.0
+    {
+        return None;
+    }
+    render_drawing(&parse_ink(xml)?.strokes, width, height)
+}
+
+/// Map the trace-center bounds to a slide frame, retaining stroke overflow.
+pub fn render_ink_in_frame(
+    drawing: &InkDrawing,
+    width: f64,
+    height: f64,
+) -> Option<RenderedPicture> {
+    if !width.is_finite()
+        || !height.is_finite()
+        || !(0.0..=1e6).contains(&width)
+        || !(0.0..=1e6).contains(&height)
+    {
+        return None;
+    }
+    let bounds = drawing.source_bounds;
+    let scale_x = if bounds.width > 0.0 && width > 0.0 {
+        width / bounds.width
+    } else {
+        1.0
+    };
+    let scale_y = if bounds.height > 0.0 && height > 0.0 {
+        height / bounds.height
+    } else {
+        1.0
+    };
+    let mut strokes = drawing.strokes.clone();
+    for stroke in &mut strokes {
+        for point in &mut stroke.points {
+            point.x = (point.x - bounds.x) * scale_x;
+            point.y = (point.y - bounds.y) * scale_y;
+        }
+        stroke.brush.width *= scale_x;
+        stroke.brush.height *= scale_y;
+    }
+    render_drawing(&strokes, width, height)
 }

@@ -16,6 +16,8 @@ name = "rust_pptx"
 rust-office-art = { version = "=0.1.4", path = "../rust-office-art" }
 rust-office-charts = { version = "=0.1.6", path = "../rust-office-charts", default-features = false, features = ["extended-charts"] }
 base64 = "0.22"
+compact_str = "=0.10.0"
+memchr = "2"
 cfb.workspace = true
 flate2.workspace = true
 quick-xml.workspace = true

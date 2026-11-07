@@ -1,6 +1,15 @@
 use std::collections::BTreeMap;
 
+use crate::{SlideTiming, SlideTransition};
 use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PictureArtwork {
+    pub svg: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub paint_bounds: Option<rust_office_art::PaintBounds>,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -104,6 +113,8 @@ pub struct Transform {
 #[allow(clippy::large_enum_variant)]
 pub enum SlideNode {
     Shape {
+        #[serde(flatten, default)]
+        metadata: Option<Box<NodeMetadata>>,
         id: String,
         name: String,
         transform: Transform,
@@ -147,12 +158,18 @@ pub enum SlideNode {
         space_first_last_paragraph: Option<bool>,
     },
     Image {
+        #[serde(flatten, default)]
+        metadata: Option<Box<NodeMetadata>>,
         #[serde(default, rename = "model3d", skip_serializing_if = "Option::is_none")]
         model_3d: Option<Box<rust_office_art::model3d::Model3D>>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        ink: Option<Box<InkContent>>,
         id: String,
         name: String,
         transform: Transform,
         asset_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fallback_asset_id: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         crop: Option<ImageCrop>,
         #[serde(skip_serializing_if = "Option::is_none")]
@@ -162,12 +179,16 @@ pub enum SlideNode {
         effects: Option<ImageEffects>,
         #[serde(skip_serializing_if = "Option::is_none")]
         picture_svg: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        fallback_picture: Option<Box<PictureArtwork>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         paint_bounds: Option<rust_office_art::PaintBounds>,
         #[serde(skip_serializing_if = "Option::is_none")]
         source_xml: Option<String>,
     },
     Group {
+        #[serde(flatten, default)]
+        metadata: Option<Box<NodeMetadata>>,
         id: String,
         name: String,
         transform: Transform,
@@ -176,6 +197,8 @@ pub enum SlideNode {
         child_transform: Option<Transform>,
     },
     Table {
+        #[serde(flatten, default)]
+        metadata: Option<Box<NodeMetadata>>,
         id: String,
         name: String,
         transform: Transform,
@@ -186,6 +209,8 @@ pub enum SlideNode {
         row_heights: Vec<i64>,
     },
     Chart {
+        #[serde(flatten, default)]
+        metadata: Option<Box<NodeMetadata>>,
         id: String,
         name: String,
         transform: Transform,
@@ -209,7 +234,31 @@ pub enum SlideNode {
         #[serde(skip_serializing_if = "Option::is_none")]
         chart_colors_xml: Option<String>,
     },
+    Media {
+        #[serde(flatten, default)]
+        metadata: Option<Box<NodeMetadata>>,
+        id: String,
+        name: String,
+        transform: Transform,
+        media_type: MediaType,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        asset_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_url: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        poster_asset_id: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        poster: Option<Box<SlideNode>>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        playback: Option<MediaPlayback>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        embedded_object: Option<EmbeddedObject>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        source_xml: Option<String>,
+    },
     Unknown {
+        #[serde(flatten, default)]
+        metadata: Option<Box<NodeMetadata>>,
         id: String,
         name: String,
         transform: Transform,
@@ -217,9 +266,250 @@ pub enum SlideNode {
     },
 }
 
+impl SlideNode {
+    pub fn metadata_mut(&mut self) -> &mut NodeMetadata {
+        match self {
+            Self::Shape { metadata, .. }
+            | Self::Image { metadata, .. }
+            | Self::Group { metadata, .. }
+            | Self::Table { metadata, .. }
+            | Self::Chart { metadata, .. }
+            | Self::Media { metadata, .. }
+            | Self::Unknown { metadata, .. } => metadata.get_or_insert_with(Default::default),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InkContent {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asset_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_xml: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drawing: Option<Box<rust_office_art::InkDrawing>>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NodeMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub editing: Option<Box<ObjectEditing>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alt_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub accessibility_title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decorative: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hyperlink: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub click_action: Option<Box<ObjectAction>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hover_action: Option<Box<ObjectAction>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_part: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectEditing {
+    pub kind: ObjectEditingKind,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub locks: Option<ObjectLocks>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connector: Option<ConnectorConnections>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_box: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prefer_relative_resize: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub is_comment: Option<bool>,
+    pub source_xml: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ObjectEditingKind {
+    Shape,
+    Connector,
+    Picture,
+    Group,
+    GraphicFrame,
+    ContentPart,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectLocks {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_grouping: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_ungrouping: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_selection: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_rotation: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_change_aspect: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_move: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_resize: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_edit_points: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_adjust_handles: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_change_arrowheads: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_change_shape_type: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_text_edit: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_crop: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_drilldown: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorConnections {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start: Option<ConnectorEndpoint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end: Option<ConnectorEndpoint>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorEndpoint {
+    pub shape_id: u32,
+    pub connection_site: u32,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectAction {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relationship_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tooltip: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_frame: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub invalid_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub highlight_click: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_sound: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sound_asset_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sound_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sound_builtin: Option<bool>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MediaType {
+    Audio,
+    Video,
+    Ole,
+    Control,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaPlayback {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trim_start_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub trim_end_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fade_in_ms: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fade_out_ms: Option<f64>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bookmarks: Vec<MediaBookmark>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaBookmark {
+    pub name: String,
+    pub time_ms: f64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddedObject {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub control: Option<Box<EmbeddedControl>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub program_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub relationship_id: Option<String>,
+    pub linked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_as_icon: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_width_emu: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub preview_height_emu: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub follow_color_scheme: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub update_automatic: Option<bool>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddedControl {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub class_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub persistence: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_xml: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub binary_asset_ids: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub properties: Vec<ControlProperty>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControlProperty {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TableCell {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub merge: Option<Box<TableCellMerge>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub row_span: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -235,6 +525,21 @@ pub struct TableCell {
     pub vertical_alignment: Option<VerticalAlignment>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text_rotation: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TableCellMerge {
+    pub horizontal: bool,
+    pub vertical: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<TableCellPosition>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TableCellPosition {
+    pub row: usize,
+    pub column: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -475,8 +780,117 @@ pub struct TextBullet {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct TextRunProperties {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub east_asian_font_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub complex_script_font_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub symbol_font_family: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_size_pt: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bold: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub italic: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub underline: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strike: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub baseline: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alternative_language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub right_to_left: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hyperlink: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub character_spacing_pt: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kerning_threshold_pt: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextFieldParagraphProperties {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub alignment: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bullet: Option<TextBullet>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub line_spacing: Option<TextSpacing>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub space_before: Option<TextSpacing>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub space_after: Option<TextSpacing>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rtl: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub margin_left_emu: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub indent_emu: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_tab_size_emu: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tab_stops: Option<Vec<TextTabStop>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub east_asian_line_break: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latin_line_break: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hanging_punctuation: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub margin_right_emu: Option<i64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_alignment: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bullet_none: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bullet_color: Option<ColorValue>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bullet_color_follow_text: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bullet_font_follow_text: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bullet_size_follow_text: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bullet_image_asset_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_run_properties: Option<TextRunProperties>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TextField {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(rename = "type", skip_serializing_if = "Option::is_none")]
+    pub field_type: Option<String>,
+    pub has_cached_text: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub paragraph_properties: Option<Box<TextFieldParagraphProperties>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_part: Option<String>,
+    pub source_xml: String,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TextRun {
     pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field: Option<Box<TextField>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub math: Option<Box<rust_office_art::OfficeMath>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub font_family: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -536,6 +950,10 @@ pub struct SlideMaster {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub theme_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transition: Option<Box<SlideTransition>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timing: Option<Box<SlideTiming>>,
     pub nodes: Vec<SlideNode>,
 }
 
@@ -547,6 +965,10 @@ pub struct SlideLayout {
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub master_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transition: Option<Box<SlideTransition>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timing: Option<Box<SlideTiming>>,
     pub nodes: Vec<SlideNode>,
 }
 
@@ -565,6 +987,10 @@ pub struct PresentationSlide {
     pub layout_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub background: Option<FillStyle>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transition: Option<Box<SlideTransition>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timing: Option<Box<SlideTiming>>,
     pub nodes: Vec<SlideNode>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<SlideNote>,
@@ -578,6 +1004,8 @@ pub struct PresentationSlide {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SlideNote {
     pub text: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paragraphs: Vec<TextParagraph>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -585,14 +1013,116 @@ pub struct SlideNote {
 pub struct SlideComment {
     pub id: String,
     pub text: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paragraphs: Vec<TextParagraph>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub replies: Vec<SlideComment>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modern: Option<Box<ModernComment>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub author: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub author_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author_initials: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_index: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_part: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub modified_at: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position: Option<SlideCommentPosition>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub x: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub y: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlideCommentPosition {
+    pub x: i64,
+    pub y: i64,
+    pub unit: SlideCommentPositionUnit,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum SlideCommentPositionUnit {
+    EighthPoint,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModernComment {
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author_user_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author_provider_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub author_extensions_xml: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub anchors: Vec<CommentAnchor>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub position_emu: Option<CommentAnchorPosition>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task: Option<CommentTask>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extensions_xml: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommentTask {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub start_date: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub due_date: Option<String>,
+    pub assigned_to: Vec<String>,
+    pub title: String,
+    pub completion: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub completion_fraction: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommentAnchorPosition {
+    pub x: f64,
+    pub y: f64,
+    pub source_x: String,
+    pub source_y: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommentAnchor {
+    pub kind: CommentAnchorKind,
+    pub monikers: Vec<CommentMoniker>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum CommentAnchorKind {
+    Slide,
+    DrawingElement,
+    TextRange,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommentMoniker {
+    pub namespace: String,
+    pub name: String,
+    pub attributes: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub children: Vec<CommentMoniker>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub text: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -294,7 +294,18 @@ fn parses_owned_presentationml_rendering_features() {
     assert_eq!(column_widths, &[1000, 2000]);
     assert_eq!(row_heights, &[500, 600]);
     assert_eq!(rows.len(), 2);
-    assert_eq!(rows[0].len(), 1, "merged continuation cell is omitted");
+    assert_eq!(rows[0].len(), 2, "merged continuation cell is retained");
+    assert!(rows[0][1].merge.as_ref().unwrap().horizontal);
+    assert_eq!(
+        rows[0][1]
+            .merge
+            .as_ref()
+            .unwrap()
+            .origin
+            .as_ref()
+            .map(|p| (p.row, p.column)),
+        Some((0, 0))
+    );
     assert_eq!(rows[0][0].col_span, Some(2));
     assert_eq!(rows[0][0].paragraphs[0].runs[0].text, "Header");
     assert!(rows[0][0].borders.contains_key("top"));
@@ -835,8 +846,13 @@ fn never_exposes_untrusted_preset_colors_as_renderable_values() {
         .unwrap()
         .remove("sourceXml")
         .unwrap();
-    assert!(source.as_str().unwrap().contains("url(javascript:alert(1))"));
-    assert!(!serde_json::to_string(&rendered).unwrap().contains("javascript"));
+    assert!(source
+        .as_str()
+        .unwrap()
+        .contains("url(javascript:alert(1))"));
+    assert!(!serde_json::to_string(&rendered)
+        .unwrap()
+        .contains("javascript"));
 }
 
 fn visual_fidelity_pptx() -> Vec<u8> {
@@ -1035,8 +1051,8 @@ fn resolves_visual_fidelity_inheritance_images_and_text_metrics() {
     ));
     assert!(matches!(
         &slide.nodes[4],
-        SlideNode::Image { name, asset_id, .. }
-            if name == "OLE fallback" && asset_id == "ppt/media/ole.png"
+        SlideNode::Media { name, media_type: rust_pptx::MediaType::Ole, poster: Some(poster), .. }
+            if name == "OLE fallback" && matches!(poster.as_ref(), SlideNode::Image { asset_id, .. } if asset_id == "ppt/media/ole.png")
     ));
     assert!(matches!(
         &slide.nodes[5],
