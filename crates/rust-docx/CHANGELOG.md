@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.15
+
+- Depend on `rust-office-art` 0.1.5 and `rust-office-charts` 0.1.7, which add shared ink and Office Math parsing, deterministic trigonometry and empty 3D chart series handling.
+
 ## 0.2.14
 
 - Preserve page-field instructions without a stored result separator and retain instruction-run formatting.
