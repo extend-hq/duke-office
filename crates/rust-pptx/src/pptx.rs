@@ -2729,6 +2729,17 @@ fn inherited_shape_transform(
 }
 
 fn compact_path_number(value: f64) -> String {
+    let mut output = String::new();
+    push_compact_path_number(&mut output, value);
+    output
+}
+
+/// Appends `value` formatted as `format!("{value:.8}")` with trailing zeros, a
+/// trailing decimal point and a bare negative zero removed.
+fn push_compact_path_number(output: &mut String, value: f64) {
+    if push_fixed_eight(output, value) {
+        return;
+    }
     let mut rendered = format!("{value:.8}");
     while rendered.contains('.') && rendered.ends_with('0') {
         rendered.pop();
@@ -2737,10 +2748,88 @@ fn compact_path_number(value: f64) -> String {
         rendered.pop();
     }
     if rendered == "-0" {
-        "0".into()
+        output.push('0');
     } else {
-        rendered
+        output.push_str(&rendered);
     }
+}
+
+/// Exact fixed-point rendering of finite values below 2^63 to eight decimals.
+/// The binary value is scaled by 10^8 in integer arithmetic and rounded half
+/// to even, which is the rounding the standard formatter applies to the exact
+/// decimal expansion. Returns false when the caller must use the formatter.
+fn push_fixed_eight(output: &mut String, value: f64) -> bool {
+    const SCALE: u128 = 100_000_000;
+    if !value.is_finite() {
+        return false;
+    }
+    let bits = value.to_bits();
+    let negative = bits >> 63 == 1;
+    let biased = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = bits & ((1u64 << 52) - 1);
+    let (mantissa, exponent) = if biased == 0 {
+        (fraction, -1074)
+    } else {
+        (fraction | (1u64 << 52), biased - 1075)
+    };
+    let scaled = if exponent >= 0 {
+        if exponent > 10 {
+            return false;
+        }
+        ((mantissa as u128) << exponent) * SCALE
+    } else {
+        let shift = (-exponent) as u32;
+        let numerator = (mantissa as u128) * SCALE;
+        if shift > 120 {
+            0
+        } else {
+            let quotient = numerator >> shift;
+            let remainder = numerator & ((1u128 << shift) - 1);
+            let half = 1u128 << (shift - 1);
+            if remainder > half || (remainder == half && quotient & 1 == 1) {
+                quotient + 1
+            } else {
+                quotient
+            }
+        }
+    };
+    if negative && scaled != 0 {
+        output.push('-');
+    }
+    let mut integer = scaled / SCALE;
+    let mut fractional = scaled % SCALE;
+    let mut digits = [0u8; 40];
+    let mut length = 0;
+    loop {
+        digits[length] = b'0' + (integer % 10) as u8;
+        length += 1;
+        integer /= 10;
+        if integer == 0 {
+            break;
+        }
+    }
+    for index in (0..length).rev() {
+        output.push(digits[index] as char);
+    }
+    if fractional != 0 {
+        let mut width = 8;
+        while fractional % 10 == 0 {
+            fractional /= 10;
+            width -= 1;
+        }
+        output.push('.');
+        let mut buffer = [b'0'; 8];
+        let mut position = width;
+        while fractional != 0 {
+            position -= 1;
+            buffer[position] = b'0' + (fractional % 10) as u8;
+            fractional /= 10;
+        }
+        for byte in &buffer[..width] {
+            output.push(*byte as char);
+        }
+    }
+    true
 }
 
 fn custom_path_point(node: &XmlNode) -> Option<(f64, f64)> {
@@ -2755,8 +2844,14 @@ fn custom_path_point(node: &XmlNode) -> Option<(f64, f64)> {
 /// guide formulas are skipped instead of degrading the shape to a rectangle.
 fn custom_geometry_path(node: &XmlNode) -> Option<String> {
     let paths = node.child("spPr")?.child("custGeom")?.child("pathLst")?;
-    let mut output = Vec::new();
+    let mut output = String::new();
     let mut has_drawn_segment = false;
+    fn push_command(output: &mut String, letter: &str) {
+        if !output.is_empty() {
+            output.push(' ');
+        }
+        output.push_str(letter);
+    }
     for path in paths.children_named("path") {
         let width = path
             .attr("w")
@@ -2766,25 +2861,26 @@ fn custom_geometry_path(node: &XmlNode) -> Option<String> {
             .attr("h")
             .and_then(|value| value.parse::<f64>().ok())
             .filter(|value| *value > 0.0)?;
-        let normalized = |(x, y): (f64, f64)| {
-            format!(
-                "{} {}",
-                compact_path_number(x / width),
-                compact_path_number(y / height)
-            )
+        let normalized = |output: &mut String, (x, y): (f64, f64)| {
+            output.push(' ');
+            push_compact_path_number(output, x / width);
+            output.push(' ');
+            push_compact_path_number(output, y / height);
         };
         let mut current = None;
         for command in &path.children {
             match command.name.as_str() {
                 "moveTo" => {
                     if let Some(point) = command.child("pt").and_then(custom_path_point) {
-                        output.push(format!("M {}", normalized(point)));
+                        push_command(&mut output, "M");
+                        normalized(&mut output, point);
                         current = Some(point);
                     }
                 }
                 "lnTo" => {
                     if let Some(point) = command.child("pt").and_then(custom_path_point) {
-                        output.push(format!("L {}", normalized(point)));
+                        push_command(&mut output, "L");
+                        normalized(&mut output, point);
                         current = Some(point);
                         has_drawn_segment = true;
                     }
@@ -2795,12 +2891,10 @@ fn custom_geometry_path(node: &XmlNode) -> Option<String> {
                         .filter_map(custom_path_point)
                         .collect::<Vec<_>>();
                     if let [first, second, third] = points.as_slice() {
-                        output.push(format!(
-                            "C {} {} {}",
-                            normalized(*first),
-                            normalized(*second),
-                            normalized(*third)
-                        ));
+                        push_command(&mut output, "C");
+                        normalized(&mut output, *first);
+                        normalized(&mut output, *second);
+                        normalized(&mut output, *third);
                         current = Some(*third);
                         has_drawn_segment = true;
                     }
@@ -2811,7 +2905,9 @@ fn custom_geometry_path(node: &XmlNode) -> Option<String> {
                         .filter_map(custom_path_point)
                         .collect::<Vec<_>>();
                     if let [first, second] = points.as_slice() {
-                        output.push(format!("Q {} {}", normalized(*first), normalized(*second)));
+                        push_command(&mut output, "Q");
+                        normalized(&mut output, *first);
+                        normalized(&mut output, *second);
                         current = Some(*second);
                         has_drawn_segment = true;
                     }
@@ -2846,23 +2942,23 @@ fn custom_geometry_path(node: &XmlNode) -> Option<String> {
                         center_x + radius_x * end_radians.cos(),
                         center_y + radius_y * end_radians.sin(),
                     );
-                    output.push(format!(
-                        "A {} {} 0 {} {} {}",
-                        compact_path_number(radius_x / width),
-                        compact_path_number(radius_y / height),
-                        usize::from(sweep_angle.abs() > 180.0),
-                        usize::from(sweep_angle >= 0.0),
-                        normalized(endpoint)
-                    ));
+                    push_command(&mut output, "A");
+                    output.push(' ');
+                    push_compact_path_number(&mut output, radius_x / width);
+                    output.push(' ');
+                    push_compact_path_number(&mut output, radius_y / height);
+                    output.push_str(if sweep_angle.abs() > 180.0 { " 0 1" } else { " 0 0" });
+                    output.push_str(if sweep_angle >= 0.0 { " 1" } else { " 0" });
+                    normalized(&mut output, endpoint);
                     current = Some(endpoint);
                     has_drawn_segment = true;
                 }
-                "close" => output.push("Z".into()),
+                "close" => push_command(&mut output, "Z"),
                 _ => {}
             }
         }
     }
-    (has_drawn_segment && !output.is_empty()).then(|| output.join(" "))
+    (has_drawn_segment && !output.is_empty()).then_some(output)
 }
 
 fn shape_fill(
@@ -6869,5 +6965,89 @@ mod tests {
             custom_geometry_path(&shape).as_deref(),
             Some("M 0 0 L 1 1 Z")
         );
+    }
+}
+
+#[cfg(test)]
+mod fixed_number_tests {
+    use super::compact_path_number;
+
+    fn reference(value: f64) -> String {
+        let mut rendered = format!("{value:.8}");
+        while rendered.contains('.') && rendered.ends_with('0') {
+            rendered.pop();
+        }
+        if rendered.ends_with('.') {
+            rendered.pop();
+        }
+        if rendered == "-0" {
+            "0".into()
+        } else {
+            rendered
+        }
+    }
+
+    #[test]
+    fn fixed_eight_matches_the_standard_formatter() {
+        let mut values = Vec::new();
+        for shift in 0..=24u32 {
+            for numerator in 0..=4096u64 {
+                let value = numerator as f64 / (1u64 << shift) as f64;
+                values.push(value);
+                values.push(-value);
+            }
+        }
+        for width in 1..=512u64 {
+            for x in 0..=width {
+                values.push(x as f64 / width as f64);
+            }
+        }
+        for width in [914400.0, 12192000.0, 6858000.0, 1234567.0, 3.0, 7.0, 11.0, 13.0] {
+            for x in 0..5000 {
+                values.push(x as f64 * 37.0 / width);
+                values.push(-(x as f64) * 37.0 / width);
+            }
+        }
+        let mut state = 0x9E37_79B9_7F4A_7C15u64;
+        for _ in 0..200_000 {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            let raw = f64::from_bits(state);
+            if raw.is_finite() {
+                values.push(raw);
+            }
+            let unit = (state >> 11) as f64 / (1u64 << 53) as f64;
+            values.push(unit * 2.0 - 1.0);
+            values.push(unit * 1e6);
+            values.push(unit * 1e-7);
+            values.push((unit * 1e9).round() / 1e8);
+        }
+        values.extend([
+            0.0,
+            -0.0,
+            f64::MIN_POSITIVE,
+            1e-300,
+            -1e-300,
+            1e15,
+            -1e15,
+            1e18,
+            1e19,
+            9.007199254740992e15,
+            0.001953125,
+            -0.001953125,
+            2.5e-9,
+            1.5e-8,
+            5e-9,
+            -5e-9,
+            0.125,
+            123456789.123456789,
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ]);
+        for value in values {
+            assert_eq!(compact_path_number(value), reference(value), "{value:e}");
+        }
     }
 }

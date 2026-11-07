@@ -41,7 +41,7 @@ pub(crate) fn with_cached_xml<T>(parse: impl FnOnce() -> T) -> T {
     }
     let previous = CHILD_CACHE.with(|slot| slot.replace(Some(ChildCache::default())));
     let _restore = Restore(previous);
-    parse()
+    crate::shapes::with_pattern_tile_cache(parse)
 }
 
 pub(crate) struct TaggedRange<'a> {
@@ -212,7 +212,145 @@ fn retained_ranges(xml: &str, retained_bytes: &mut usize) -> Option<(String, Vec
     Some((xml.to_owned(), ranges))
 }
 
+// ---- Offset-indexed documents ----
+//
+// A render entry point registers the XML strings it was handed. Each string is
+// tokenized once into a flat element table. Every later lookup on a slice of a
+// registered string resolves that slice to its element by pointer offset and
+// reads children from the table instead of tokenizing the slice again. Slices
+// that are not exactly an element range, or that belong to no registered
+// string, take the original scanning paths below.
+
+const MAX_INDEXED_BYTES: usize = 16 * 1024 * 1024;
+const UNCLOSED: u32 = u32::MAX;
+
+#[derive(Clone, Copy)]
+struct IndexedElement {
+    start: u32,
+    end: u32,
+    name_start: u32,
+    name_end: u32,
+    depth: u32,
+}
+
+struct IndexedDocument {
+    base: usize,
+    len: usize,
+    elements: Vec<IndexedElement>,
+}
+
+thread_local! {
+    static INDEXED_DOCUMENTS: RefCell<Vec<IndexedDocument>> = const { RefCell::new(Vec::new()) };
+}
+
+fn index_document(xml: &str) -> Option<IndexedDocument> {
+    if xml.is_empty() || xml.len() >= MAX_INDEXED_BYTES {
+        return None;
+    }
+    let mut elements: Vec<IndexedElement> = Vec::new();
+    let mut open: Vec<usize> = Vec::new();
+    for token in tokens(xml) {
+        if token.close {
+            if let Some(index) = open.pop() {
+                elements[index].end = token.end as u32;
+            }
+        } else {
+            let name_start = token.name.as_ptr() as usize - xml.as_ptr() as usize;
+            elements.push(IndexedElement {
+                start: token.start as u32,
+                end: if token.empty { token.end as u32 } else { UNCLOSED },
+                name_start: name_start as u32,
+                name_end: (name_start + token.name.len()) as u32,
+                depth: open.len() as u32,
+            });
+            if !token.empty {
+                open.push(elements.len() - 1);
+            }
+        }
+    }
+    if elements.is_empty() {
+        return None;
+    }
+    Some(IndexedDocument {
+        base: xml.as_ptr() as usize,
+        len: xml.len(),
+        elements,
+    })
+}
+
+impl IndexedDocument {
+    fn element_at(&self, offset: usize, len: usize) -> Option<usize> {
+        let start = u32::try_from(offset).ok()?;
+        let index = self
+            .elements
+            .binary_search_by_key(&start, |element| element.start)
+            .ok()?;
+        let element = &self.elements[index];
+        (element.end != UNCLOSED && element.end as usize == offset + len).then_some(index)
+    }
+
+    fn children(&self, index: usize) -> impl Iterator<Item = &IndexedElement> {
+        let parent = self.elements[index];
+        self.elements[index + 1..]
+            .iter()
+            .take_while(move |element| element.start < parent.end)
+            .filter(move |element| element.depth == parent.depth + 1 && element.end != UNCLOSED)
+    }
+}
+
+/// Index `roots` for the duration of `render`. The strings must stay borrowed
+/// for that duration, which pins their memory, so pointer-range resolution of
+/// their sub-slices is sound. Nested registrations stack.
+pub(crate) fn with_indexed_xml<T>(roots: &[&str], render: impl FnOnce() -> T) -> T {
+    struct Truncate(usize);
+    impl Drop for Truncate {
+        fn drop(&mut self) {
+            INDEXED_DOCUMENTS.with(|slot| slot.borrow_mut().truncate(self.0));
+        }
+    }
+    let previous = INDEXED_DOCUMENTS.with(|slot| {
+        let mut documents = slot.borrow_mut();
+        let previous = documents.len();
+        for root in roots {
+            if let Some(document) = index_document(root) {
+                documents.push(document);
+            }
+        }
+        previous
+    });
+    let _truncate = Truncate(previous);
+    render()
+}
+
+fn with_indexed_element<T>(
+    xml: &str,
+    visit: impl FnOnce(&IndexedDocument, usize) -> T,
+) -> Option<T> {
+    INDEXED_DOCUMENTS.with(|slot| {
+        let documents = slot.borrow();
+        let pointer = xml.as_ptr() as usize;
+        let document = documents.iter().rev().find(|document| {
+            pointer >= document.base && pointer + xml.len() <= document.base + document.len
+        })?;
+        let index = document.element_at(pointer - document.base, xml.len())?;
+        Some(visit(document, index))
+    })
+}
+
 pub(crate) fn extract_direct_child_tag_ranges(xml: &str) -> Vec<TaggedRange<'_>> {
+    if let Some(ranges) = with_indexed_element(xml, |document, index| {
+        let base = document.elements[index].start as usize;
+        document
+            .children(index)
+            .map(|child| TaggedRange {
+                start: child.start as usize - base,
+                end: child.end as usize - base,
+                tag_name: &xml[child.name_start as usize - base..child.name_end as usize - base],
+            })
+            .collect::<Vec<_>>()
+    }) {
+        return ranges;
+    }
     let cached = CHILD_CACHE.with(|slot| {
         let mut cache = slot.borrow_mut();
         let cache = cache.as_mut()?;
@@ -232,6 +370,17 @@ pub(crate) fn direct_child_local<'a>(xml: &'a str, name: &str) -> Option<&'a str
 }
 
 fn find_direct_child<'a>(xml: &'a str, matches: impl Fn(&str) -> bool) -> Option<&'a str> {
+    if let Some(result) = with_indexed_element(xml, |document, index| {
+        let base = document.elements[index].start as usize;
+        document
+            .children(index)
+            .find(|child| {
+                matches(&xml[child.name_start as usize - base..child.name_end as usize - base])
+            })
+            .map(|child| &xml[child.start as usize - base..child.end as usize - base])
+    }) {
+        return result;
+    }
     let cached = CHILD_CACHE.with(|slot| {
         let mut cache = slot.borrow_mut();
         let cache = cache.as_mut()?;
@@ -273,6 +422,32 @@ fn find_direct_child<'a>(xml: &'a str, matches: impl Fn(&str) -> bool) -> Option
 }
 
 pub(crate) fn extract_balanced_tag_slices<'a>(xml: &'a str, name: &str) -> Vec<&'a str> {
+    if let Some(slices) = with_indexed_element(xml, |document, index| {
+        let root = document.elements[index];
+        let base = root.start as usize;
+        let mut output = Vec::new();
+        let mut skip_until = 0u32;
+        for element in document.elements[index..]
+            .iter()
+            .take_while(|element| element.start < root.end)
+        {
+            if element.start < skip_until {
+                continue;
+            }
+            let tag = &xml[element.name_start as usize - base..element.name_end as usize - base];
+            if !tag.eq_ignore_ascii_case(name) {
+                continue;
+            }
+            if element.end == UNCLOSED {
+                break;
+            }
+            output.push(&xml[element.start as usize - base..element.end as usize - base]);
+            skip_until = element.end;
+        }
+        output
+    }) {
+        return slices;
+    }
     let mut depth = 0;
     let mut start = 0;
     let mut output = Vec::new();

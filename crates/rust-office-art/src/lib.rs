@@ -1115,6 +1115,16 @@ pub fn render_picture(
     if !width.is_finite() || !height.is_finite() || width <= 0.0 || height <= 0.0 {
         return None;
     }
+    xml::with_indexed_xml(&[xml], || render_picture_indexed(xml, source, width, height, context))
+}
+
+fn render_picture_indexed(
+    xml: &str,
+    source: &str,
+    width: f64,
+    height: f64,
+    context: &impl PictureContext,
+) -> Option<RenderedPicture> {
     let picture = extract_balanced_tag_slices(xml, "pic:pic")
         .into_iter()
         .next()?;

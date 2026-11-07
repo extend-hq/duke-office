@@ -1,4 +1,4 @@
-use std::fmt::Write;
+use std::{cell::RefCell, collections::HashMap, fmt::Write};
 
 use base64::Engine;
 use image::ImageEncoder;
@@ -452,6 +452,35 @@ fn mix_color(start: [f64; 4], end: [f64; 4], ratio: f64) -> [u8; 4] {
     result
 }
 
+#[derive(PartialEq, Eq, Hash)]
+struct PatternTileKey {
+    preset: String,
+    foreground: [u64; 4],
+    background: [u64; 4],
+}
+
+const MAX_PATTERN_TILES: usize = 512;
+
+thread_local! {
+    static PATTERN_TILES: RefCell<Option<HashMap<PatternTileKey, String>>> =
+        const { RefCell::new(None) };
+}
+
+/// Keeps encoded pattern tiles for the duration of `parse`. A tile depends only
+/// on the preset coverage table and the two resolved colors, so a cached data
+/// URI is byte-identical to a fresh encoding.
+pub(crate) fn with_pattern_tile_cache<T>(parse: impl FnOnce() -> T) -> T {
+    struct Restore(Option<HashMap<PatternTileKey, String>>);
+    impl Drop for Restore {
+        fn drop(&mut self) {
+            PATTERN_TILES.with(|slot| *slot.borrow_mut() = self.0.take());
+        }
+    }
+    let previous = PATTERN_TILES.with(|slot| slot.replace(Some(HashMap::new())));
+    let _restore = Restore(previous);
+    parse()
+}
+
 fn pattern(
     xml: &str,
     id: &str,
@@ -461,15 +490,52 @@ fn pattern(
 ) -> Option<Paint> {
     let foreground = rgba(&resolved_paint(child(xml, "fgClr")?, mode, context)?)?;
     let background = rgba(&resolved_paint(child(xml, "bgClr")?, mode, context)?)?;
-    let coverage = pattern_data::coverage(get_attribute_ref(xml, "prst")?)?;
-    let mut pixels = Vec::with_capacity(64 * 64 * 4);
-    for y in 0..64 {
-        for x in 0..64 {
-            let amount = f64::from(coverage[(y / 8) * 8 + x / 8]) / 2.0;
-            pixels.extend(mix_color(background, foreground, amount));
+    let preset = get_attribute_ref(xml, "prst")?;
+    let coverage = pattern_data::coverage(preset)?;
+    let key = PatternTileKey {
+        preset: preset.to_owned(),
+        foreground: foreground.map(f64::to_bits),
+        background: background.map(f64::to_bits),
+    };
+    let cached = PATTERN_TILES.with(|slot| {
+        slot.borrow()
+            .as_ref()
+            .and_then(|tiles| tiles.get(&key).cloned())
+    });
+    let source = match cached {
+        Some(source) => source,
+        None => {
+            // Every 8x8 block is one mixed color and every block row spans
+            // eight identical pixel rows, so mix each distinct coverage value
+            // once and copy rows instead of mixing all 4,096 pixels.
+            let mut mixed = [None::<[u8; 4]>; 256];
+            let mut pixels = Vec::with_capacity(64 * 64 * 4);
+            for block_row in 0..8 {
+                let mut row = Vec::with_capacity(64 * 4);
+                for block in 0..8 {
+                    let value = coverage[block_row * 8 + block];
+                    let color = *mixed[usize::from(value)].get_or_insert_with(|| {
+                        mix_color(background, foreground, f64::from(value) / 2.0)
+                    });
+                    for _ in 0..8 {
+                        row.extend_from_slice(&color);
+                    }
+                }
+                for _ in 0..8 {
+                    pixels.extend_from_slice(&row);
+                }
+            }
+            let source = png_source(&pixels, 64, 64)?;
+            PATTERN_TILES.with(|slot| {
+                if let Some(tiles) = slot.borrow_mut().as_mut() {
+                    if tiles.len() < MAX_PATTERN_TILES {
+                        tiles.insert(key, source.clone());
+                    }
+                }
+            });
+            source
         }
-    }
-    let source = png_source(&pixels, 64, 64)?;
+    };
     let period = 32.0 / 3.0;
     let _ = write!(
         defs,
@@ -783,8 +849,10 @@ pub fn render_shape(
     {
         return None;
     }
-    let paths = geometry_paths(properties_xml, width, height)?;
-    render_shape_paths(&paths, properties_xml, style_xml, width, height, context)
+    crate::xml::with_indexed_xml(&[properties_xml, style_xml], || {
+        let paths = geometry_paths(properties_xml, width, height)?;
+        render_shape_paths(&paths, properties_xml, style_xml, width, height, context)
+    })
 }
 
 pub fn render_3d_path(
@@ -826,7 +894,9 @@ pub fn render_3d_path(
         "<a:spPr>{inner}{fill_xml}{}</a:spPr>",
         line_xml.unwrap_or("")
     );
-    render_shape_paths(&[path], &properties, "", width, height, context)
+    crate::xml::with_indexed_xml(&[properties.as_str()], || {
+        render_shape_paths(&[path], &properties, "", width, height, context)
+    })
 }
 
 fn render_shape_paths(
