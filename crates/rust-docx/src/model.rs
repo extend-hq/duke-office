@@ -594,7 +594,11 @@ pub struct ImageRunNode {
     pub block_id: Option<String>,
     #[serde(default = "default_image_run_type", rename = "type")]
     pub r#type: ImageRunNodeType,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::transport::deserialize_optional_text",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub src: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub alt: Option<String>,
@@ -606,7 +610,11 @@ pub struct ImageRunNode {
     pub part_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_type: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::transport::deserialize_image_data",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub data: Option<Vec<u8>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_xml: Option<String>,
@@ -1593,7 +1601,11 @@ pub struct NumberingDefinitionSet {
 #[serde(rename_all = "camelCase")]
 pub struct NumberingPictureBulletDefinition {
     pub num_pic_bullet_id: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "crate::transport::deserialize_optional_text",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub src: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub width_px: Option<f64>,

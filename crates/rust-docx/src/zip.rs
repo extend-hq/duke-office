@@ -432,6 +432,7 @@ pub(crate) fn crc32(bytes: &[u8]) -> u32 {
     value ^ 0xffff_ffff
 }
 
+#[cfg(test)]
 fn concat_bytes(chunks: &[&[u8]]) -> Vec<u8> {
     let total_length: usize = chunks.iter().map(|chunk| chunk.len()).sum();
     let mut output = Vec::with_capacity(total_length);
@@ -441,19 +442,43 @@ fn concat_bytes(chunks: &[&[u8]]) -> Vec<u8> {
     output
 }
 
+/// Media formats that are already compressed; DEFLATE rarely shrinks them.
+const PRECOMPRESSED_EXTENSIONS: &[&str] = &[
+    "7z", "avi", "avif", "docm", "docx", "gif", "gz", "hdp", "heic", "heif", "jpe", "jpeg", "jpg",
+    "jxr", "m4a", "m4v", "mov", "mp3", "mp4", "png", "pptm", "pptx", "wdp", "webp", "wma", "wmv",
+    "xlsm", "xlsx", "zip",
+];
+
+fn is_precompressed(name: &str) -> bool {
+    name.rsplit_once('.').is_some_and(|(_, extension)| {
+        PRECOMPRESSED_EXTENSIONS
+            .iter()
+            .any(|known| known.eq_ignore_ascii_case(extension))
+    })
+}
+
+fn zip_u32(value: usize, what: &str) -> Result<u32, String> {
+    u32::try_from(value).map_err(|_| format!("{what} exceeds the 4 GiB non-ZIP64 limit"))
+}
+
+/// Writes the package as a ZIP archive.
+///
+/// Entries are written straight into one output buffer in name order. XML and
+/// uncompressed binaries use DEFLATE; already-compressed media, and any entry
+/// that DEFLATE does not shrink, are stored.
 pub fn package_to_bytes(pkg: &OoxmlPackage) -> Result<Vec<u8>, String> {
-    let mut entries: Vec<(String, Vec<u8>)> = pkg
+    let mut entries: Vec<(&str, &[u8])> = pkg
         .parts
         .values()
-        .map(|part| (part.name.clone(), part.content.as_bytes().to_vec()))
+        .map(|part| (part.name.as_str(), part.content.as_bytes()))
         .chain(
             pkg.binary_assets
                 .iter()
-                .map(|(name, data)| (name.clone(), data.clone())),
+                .map(|(name, data)| (name.as_str(), data.as_slice())),
         )
         .collect();
 
-    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    entries.sort_by(|left, right| left.0.cmp(right.0));
 
     if entries.is_empty() {
         return Err("Cannot create DOCX ZIP from an empty package".to_string());
@@ -463,69 +488,71 @@ pub fn package_to_bytes(pkg: &OoxmlPackage) -> Result<Vec<u8>, String> {
         return Err("Too many ZIP entries for non-ZIP64 writer".to_string());
     }
 
-    let mut local_chunks: Vec<Vec<u8>> = Vec::new();
-    let mut central_chunks: Vec<Vec<u8>> = Vec::new();
-    let mut offset = 0u32;
+    let stored_media: usize = entries
+        .iter()
+        .filter(|(name, _)| is_precompressed(name))
+        .map(|(name, payload)| 30 + name.len() + payload.len())
+        .sum();
+    let mut output = Vec::with_capacity(stored_media + 64 * 1024);
+    let mut central_directory = Vec::with_capacity(entries.iter().map(|(name, _)| 46 + name.len()).sum());
 
     for (name, payload) in &entries {
         let name_bytes = name.as_bytes();
         let crc = crc32(payload);
+        let offset = zip_u32(output.len(), "ZIP archive")?;
+        let uncompressed_size = zip_u32(payload.len(), name)?;
 
-        let mut local_header = vec![0u8; 30 + name_bytes.len() + payload.len()];
+        let deflated = (!is_precompressed(name) && !payload.is_empty())
+            .then(|| miniz_oxide::deflate::compress_to_vec(payload, 6))
+            .filter(|deflated| deflated.len() < payload.len());
+        let (method, data): (u16, &[u8]) = match &deflated {
+            Some(deflated) => (DEFLATE_COMPRESSION, deflated),
+            None => (STORE_COMPRESSION, payload),
+        };
+        let compressed_size = zip_u32(data.len(), name)?;
+
+        let mut local_header = [0u8; 30];
         write_u32_le(&mut local_header, 0, ZIP_LOCAL_FILE_HEADER_SIGNATURE);
         write_u16_le(&mut local_header, 4, 20);
         write_u16_le(&mut local_header, 6, UTF8_FLAG);
-        write_u16_le(&mut local_header, 8, STORE_COMPRESSION);
-        write_u16_le(&mut local_header, 10, 0);
-        write_u16_le(&mut local_header, 12, 0);
+        write_u16_le(&mut local_header, 8, method);
         write_u32_le(&mut local_header, 14, crc);
-        write_u32_le(&mut local_header, 18, payload.len() as u32);
-        write_u32_le(&mut local_header, 22, payload.len() as u32);
+        write_u32_le(&mut local_header, 18, compressed_size);
+        write_u32_le(&mut local_header, 22, uncompressed_size);
         write_u16_le(&mut local_header, 26, name_bytes.len() as u16);
-        write_u16_le(&mut local_header, 28, 0);
-        local_header[30..30 + name_bytes.len()].copy_from_slice(name_bytes);
-        local_header[30 + name_bytes.len()..].copy_from_slice(payload);
-        local_chunks.push(local_header.clone());
+        output.extend_from_slice(&local_header);
+        output.extend_from_slice(name_bytes);
+        output.extend_from_slice(data);
+        drop(deflated);
 
-        let mut central_header = vec![0u8; 46 + name_bytes.len()];
+        let mut central_header = [0u8; 46];
         write_u32_le(&mut central_header, 0, ZIP_CENTRAL_DIRECTORY_SIGNATURE);
         write_u16_le(&mut central_header, 4, 20);
         write_u16_le(&mut central_header, 6, 20);
         write_u16_le(&mut central_header, 8, UTF8_FLAG);
-        write_u16_le(&mut central_header, 10, STORE_COMPRESSION);
-        write_u16_le(&mut central_header, 12, 0);
-        write_u16_le(&mut central_header, 14, 0);
+        write_u16_le(&mut central_header, 10, method);
         write_u32_le(&mut central_header, 16, crc);
-        write_u32_le(&mut central_header, 20, payload.len() as u32);
-        write_u32_le(&mut central_header, 24, payload.len() as u32);
+        write_u32_le(&mut central_header, 20, compressed_size);
+        write_u32_le(&mut central_header, 24, uncompressed_size);
         write_u16_le(&mut central_header, 28, name_bytes.len() as u16);
-        write_u16_le(&mut central_header, 30, 0);
-        write_u16_le(&mut central_header, 32, 0);
-        write_u16_le(&mut central_header, 34, 0);
-        write_u16_le(&mut central_header, 36, 0);
-        write_u32_le(&mut central_header, 38, 0);
         write_u32_le(&mut central_header, 42, offset);
-        central_header[46..].copy_from_slice(name_bytes);
-        central_chunks.push(central_header);
-
-        offset += local_header.len() as u32;
+        central_directory.extend_from_slice(&central_header);
+        central_directory.extend_from_slice(name_bytes);
     }
 
-    let central_directory_offset = offset;
-    let central_directory: Vec<u8> = central_chunks.into_iter().flatten().collect();
-    let local_file_data: Vec<u8> = local_chunks.into_iter().flatten().collect();
+    let central_directory_offset = zip_u32(output.len(), "ZIP archive")?;
+    let central_directory_size = zip_u32(central_directory.len(), "ZIP central directory")?;
+    output.extend_from_slice(&central_directory);
+    drop(central_directory);
 
-    let mut eocd = vec![0u8; 22];
+    let mut eocd = [0u8; 22];
     write_u32_le(&mut eocd, 0, ZIP_EOCD_SIGNATURE);
-    write_u16_le(&mut eocd, 4, 0);
-    write_u16_le(&mut eocd, 6, 0);
     write_u16_le(&mut eocd, 8, entries.len() as u16);
     write_u16_le(&mut eocd, 10, entries.len() as u16);
-    write_u32_le(&mut eocd, 12, central_directory.len() as u32);
+    write_u32_le(&mut eocd, 12, central_directory_size);
     write_u32_le(&mut eocd, 16, central_directory_offset);
-    write_u16_le(&mut eocd, 20, 0);
-
-    Ok(concat_bytes(&[&local_file_data, &central_directory, &eocd]))
+    output.extend_from_slice(&eocd);
+    Ok(output)
 }
 
 pub fn create_minimal_docx_package(document_xml: Option<&str>) -> OoxmlPackage {
@@ -720,6 +747,31 @@ mod tests {
             .content
             .contains("Hello DOCX"));
     }
+    #[test]
+    fn writes_deflated_xml_and_stored_media_that_reparse_exactly() {
+        let mut source = create_minimal_docx_package(Some(DOCUMENT_XML));
+        let photo: Vec<u8> = (0..200_000u32).map(|value| (value.wrapping_mul(2_654_435_761) >> 24) as u8).collect();
+        let metafile = vec![7u8; 100_000];
+        source.binary_assets.insert("word/media/photo.png".into(), photo.clone());
+        source.binary_assets.insert("word/media/figure.emf".into(), metafile.clone());
+        source.binary_assets.insert("word/media/empty.bin".into(), Vec::new());
+        let zip = package_to_bytes(&source).expect("package to bytes");
+
+        let entries = parse_central_directory(&zip).expect("central directory");
+        let method = |name: &str| entries.iter().find(|entry| entry.name == name).map(|entry| entry.compression_method);
+        assert_eq!(method("word/document.xml"), Some(DEFLATE_COMPRESSION));
+        assert_eq!(method("word/media/figure.emf"), Some(DEFLATE_COMPRESSION));
+        assert_eq!(method("word/media/photo.png"), Some(STORE_COMPRESSION));
+        assert_eq!(method("word/media/empty.bin"), Some(STORE_COMPRESSION));
+        assert!(zip.len() < photo.len() + 20_000, "metafile and XML should be compressed");
+
+        let reparsed = parse_docx(&zip).expect("reparse docx");
+        assert_eq!(reparsed.binary_assets["word/media/photo.png"], photo);
+        assert_eq!(reparsed.binary_assets["word/media/figure.emf"], metafile);
+        assert!(reparsed.binary_assets["word/media/empty.bin"].is_empty());
+        assert_eq!(reparsed.parts["word/document.xml"].content, source.parts["word/document.xml"].content);
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn parallel_entries_preserve_payloads_duplicates_and_error_order() {

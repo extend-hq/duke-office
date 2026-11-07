@@ -1489,13 +1489,14 @@ fn ensure_image_part_and_relationship(
     state: &mut ImageSerializationState<'_>,
 ) -> Option<(String, f64, f64, String)> {
     let mut part_name = image.part_name.clone();
-    let mut image_data = image.data.clone();
+    // Borrow the model's bytes; they are copied only if a new part is inserted.
+    let mut image_data = image.data.as_deref().map(std::borrow::Cow::Borrowed);
     let mut content_type = image.content_type.clone();
 
     if part_name.is_none() || image_data.is_none() {
         if let Some(src) = &image.src {
             if let Some((decoded_mime, decoded_data)) = decode_data_uri(src) {
-                image_data = Some(decoded_data);
+                image_data = Some(std::borrow::Cow::Owned(decoded_data));
                 if content_type.is_none() {
                     content_type = Some(decoded_mime);
                 }
@@ -1519,7 +1520,7 @@ fn ensure_image_part_and_relationship(
             state
                 .pkg
                 .binary_assets
-                .insert(part_name.clone(), data.clone());
+                .insert(part_name.clone(), data.clone().into_owned());
         }
     }
 

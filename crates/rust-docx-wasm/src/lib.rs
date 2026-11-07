@@ -1,10 +1,15 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 
 use rust_docx::{
     build_doc_model_with_options, model_to_document_xml, package_to_bytes, parse_document_bytes,
     try_serialize_doc_model, DocModel, ImageRunNode, OoxmlPackage, OoxmlPart,
 };
-use js_sys::{Array, Object, Reflect};
+use js_sys::{Array, JsString, Object, Reflect, Uint8Array};
+use rust_docx::transport::{
+    with_transport_payloads, TransportPayloads, BYTES_TOKEN_PREFIX, TEXT_TOKEN_PREFIX,
+};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
@@ -84,37 +89,109 @@ fn value_to_doc_model(value: &JsValue) -> Result<DocModel, JsValue> {
     if let Some(json_str) = value.as_string() {
         return doc_model_from_json(&json_str);
     }
-
-    let json = stringify_model_value(value)
+    let model = stringify_model_value(value)
         .map_err(|error| JsValue::from_str(&format!("Failed to stringify model: {error:?}")))?;
-    let json_str = json
-        .as_string()
-        .ok_or_else(|| JsValue::from_str("Model JSON must be a string"))?;
-    doc_model_from_json(&json_str)
+    model.parse("DocModel")
 }
 
-fn stringify_model_value(value: &JsValue) -> Result<js_sys::JsString, JsValue> {
-    let replacer = Closure::<dyn FnMut(JsValue, JsValue) -> JsValue>::new(|_: JsValue, value: JsValue| {
-        if value.is_instance_of::<js_sys::Uint8Array>() {
-            Array::from(&value).into()
-        } else {
-            value
+/// Strings at least this long in a `src` field travel outside the model JSON.
+const OUT_OF_BAND_TEXT_LENGTH: u32 = 4096;
+
+/// Model JSON whose image payloads are referenced by transport tokens.
+struct ModelJson {
+    json: String,
+    payloads: TransportPayloads,
+}
+
+impl ModelJson {
+    fn parse<T: serde::de::DeserializeOwned>(self, what: &str) -> Result<T, JsValue> {
+        let ModelJson { json, payloads } = self;
+        with_transport_payloads(payloads, || serde_json::from_str(&json))
+            .map_err(|error| JsValue::from_str(&format!("Invalid {what} JSON: {error}")))
+    }
+}
+
+fn token(prefix: &str, index: usize) -> JsValue {
+    JsValue::from_str(&format!("{prefix}{index}"))
+}
+
+fn intern(values: &mut Vec<JsValue>, value: JsValue) -> usize {
+    match values.iter().position(|known| Object::is(known, &value)) {
+        Some(index) => index,
+        None => {
+            values.push(value);
+            values.len() - 1
         }
+    }
+}
+
+/// Stringifies a JS model without expanding image payloads into JSON.
+///
+/// Image `data` buffers and long `src` strings are collected once (repeated
+/// buffers and strings are shared) and replaced by short tokens in a shallow
+/// copy of their holder; the caller's objects are not modified. Other byte
+/// arrays keep the legacy number-array encoding.
+fn stringify_model_value(value: &JsValue) -> Result<ModelJson, JsValue> {
+    let bytes = Rc::new(RefCell::new(Vec::<JsValue>::new()));
+    let text = Rc::new(RefCell::new(Vec::<JsValue>::new()));
+    let (replacer_bytes, replacer_text) = (bytes.clone(), text.clone());
+    let replacer = Closure::<dyn FnMut(JsValue, JsValue) -> JsValue>::new(move |_: JsValue, value: JsValue| {
+        if value.is_instance_of::<Uint8Array>() {
+            return Array::from(&value).into();
+        }
+        if !value.is_object() || Array::is_array(&value) {
+            return value;
+        }
+        let get = |key: &str| Reflect::get(&value, &JsValue::from_str(key)).unwrap_or(JsValue::UNDEFINED);
+        let data = get("data");
+        let data = (data.is_instance_of::<Uint8Array>() && get("type").as_string().as_deref() == Some("image"))
+            .then_some(data);
+        let src = get("src");
+        let src = src
+            .dyn_ref::<JsString>()
+            .is_some_and(|src| src.length() >= OUT_OF_BAND_TEXT_LENGTH)
+            .then_some(src);
+        if data.is_none() && src.is_none() {
+            return value;
+        }
+        let holder = Object::assign(&Object::new(), value.unchecked_ref());
+        if let Some(data) = data {
+            let index = intern(&mut replacer_bytes.borrow_mut(), data);
+            let _ = Reflect::set(&holder, &JsValue::from_str("data"), &token(BYTES_TOKEN_PREFIX, index));
+        }
+        if let Some(src) = src {
+            let index = intern(&mut replacer_text.borrow_mut(), src);
+            let _ = Reflect::set(&holder, &JsValue::from_str("src"), &token(TEXT_TOKEN_PREFIX, index));
+        }
+        holder.into()
     });
-    js_sys::JSON::stringify_with_replacer(value, replacer.as_ref())
+    let json = js_sys::JSON::stringify_with_replacer(value, replacer.as_ref())?
+        .as_string()
+        .ok_or_else(|| JsValue::from_str("Model JSON must be a string"))?;
+    drop(replacer);
+    let payloads = TransportPayloads {
+        bytes: bytes
+            .take()
+            .into_iter()
+            .map(|data| data.unchecked_into::<Uint8Array>().to_vec())
+            .collect(),
+        text: text
+            .take()
+            .into_iter()
+            .map(|src| src.as_string().unwrap_or_default())
+            .collect(),
+    };
+    Ok(ModelJson { json, payloads })
 }
 
 fn value_to_image_run(value: &JsValue) -> Result<ImageRunNode, JsValue> {
-    let json_str = if let Some(json_str) = value.as_string() {
-        json_str
-    } else {
-        stringify_model_value(value)
-            .map_err(|error| JsValue::from_str(&format!("Failed to stringify image: {error:?}")))?
-            .as_string()
-            .ok_or_else(|| JsValue::from_str("Image JSON must be a string"))?
-    };
-    serde_json::from_str(&json_str)
-        .map_err(|error| JsValue::from_str(&format!("Invalid ImageRunNode JSON: {error}")))
+    if let Some(json_str) = value.as_string() {
+        return serde_json::from_str(&json_str)
+            .map_err(|error| JsValue::from_str(&format!("Invalid ImageRunNode JSON: {error}")));
+    }
+    stringify_model_value(value)
+        .map_err(|error| JsValue::from_str(&format!("Failed to stringify image: {error:?}")))?
+        .parse("ImageRunNode")
 }
 
 #[wasm_bindgen]

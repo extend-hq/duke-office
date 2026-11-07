@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.16
+
+- Accept image `data` as a base64 string or out-of-band transport token, and image `src` as a transport token, so large images no longer expand into one buffered JSON value per byte inside untagged model nodes. Number arrays remain accepted.
+- Write DOCX archives into a single output buffer and compress XML and uncompressed media with DEFLATE; already-compressed media is stored.
+- Borrow model image bytes during serialization instead of cloning them for every image.
+- `rust-docx-wasm`: `serialize_docx_wasm` and the other object-model entry points transfer image bytes and data URIs outside the model JSON. A 66 MB image now adds about 84 MiB of WebAssembly memory instead of about 3 GiB.
+
 ## 0.2.15
 
 - Depend on `rust-office-art` 0.1.5 and `rust-office-charts` 0.1.7, which add shared ink and Office Math parsing, deterministic trigonometry and empty 3D chart series handling.
