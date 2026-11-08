@@ -12,6 +12,7 @@ enum Parsed {
 fn parse(engine: &str, bytes: &Arc<[u8]>, legacy: bool) -> Result<Parsed, String> {
     match engine {
         "rust-pptx" => rust_pptx::parse_presentation(bytes, &Default::default()).map(Parsed::Core).map_err(|e| e.to_string()),
+        "rust-pptx-deferred" => rust_pptx::parse_presentation_with_options(bytes, &Default::default(), &rust_pptx::ParseOptions { defer_artwork: true, ..Default::default() }).map(Parsed::Core).map_err(|e| e.to_string()),
         "office_oxide" => {
             let format = if legacy { office_oxide::format::DocumentFormat::Ppt } else { office_oxide::format::DocumentFormat::Pptx };
             let doc = office_oxide::Document::from_reader(Cursor::new(Arc::clone(bytes)), format).map_err(|e|e.to_string())?;
@@ -67,10 +68,62 @@ fn take_editing(v: &mut Value, path: &str, nodes: &mut Vec<Value>) {
     }
 }
 
+/// Collects the first `limit` nodes with eager artwork (first occurrence of each id
+/// per node list, in model order) and compares on-demand renders with them.
+fn artwork_check(bytes: &[u8], limit: usize) -> Result<Value, String> {
+    use rust_pptx::{ArtworkTarget, NodeArtwork, SlideNode};
+    use std::collections::HashSet;
+    fn artwork(node: &SlideNode) -> Option<NodeArtwork> {
+        match node {
+            SlideNode::Shape { shape_svg: Some(svg), paint_bounds, .. } => Some(NodeArtwork { svg: svg.clone(), paint_bounds: paint_bounds.clone(), fallback_picture: None }),
+            SlideNode::Image { picture_svg: Some(svg), paint_bounds, fallback_picture, .. } => Some(NodeArtwork { svg: svg.clone(), paint_bounds: paint_bounds.clone(), fallback_picture: fallback_picture.clone() }),
+            SlideNode::Chart { chart_svg: Some(svg), .. } => Some(NodeArtwork { svg: svg.clone(), paint_bounds: None, fallback_picture: None }),
+            _ => None,
+        }
+    }
+    fn collect(nodes: &[SlideNode], seen: &mut HashSet<String>, make: &dyn Fn(String) -> ArtworkTarget, out: &mut Vec<(ArtworkTarget, NodeArtwork)>, limit: usize) {
+        for node in nodes {
+            let id = match node {
+                SlideNode::Shape { id, .. } | SlideNode::Image { id, .. } | SlideNode::Group { id, .. } | SlideNode::Table { id, .. } | SlideNode::Chart { id, .. } | SlideNode::Media { id, .. } | SlideNode::Unknown { id, .. } => id.clone(),
+            };
+            if seen.insert(id.clone()) {
+                if let Some(expected) = artwork(node) {
+                    if out.len() < limit { out.push((make(id), expected)); }
+                }
+            }
+            if let SlideNode::Group { children, .. } = node { collect(children, seen, make, out, limit); }
+        }
+    }
+    let limits = rust_pptx::ParseLimits::default();
+    let options = rust_pptx::ParseOptions::default();
+    let document = rust_pptx::parse_presentation_with_options(bytes, &limits, &options).map_err(|e| e.to_string())?;
+    let mut targets = Vec::new();
+    for (index, slide) in document.slides.iter().enumerate() {
+        let mut seen = HashSet::new();
+        collect(&slide.nodes, &mut seen, &|node_id| ArtworkTarget { slide_index: Some(index), node_id, ..Default::default() }, &mut targets, limit);
+    }
+    for layout in &document.layouts {
+        let mut seen = HashSet::new();
+        collect(&layout.nodes, &mut seen, &|node_id| ArtworkTarget { layout_id: Some(layout.id.clone()), node_id, ..Default::default() }, &mut targets, limit);
+    }
+    for master in &document.masters {
+        let mut seen = HashSet::new();
+        collect(&master.nodes, &mut seen, &|node_id| ArtworkTarget { master_id: Some(master.id.clone()), node_id, ..Default::default() }, &mut targets, limit);
+    }
+    let mut matched = 0;
+    let mut mismatches = Vec::new();
+    for (target, expected) in &targets {
+        let actual = rust_pptx::render_node_artwork(bytes, &limits, &options, target).map_err(|e| e.to_string())?;
+        if actual.as_ref() == Some(expected) { matched += 1; } else { mismatches.push(json!({"target": target, "expected_bytes": expected.svg.len(), "actual_bytes": actual.map(|a| a.svg.len())})); }
+    }
+    Ok(json!({"status": "ok", "checked": targets.len(), "matched": matched, "mismatches": mismatches}))
+}
+
 fn run(args: &[String]) -> Result<Value,String> {
     let bytes: Arc<[u8]>=fs::read(&args[2]).map_err(|e|e.to_string())?.into();
     let legacy=bytes.starts_with(b"\xd0\xcf\x11\xe0");
     let repeats:usize=args[4].parse().unwrap();
+    if args[1]=="rust-pptx-artwork-check" { return artwork_check(&bytes, if repeats==0 {6} else {repeats}); }
     let start=Instant::now();
     let first=parse(&args[1],&bytes,legacy)?;
     let cold_ms=start.elapsed().as_secs_f64()*1000.;

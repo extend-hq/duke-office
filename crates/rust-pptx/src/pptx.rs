@@ -3158,8 +3158,27 @@ fn shape_line(node: XmlNode<'_>, colors: Option<&ColorContext<'_>>) -> Option<Op
         .map(|line| style_matrix_line(line, colors))
 }
 
+/// Which node list a parse context fills, for on-demand artwork targeting.
+#[derive(Clone, Copy)]
+enum ArtworkPart<'a> {
+    Slide(usize),
+    Layout(&'a str),
+    Master(&'a str),
+}
+
+/// How render-time node ids relate to the ids stored in the model.
+#[derive(Clone, Copy)]
+enum ArtworkIdMatch {
+    Exact,
+    Prefixed(&'static str),
+    Any,
+}
+
 #[derive(Clone, Copy)]
 struct NodeParseContext<'a, 'color> {
+    artwork_target: Option<&'a crate::ArtworkTarget>,
+    artwork_part: ArtworkPart<'a>,
+    artwork_id_match: ArtworkIdMatch,
     shape_cache: &'a RefCell<paint::ShapeCache>,
     editing_cache: &'a RefCell<editing::Cache>,
     source_part: Option<&'a str>,
@@ -3181,6 +3200,38 @@ struct NodeParseContext<'a, 'color> {
     master_rels: Option<&'a Relationships>,
     presentation_text_style: Option<XmlNode<'a>>,
     table_styles: Option<XmlNode<'a>>,
+}
+
+impl NodeParseContext<'_, '_> {
+    /// Whether this node's artwork is generated in this parse.
+    fn renders_artwork(&self, id: &str) -> bool {
+        let Some(target) = self.artwork_target else {
+            return !self.options.defer_artwork;
+        };
+        let part_matches = match self.artwork_part {
+            ArtworkPart::Slide(index) => {
+                target.slide_index == Some(index)
+                    && target.layout_id.is_none()
+                    && target.master_id.is_none()
+            }
+            ArtworkPart::Layout(path) => {
+                target.slide_index.is_none() && target.layout_id.as_deref() == Some(path)
+            }
+            ArtworkPart::Master(path) => {
+                target.slide_index.is_none()
+                    && target.layout_id.is_none()
+                    && target.master_id.as_deref() == Some(path)
+            }
+        };
+        part_matches
+            && match self.artwork_id_match {
+                ArtworkIdMatch::Exact => target.node_id == id,
+                ArtworkIdMatch::Prefixed(prefix) => {
+                    target.node_id.strip_prefix(prefix).and_then(|rest| rest.strip_prefix(':')) == Some(id)
+                }
+                ArtworkIdMatch::Any => true,
+            }
+    }
 }
 
 fn parse_shape_node(
@@ -3234,22 +3285,27 @@ fn parse_shape_node(
         rels: context.rels,
     };
     let transform = inherited_shape_transform(node, layout, master);
-    let (properties_xml, style_xml) = shape_appearance_xml(
-        &[
-            (Some(node), Some(context.rels)),
-            (layout, context.layout_rels),
-            (master, context.master_rels),
-        ],
-        &transform,
-    );
-    let rendered = paint::render_shape(
-        properties_xml,
-        style_xml,
-        transform.width as f64 * context.paint_scale.0 / 9525.0,
-        transform.height as f64 * context.paint_scale.1 / 9525.0,
-        context,
-    );
-    if rendered.is_none() && transform.width > 0 && transform.height > 0 {
+    let render = context.renders_artwork(&id);
+    let rendered = if render {
+        let (properties_xml, style_xml) = shape_appearance_xml(
+            &[
+                (Some(node), Some(context.rels)),
+                (layout, context.layout_rels),
+                (master, context.master_rels),
+            ],
+            &transform,
+        );
+        paint::render_shape(
+            properties_xml,
+            style_xml,
+            transform.width as f64 * context.paint_scale.0 / 9525.0,
+            transform.height as f64 * context.paint_scale.1 / 9525.0,
+            context,
+        )
+    } else {
+        None
+    };
+    if render && rendered.is_none() && transform.width > 0 && transform.height > 0 {
         context.diagnostics.warn("unsupported-shape-appearance", "Shape paint could not be rendered by the shared engine; structured geometry, fill, line and source XML remain available.", Some("shape"));
     }
     let (shape_svg, paint_bounds) = rendered
@@ -3874,18 +3930,28 @@ fn parse_image_node(
             },
         )
     };
-    let rendered = resolved_fill
-        .as_ref()
-        .and_then(|(fill, asset_id, _)| render_asset(*fill, asset_id));
-    let fallback_picture = resolved_fill.as_ref().and_then(|(fill, _, fallback)| {
-        render_asset(*fill, fallback.as_deref()?).map(|picture| {
-            Box::new(crate::PictureArtwork {
-                svg: picture.svg,
-                paint_bounds: picture.paint_bounds,
+    let render = context.renders_artwork(&id);
+    let rendered = if render {
+        resolved_fill
+            .as_ref()
+            .and_then(|(fill, asset_id, _)| render_asset(*fill, asset_id))
+    } else {
+        None
+    };
+    let fallback_picture = if render {
+        resolved_fill.as_ref().and_then(|(fill, _, fallback)| {
+            render_asset(*fill, fallback.as_deref()?).map(|picture| {
+                Box::new(crate::PictureArtwork {
+                    svg: picture.svg,
+                    paint_bounds: picture.paint_bounds,
+                })
             })
         })
-    });
-    if rendered.is_none()
+    } else {
+        None
+    };
+    if render
+        && rendered.is_none()
         && resolved_fill
             .as_ref()
             .is_some_and(|(fill, _, _)| picture_needs_rendering(*fill, &sources, &transform))
@@ -4566,6 +4632,7 @@ fn parse_chart_part(
     context: &NodeParseContext<'_, '_>,
     transform: &Transform,
     companions: Option<&ChartCompanionParts>,
+    render: bool,
 ) -> Result<ParsedChart, ParseError> {
     let document = parse_xml_tree(xml.to_vec(), context.limits, part_name)?;
     let root = document.root();
@@ -4659,7 +4726,11 @@ fn parse_chart_part(
         })
         .collect();
     Ok(ParsedChart {
-        svg: render_shared_chart(root, xml, transform, context, companions),
+        svg: if render {
+            render_shared_chart(root, xml, transform, context, companions)
+        } else {
+            None
+        },
         chart_type: chart_type.into(),
         title: chart_title(root),
         series,
@@ -5083,6 +5154,13 @@ fn parse_smartart_frame(
             };
             parse_xml_tree(drawing_xml.to_vec(), context.limits, drawing_path)?;
             let drawing_context = NodeParseContext {
+                artwork_target: context.artwork_target,
+                artwork_part: context.artwork_part,
+                artwork_id_match: if context.artwork_target.is_some() {
+                    ArtworkIdMatch::Any
+                } else {
+                    context.artwork_id_match
+                },
                 source_part: Some(drawing_path),
                 rels: context
                     .related_relationships
@@ -5355,10 +5433,12 @@ fn parse_graphic_frame(
         let path = relationship.and_then(|value| context.rels.get(value));
         let resolved = path.and_then(|path| context.related_parts.get(path).map(|xml| (path, xml)));
         let transform = parse_transform(node.child("xfrm"));
+        let (id, name) = node_identity(node, context.slide_index, node_index);
+        let render = context.renders_artwork(&id);
         let (chart, chart_xml, companions) = if let Some((path, xml)) = resolved {
             let companions = context.chart_companions.get(path);
             (
-                parse_chart_part(xml, path, context, &transform, companions)?,
+                parse_chart_part(xml, path, context, &transform, companions, render)?,
                 Some(String::from_utf8_lossy(xml).into_owned()),
                 companions,
             )
@@ -5380,10 +5460,9 @@ fn parse_graphic_frame(
                 None,
             )
         };
-        if chart.svg.is_none() && chart_xml.is_some() {
+        if render && chart.svg.is_none() && chart_xml.is_some() {
             context.diagnostics.warn("unsupported-chart-rendering", "The chart source and cached series are retained; shared SVG rendering is unavailable for this chart.", Some("chart"));
         }
-        let (id, name) = node_identity(node, context.slide_index, node_index);
         return Ok(SlideNode::Chart {
             metadata: Default::default(),
             id,
@@ -5495,6 +5574,10 @@ fn parse_content_part(
         .and_then(|path| context.related_parts.get(path))
         .and_then(|bytes| std::str::from_utf8(bytes).ok());
     let drawing = source.and_then(rust_office_art::parse_ink);
+    // Ink is rendered even when artwork is deferred: whether the render
+    // succeeds decides between the ink and its saved preview in
+    // markup-compatibility fallbacks. `parse_slide_node` drops a deferred
+    // preview once that choice is made.
     let rendered = drawing.as_ref().and_then(|drawing| {
         rust_office_art::render_ink_in_frame(
             drawing,
@@ -5541,6 +5624,31 @@ fn parse_slide_node(
     node_index: usize,
     context: &NodeParseContext<'_, '_>,
 ) -> Result<Option<SlideNode>, ParseError> {
+    let mut parsed = parse_slide_node_with_ink_artwork(node, node_index, context)?;
+    // `parse_content_part` always renders ink so that markup-compatibility
+    // fallbacks are chosen exactly as in an eager parse; a deferred node keeps
+    // the ink source but not the generated preview.
+    if let Some(SlideNode::Image {
+        id,
+        ink: Some(_),
+        picture_svg,
+        paint_bounds,
+        ..
+    }) = parsed.as_mut()
+    {
+        if !context.renders_artwork(id) {
+            *picture_svg = None;
+            *paint_bounds = None;
+        }
+    }
+    Ok(parsed)
+}
+
+fn parse_slide_node_with_ink_artwork(
+    node: XmlNode<'_>,
+    node_index: usize,
+    context: &NodeParseContext<'_, '_>,
+) -> Result<Option<SlideNode>, ParseError> {
     let mut parsed = match node.name() {
         "sp" | "cxnSp" => Ok(Some(parse_shape_node(node, node_index, context))),
         "pic" => Ok(Some(parse_picture_or_media(node, node_index, context))),
@@ -5560,7 +5668,9 @@ fn parse_slide_node(
             for branch_name in ["Choice", "Fallback"] {
                 for branch in node.children_named(branch_name) {
                     for child in branch.children() {
-                        let Some(mut parsed) = parse_slide_node(child, node_index, context)? else {
+                        let Some(mut parsed) =
+                            parse_slide_node_with_ink_artwork(child, node_index, context)?
+                        else {
                             continue;
                         };
                         if matches!(
@@ -6024,6 +6134,9 @@ fn parse_slide(
     {
         if let (Some(master), Some(master_rels)) = (context.master_root, context.master_rels) {
             let master_context = NodeParseContext {
+                artwork_target: context.artwork_target,
+                artwork_part: context.artwork_part,
+                artwork_id_match: ArtworkIdMatch::Prefixed("master"),
                 shape_cache: context.shape_cache,
                 editing_cache: context.editing_cache,
                 source_part: context.layout_rels.and_then(|rels| {
@@ -6058,6 +6171,9 @@ fn parse_slide(
     }
     if let (Some(layout), Some(layout_rels)) = (context.layout_root, context.layout_rels) {
         let layout_context = NodeParseContext {
+            artwork_target: context.artwork_target,
+            artwork_part: context.artwork_part,
+            artwork_id_match: ArtworkIdMatch::Prefixed("layout"),
             shape_cache: context.shape_cache,
             editing_cache: context.editing_cache,
             source_part: context
@@ -6336,13 +6452,25 @@ pub fn parse(
     limits: &ParseLimits,
     options: &ParseOptions,
 ) -> Result<PresentationDocument, ParseError> {
-    rust_office_art::with_cached_xml(|| parse_cached(bytes, limits, options))
+    parse_with_artwork_target(bytes, limits, options, None)
+}
+
+/// Parses with artwork rendered only for `target` when one is given; without a
+/// target, `options.defer_artwork` decides whether any artwork is rendered.
+pub(crate) fn parse_with_artwork_target(
+    bytes: &[u8],
+    limits: &ParseLimits,
+    options: &ParseOptions,
+    target: Option<&crate::ArtworkTarget>,
+) -> Result<PresentationDocument, ParseError> {
+    rust_office_art::with_cached_xml(|| parse_cached(bytes, limits, options, target))
 }
 
 fn parse_cached(
     bytes: &[u8],
     limits: &ParseLimits,
     options: &ParseOptions,
+    artwork_target: Option<&crate::ArtworkTarget>,
 ) -> Result<PresentationDocument, ParseError> {
     let cursor = Cursor::new(bytes);
     let mut archive =
@@ -6726,6 +6854,9 @@ fn parse_cached(
                 paint_key: paint::ColorKey::new(theme, &slide_color_map),
             };
             let context = NodeParseContext {
+                artwork_target,
+                artwork_part: ArtworkPart::Slide(index),
+                artwork_id_match: ArtworkIdMatch::Exact,
                 shape_cache: &shape_cache,
                 editing_cache: &editing_cache,
                 source_part: Some(slide_path),
@@ -6852,6 +6983,9 @@ fn parse_cached(
                 paint_key: paint::ColorKey::new(theme, &part_color_map),
             };
             let context = NodeParseContext {
+                artwork_target,
+                artwork_part: ArtworkPart::Master(&part.path),
+                artwork_id_match: ArtworkIdMatch::Exact,
                 shape_cache: &shape_cache,
                 editing_cache: &editing_cache,
                 source_part: Some(&part.path),
@@ -6945,6 +7079,9 @@ fn parse_cached(
                 paint_key: paint::ColorKey::new(theme, &part_color_map),
             };
             let context = NodeParseContext {
+                artwork_target,
+                artwork_part: ArtworkPart::Layout(&part.path),
+                artwork_id_match: ArtworkIdMatch::Exact,
                 shape_cache: &shape_cache,
                 editing_cache: &editing_cache,
                 source_part: Some(&part.path),

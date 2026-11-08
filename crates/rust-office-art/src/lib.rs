@@ -35,6 +35,10 @@ pub use math::{parse_office_math, MathAttribute, MathElement, OfficeMath};
 pub struct ParseOptions {
     #[serde(rename = "include3dModels")]
     pub include_3d_models: bool,
+    /// Omit generated shape, picture, chart and ink artwork from the model.
+    /// Structured geometry, fills, lines, text and source XML are still parsed,
+    /// and artwork can be produced later for one node at a time.
+    pub defer_artwork: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

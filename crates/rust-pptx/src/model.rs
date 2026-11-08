@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::{SlideTiming, SlideTransition};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PictureArtwork {
     pub svg: String,

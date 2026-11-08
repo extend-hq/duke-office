@@ -62,6 +62,7 @@ pub fn parse_document_blocks_with_options(
             &package,
             &ParseOptions {
                 include_3d_models: options.include_3d_models,
+                defer_artwork: false,
             },
         ),
         options,
@@ -79,6 +80,7 @@ pub fn parse_document_blocks_with_revisions(
             &package,
             &ParseOptions {
                 include_3d_models: options.include_3d_models,
+                defer_artwork: false,
             },
         ),
         options,
