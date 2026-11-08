@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.17
+
+- Depend on `rust-office-art` 0.1.6 and `rust-office-charts` 0.1.8. The shared Office Art crate adds the `defer_artwork` parse option, which rust-docx leaves off, and speeds up its XML lookups, path-number formatting and pattern tiles with unchanged output.
+
 ## 0.2.16
 
 - Accept image `data` as a base64 string or out-of-band transport token, and image `src` as a transport token, so large images no longer expand into one buffered JSON value per byte inside untagged model nodes. Number arrays remain accepted.

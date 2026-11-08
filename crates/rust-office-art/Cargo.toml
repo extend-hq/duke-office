@@ -1,6 +1,6 @@
 [package]
 name = "rust-office-art"
-version = "0.1.5"
+version = "0.1.6"
 edition.workspace = true
 license = "MIT AND Apache-2.0 AND OFL-1.1"
 repository.workspace = true

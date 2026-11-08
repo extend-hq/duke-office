@@ -1,6 +1,6 @@
 [package]
 name = "rust-pptx"
-version = "0.1.6"
+version = "0.1.7"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -13,8 +13,8 @@ categories = ["parser-implementations"]
 name = "rust_pptx"
 
 [dependencies]
-rust-office-art = { version = "=0.1.5", path = "../rust-office-art" }
-rust-office-charts = { version = "=0.1.7", path = "../rust-office-charts", default-features = false, features = ["extended-charts"] }
+rust-office-art = { version = "=0.1.6", path = "../rust-office-art" }
+rust-office-charts = { version = "=0.1.8", path = "../rust-office-charts", default-features = false, features = ["extended-charts"] }
 base64 = "0.22"
 compact_str = "=0.10.0"
 memchr = "2"
