@@ -3174,6 +3174,45 @@ enum ArtworkIdMatch {
     Any,
 }
 
+/// The assets a part can see while its nodes are parsed.
+///
+/// The parse loads assets part by part, so a slide parsed early never sees an
+/// asset a later slide or layout loads. A retained render reproduces that view
+/// through the insertion generation of each asset; the parse that fills the map
+/// has no generations and sees everything loaded so far.
+#[derive(Clone, Copy)]
+struct AssetView<'a> {
+    assets: &'a BTreeMap<String, PresentationAsset>,
+    generations: Option<(&'a HashMap<String, u32>, u32)>,
+}
+
+impl<'a> AssetView<'a> {
+    fn unfiltered(assets: &'a BTreeMap<String, PresentationAsset>) -> Self {
+        Self {
+            assets,
+            generations: None,
+        }
+    }
+
+    fn get(&self, path: &str) -> Option<&'a PresentationAsset> {
+        let asset = self.assets.get(path)?;
+        if let Some((generations, visible)) = self.generations {
+            if generations.get(path).is_none_or(|generation| *generation > visible) {
+                return None;
+            }
+        }
+        Some(asset)
+    }
+
+    fn contains_key(&self, path: &str) -> bool {
+        self.get(path).is_some()
+    }
+
+    fn len(&self) -> usize {
+        self.assets.len()
+    }
+}
+
 #[derive(Clone, Copy)]
 struct NodeParseContext<'a, 'color> {
     artwork_target: Option<&'a crate::ArtworkTarget>,
@@ -3188,7 +3227,7 @@ struct NodeParseContext<'a, 'color> {
     rels: &'a Relationships,
     related_parts: &'a HashMap<String, Vec<u8>>,
     related_relationships: &'a HashMap<String, Relationships>,
-    assets: &'a BTreeMap<String, PresentationAsset>,
+    assets: AssetView<'a>,
     chart_companions: &'a HashMap<String, ChartCompanionParts>,
     legacy_chart_defaults: bool,
     limits: &'a ParseLimits,
@@ -3442,7 +3481,11 @@ fn load_picture_assets(
     limits: &ParseLimits,
     options: &ParseOptions,
     content_types: XmlNode<'_>,
+    mut generations: Option<&mut AssetGenerations>,
 ) -> Result<(), ParseError> {
+    if let Some(generations) = generations.as_deref_mut() {
+        generations.advance();
+    }
     for path in paths
         .keys()
         .filter(|path| !assets.contains_key(*path))
@@ -3456,6 +3499,9 @@ fn load_picture_assets(
             continue;
         }
         if let Some(data) = read_entry(archive, &path, limits)? {
+            if let Some(generations) = generations.as_deref_mut() {
+                generations.record(&path);
+            }
             assets.insert(
                 path.clone(),
                 PresentationAsset {
@@ -3474,7 +3520,7 @@ fn load_picture_assets(
 struct OfficeArtColors<'a, 'b> {
     colors: Option<&'a ColorContext<'b>>,
     limits: &'a ParseLimits,
-    assets: &'a BTreeMap<String, PresentationAsset>,
+    assets: AssetView<'a>,
     relationships: &'a Relationships,
 }
 
@@ -6209,7 +6255,7 @@ fn parse_slide(
     let (transition, timing) = timing::parse(
         root,
         context.rels,
-        context.assets,
+        context.assets.assets,
         context.colors,
         context.limits,
     )?;
@@ -6463,7 +6509,30 @@ pub(crate) fn parse_with_artwork_target(
     options: &ParseOptions,
     target: Option<&crate::ArtworkTarget>,
 ) -> Result<PresentationDocument, ParseError> {
-    rust_office_art::with_cached_xml(|| parse_cached(bytes, limits, options, target))
+    rust_office_art::with_cached_xml(|| {
+        parse_cached(bytes, limits, options, target, false).map(|(document, _)| document)
+    })
+}
+
+/// Parses with artwork deferred and keeps the inflated parts, their XML trees,
+/// relationships, themes, color maps and related parts, so that nodes can be
+/// rendered on demand without reading the archive again.
+pub(crate) fn parse_retained(
+    bytes: &[u8],
+    limits: &ParseLimits,
+    options: &ParseOptions,
+) -> Result<(PresentationDocument, RetainedParse), ParseError> {
+    let options = ParseOptions {
+        defer_artwork: true,
+        ..*options
+    };
+    rust_office_art::with_cached_xml(|| {
+        let (document, retained) = parse_cached(bytes, limits, &options, None, true)?;
+        Ok((
+            document,
+            retained.expect("a retaining parse keeps its state"),
+        ))
+    })
 }
 
 fn parse_cached(
@@ -6471,7 +6540,8 @@ fn parse_cached(
     limits: &ParseLimits,
     options: &ParseOptions,
     artwork_target: Option<&crate::ArtworkTarget>,
-) -> Result<PresentationDocument, ParseError> {
+    retain: bool,
+) -> Result<(PresentationDocument, Option<RetainedParse>), ParseError> {
     let cursor = Cursor::new(bytes);
     let mut archive =
         ZipArchive::new(cursor).map_err(|error| ParseError::Corrupt(format!("ZIP: {error}")))?;
@@ -6560,6 +6630,10 @@ fn parse_cached(
     let mut document_warnings = Vec::new();
     let shape_cache = RefCell::new(paint::ShapeCache::default());
     let editing_cache = RefCell::new(editing::Cache::default());
+    let mut generations = retain.then(AssetGenerations::default);
+    let mut retained_slides = Vec::new();
+    let mut retained_layouts = BTreeMap::new();
+    let mut retained_master_views = BTreeMap::new();
     for (index, slide_path) in slide_paths.iter().enumerate() {
         let xml = read_entry(&mut archive, slide_path, limits)?
             .ok_or_else(|| ParseError::Corrupt(format!("missing {slide_path}")))?;
@@ -6770,6 +6844,7 @@ fn parse_cached(
             limits,
             options,
             content_types.root(),
+            generations.as_mut(),
         )?;
         let notes = if let Some(target) = slide_rels.related("notesSlide", "ppt/notesSlides/") {
             let notes_rels =
@@ -6865,7 +6940,7 @@ fn parse_cached(
                 rels: &slide_rels,
                 related_parts: &related_parts,
                 related_relationships: &related_relationships,
-                assets: &assets,
+                assets: AssetView::unfiltered(&assets),
                 chart_companions: &chart_companions,
                 legacy_chart_defaults,
                 options,
@@ -6882,6 +6957,7 @@ fn parse_cached(
             parse_slide(slide_root, &context)?
         };
         let slide_warnings = diagnostics.take();
+        let retained_paths = retain.then(|| (layout_path.clone(), master_path.clone()));
         slides.push(PresentationSlide {
             id: format!("slide-{}", index + 1),
             index,
@@ -6898,6 +6974,23 @@ fn parse_cached(
             source_part: Some(slide_path.clone()),
             warnings: slide_warnings,
         });
+        if let Some((layout_path, master_path)) = retained_paths {
+            retained_slides.push(RetainedSlide {
+                path: slide_path.clone(),
+                document: slide_document,
+                rels: slide_rels,
+                layout_path,
+                master_path,
+                theme_path,
+                color_map: slide_color_map,
+                related_parts,
+                related_relationships,
+                chart_companions,
+                generation: generations
+                    .as_ref()
+                    .map_or(0, |generations| generations.current),
+            });
+        }
     }
 
     let mut declared_master_paths = rels
@@ -6965,6 +7058,7 @@ fn parse_cached(
         limits,
         options,
         content_types.root(),
+        generations.as_mut(),
     )?;
     let empty_related_parts = HashMap::new();
     let empty_related_relationships = HashMap::new();
@@ -6994,7 +7088,7 @@ fn parse_cached(
                 rels: &part.rels,
                 related_parts: &empty_related_parts,
                 related_relationships: &empty_related_relationships,
-                assets: &assets,
+                assets: AssetView::unfiltered(&assets),
                 chart_companions: &empty_chart_companions,
                 legacy_chart_defaults,
                 options,
@@ -7014,6 +7108,15 @@ fn parse_cached(
             (nodes, transition, timing)
         };
         document_warnings.extend(diagnostics.take());
+        if retain {
+            retained_master_views.insert(
+                part.path.clone(),
+                (
+                    part_color_map,
+                    generations.as_ref().map_or(0, |generations| generations.current),
+                ),
+            );
+        }
         masters.push(crate::SlideMaster {
             id: part.path.clone(),
             name: part
@@ -7052,6 +7155,7 @@ fn parse_cached(
                 limits,
                 options,
                 content_types.root(),
+                generations.as_mut(),
             )?;
             part
         } else {
@@ -7090,7 +7194,7 @@ fn parse_cached(
                 rels: &part.rels,
                 related_parts: &empty_related_parts,
                 related_relationships: &empty_related_relationships,
-                assets: &assets,
+                assets: AssetView::unfiltered(&assets),
                 chart_companions: &empty_chart_companions,
                 legacy_chart_defaults,
                 options,
@@ -7123,6 +7227,16 @@ fn parse_cached(
             timing,
             nodes,
         });
+        if retain {
+            retained_layouts.insert(
+                part.path.clone(),
+                RetainedPart {
+                    color_map: part_color_map,
+                    generation: generations.as_ref().map_or(0, |generations| generations.current),
+                    part,
+                },
+            );
+        }
     }
     document_warnings.splice(
         layout_warning_offset..layout_warning_offset,
@@ -7185,7 +7299,7 @@ fn parse_cached(
     let metadata =
         read_entry(&mut archive, core_path, limits)?.map(|xml| parse_core_metadata(&xml));
     document_warnings.extend(font_warnings);
-    Ok(PresentationDocument {
+    let document = PresentationDocument {
         format: PresentationFormat::Pptx,
         size,
         slides,
@@ -7199,7 +7313,411 @@ fn parse_cached(
         embedded_fonts,
         warnings: document_warnings,
         metadata,
-    })
+    };
+    let retained = if retain {
+        Some(RetainedParse {
+            limits: limits.clone(),
+            options: *options,
+            legacy_chart_defaults,
+            presentation: presentation_document,
+            table_styles: table_styles_root,
+            themes: theme_parts,
+            masters: master_parts
+                .into_iter()
+                .map(|(path, part)| {
+                    let (color_map, generation) =
+                        retained_master_views.remove(&path).unwrap_or_default();
+                    (
+                        path,
+                        RetainedPart {
+                            part,
+                            color_map,
+                            generation,
+                        },
+                    )
+                })
+                .collect(),
+            layouts: retained_layouts,
+            slides: retained_slides,
+            asset_generations: generations
+                .map(|generations| generations.by_path)
+                .unwrap_or_default(),
+            shape_cache,
+            editing_cache,
+        })
+    } else {
+        None
+    };
+    Ok((document, retained))
+}
+
+/// Insertion order of the assets, so that a retained render sees exactly the
+/// assets the parse had loaded when it parsed the same part.
+#[derive(Default)]
+struct AssetGenerations {
+    by_path: HashMap<String, u32>,
+    current: u32,
+}
+
+impl AssetGenerations {
+    fn advance(&mut self) {
+        self.current += 1;
+    }
+
+    fn record(&mut self, path: &str) {
+        self.by_path.insert(path.to_owned(), self.current);
+    }
+}
+
+/// A layout or master kept for on-demand rendering, with the color map and
+/// asset generation its nodes were parsed with.
+struct RetainedPart {
+    part: ParsedXmlPart,
+    color_map: BTreeMap<String, String>,
+    generation: u32,
+}
+
+/// A slide kept for on-demand rendering: its XML tree, relationships, merged
+/// color map, related chart, diagram, ink and control parts, and the asset
+/// generation its nodes were parsed with.
+struct RetainedSlide {
+    path: String,
+    document: XmlDocument,
+    rels: Relationships,
+    layout_path: Option<String>,
+    master_path: Option<String>,
+    theme_path: Option<String>,
+    color_map: BTreeMap<String, String>,
+    related_parts: HashMap<String, Vec<u8>>,
+    related_relationships: HashMap<String, Relationships>,
+    chart_companions: HashMap<String, ChartCompanionParts>,
+    generation: u32,
+}
+
+/// What a node render needs after a deferred parse, without the archive: the
+/// inflated parts and their XML trees, relationships, themes, color maps,
+/// related parts and the caches shared by renders.
+pub(crate) struct RetainedParse {
+    limits: ParseLimits,
+    options: ParseOptions,
+    legacy_chart_defaults: bool,
+    presentation: XmlDocument,
+    table_styles: Option<XmlDocument>,
+    themes: BTreeMap<String, ThemeDataInternal>,
+    masters: BTreeMap<String, RetainedPart>,
+    layouts: BTreeMap<String, RetainedPart>,
+    slides: Vec<RetainedSlide>,
+    asset_generations: HashMap<String, u32>,
+    shape_cache: RefCell<paint::ShapeCache>,
+    editing_cache: RefCell<editing::Cache>,
+}
+
+impl RetainedParse {
+    /// Renders one node's artwork from the retained state. `assets` is the
+    /// document's asset map, which the retained parse filled; each part sees
+    /// only the assets that were loaded when it was parsed.
+    pub(crate) fn render_node_artwork(
+        &self,
+        assets: &BTreeMap<String, PresentationAsset>,
+        target: &crate::ArtworkTarget,
+    ) -> Result<Option<crate::NodeArtwork>, ParseError> {
+        rust_office_art::with_cached_xml(|| {
+            if let Some(index) = target.slide_index {
+                self.render_slide_node(assets, index, target)
+            } else if let Some(path) = &target.layout_id {
+                self.render_layout_node(assets, path, target)
+            } else if let Some(path) = &target.master_id {
+                self.render_master_node(assets, path, target)
+            } else {
+                Ok(None)
+            }
+        })
+    }
+
+    fn asset_view<'a>(
+        &'a self,
+        assets: &'a BTreeMap<String, PresentationAsset>,
+        generation: u32,
+    ) -> AssetView<'a> {
+        AssetView {
+            assets,
+            generations: Some((&self.asset_generations, generation)),
+        }
+    }
+
+    fn render_slide_node(
+        &self,
+        assets: &BTreeMap<String, PresentationAsset>,
+        index: usize,
+        target: &crate::ArtworkTarget,
+    ) -> Result<Option<crate::NodeArtwork>, ParseError> {
+        let Some(slide) = self.slides.get(index) else {
+            return Ok(None);
+        };
+        let layout = slide
+            .layout_path
+            .as_ref()
+            .and_then(|path| self.layouts.get(path));
+        let master = slide
+            .master_path
+            .as_ref()
+            .and_then(|path| self.masters.get(path));
+        let theme = slide
+            .theme_path
+            .as_ref()
+            .and_then(|path| self.themes.get(path));
+        let diagnostics = ParseDiagnostics::new(Some(index), &slide.path);
+        let colors = ColorContext {
+            theme,
+            color_map: &slide.color_map,
+            diagnostics: &diagnostics,
+            paint_key: paint::ColorKey::new(theme, &slide.color_map),
+        };
+        let context = NodeParseContext {
+            artwork_target: Some(target),
+            artwork_part: ArtworkPart::Slide(index),
+            artwork_id_match: ArtworkIdMatch::Exact,
+            shape_cache: &self.shape_cache,
+            editing_cache: &self.editing_cache,
+            source_part: Some(&slide.path),
+            slide_index: index,
+            paint_scale: (1.0, 1.0),
+            rels: &slide.rels,
+            related_parts: &slide.related_parts,
+            related_relationships: &slide.related_relationships,
+            assets: self.asset_view(assets, slide.generation),
+            chart_companions: &slide.chart_companions,
+            legacy_chart_defaults: self.legacy_chart_defaults,
+            options: &self.options,
+            limits: &self.limits,
+            colors: Some(&colors),
+            diagnostics: &diagnostics,
+            layout_root: layout.map(|layout| layout.part.document.root()),
+            master_root: master.map(|master| master.part.document.root()),
+            layout_rels: layout.map(|layout| &layout.part.rels),
+            master_rels: master.map(|master| &master.part.rels),
+            presentation_text_style: self.presentation.root().child("defaultTextStyle"),
+            table_styles: self.table_styles.as_ref().map(XmlDocument::root),
+        };
+        render_slide_target(slide.document.root(), &context, &target.node_id)
+    }
+
+    fn render_master_node(
+        &self,
+        assets: &BTreeMap<String, PresentationAsset>,
+        path: &str,
+        target: &crate::ArtworkTarget,
+    ) -> Result<Option<crate::NodeArtwork>, ParseError> {
+        let Some(master) = self.masters.get(path) else {
+            return Ok(None);
+        };
+        let theme = related_path(&master.part.rels, "theme", "ppt/theme/")
+            .and_then(|path| self.themes.get(&path));
+        let empty_related_parts = HashMap::new();
+        let empty_related_relationships = HashMap::new();
+        let empty_chart_companions = HashMap::new();
+        let diagnostics = ParseDiagnostics::new(None, &master.part.path);
+        let colors = ColorContext {
+            theme,
+            color_map: &master.color_map,
+            diagnostics: &diagnostics,
+            paint_key: paint::ColorKey::new(theme, &master.color_map),
+        };
+        let context = NodeParseContext {
+            artwork_target: Some(target),
+            artwork_part: ArtworkPart::Master(&master.part.path),
+            artwork_id_match: ArtworkIdMatch::Exact,
+            shape_cache: &self.shape_cache,
+            editing_cache: &self.editing_cache,
+            source_part: Some(&master.part.path),
+            slide_index: 0,
+            paint_scale: (1.0, 1.0),
+            rels: &master.part.rels,
+            related_parts: &empty_related_parts,
+            related_relationships: &empty_related_relationships,
+            assets: self.asset_view(assets, master.generation),
+            chart_companions: &empty_chart_companions,
+            legacy_chart_defaults: self.legacy_chart_defaults,
+            options: &self.options,
+            limits: &self.limits,
+            colors: Some(&colors),
+            diagnostics: &diagnostics,
+            layout_root: None,
+            master_root: None,
+            layout_rels: None,
+            master_rels: None,
+            presentation_text_style: self.presentation.root().child("defaultTextStyle"),
+            table_styles: self.table_styles.as_ref().map(XmlDocument::root),
+        };
+        let nodes =
+            parse_matching_part_nodes(master.part.document.root(), &context, &target.node_id, false)?;
+        Ok(crate::find_node(&nodes, &target.node_id).and_then(crate::node_artwork))
+    }
+
+    fn render_layout_node(
+        &self,
+        assets: &BTreeMap<String, PresentationAsset>,
+        path: &str,
+        target: &crate::ArtworkTarget,
+    ) -> Result<Option<crate::NodeArtwork>, ParseError> {
+        let Some(layout) = self.layouts.get(path) else {
+            return Ok(None);
+        };
+        let master = related_path(&layout.part.rels, "slideMaster", "ppt/slideMasters/")
+            .and_then(|path| self.masters.get(&path));
+        let theme = master
+            .and_then(|master| related_path(&master.part.rels, "theme", "ppt/theme/"))
+            .and_then(|path| self.themes.get(&path));
+        let empty_related_parts = HashMap::new();
+        let empty_related_relationships = HashMap::new();
+        let empty_chart_companions = HashMap::new();
+        let diagnostics = ParseDiagnostics::new(None, &layout.part.path);
+        let colors = ColorContext {
+            theme,
+            color_map: &layout.color_map,
+            diagnostics: &diagnostics,
+            paint_key: paint::ColorKey::new(theme, &layout.color_map),
+        };
+        let context = NodeParseContext {
+            artwork_target: Some(target),
+            artwork_part: ArtworkPart::Layout(&layout.part.path),
+            artwork_id_match: ArtworkIdMatch::Exact,
+            shape_cache: &self.shape_cache,
+            editing_cache: &self.editing_cache,
+            source_part: Some(&layout.part.path),
+            slide_index: 0,
+            paint_scale: (1.0, 1.0),
+            rels: &layout.part.rels,
+            related_parts: &empty_related_parts,
+            related_relationships: &empty_related_relationships,
+            assets: self.asset_view(assets, layout.generation),
+            chart_companions: &empty_chart_companions,
+            legacy_chart_defaults: self.legacy_chart_defaults,
+            options: &self.options,
+            limits: &self.limits,
+            colors: Some(&colors),
+            diagnostics: &diagnostics,
+            layout_root: None,
+            master_root: master.map(|master| master.part.document.root()),
+            layout_rels: None,
+            master_rels: master.map(|master| &master.part.rels),
+            presentation_text_style: self.presentation.root().child("defaultTextStyle"),
+            table_styles: self.table_styles.as_ref().map(XmlDocument::root),
+        };
+        let nodes =
+            parse_matching_part_nodes(layout.part.document.root(), &context, &target.node_id, false)?;
+        Ok(crate::find_node(&nodes, &target.node_id).and_then(crate::node_artwork))
+    }
+}
+
+/// Renders `node_id` on a slide the way `parse_slide` would have stored it:
+/// inherited master nodes come first when the master shapes are shown, then the
+/// layout's, then the slide's own, and the first node with that id wins. Only
+/// the node lists that can hold the id are parsed, without their prefixes, and
+/// background, timing and transition are not needed.
+fn render_slide_target(
+    root: XmlNode<'_>,
+    context: &NodeParseContext<'_, '_>,
+    node_id: &str,
+) -> Result<Option<crate::NodeArtwork>, ParseError> {
+    if let Some(id) = node_id.strip_prefix("master:") {
+        if master_shapes_are_visible(root)
+            && context
+                .layout_root
+                .map(master_shapes_are_visible)
+                .unwrap_or(true)
+        {
+            if let (Some(master), Some(master_rels)) = (context.master_root, context.master_rels) {
+                let master_context = NodeParseContext {
+                    artwork_id_match: ArtworkIdMatch::Prefixed("master"),
+                    source_part: context.layout_rels.and_then(|rels| {
+                        rels.related("slideMaster", "ppt/slideMasters/")
+                            .map(String::as_str)
+                    }),
+                    rels: master_rels,
+                    layout_root: None,
+                    master_root: None,
+                    layout_rels: None,
+                    master_rels: None,
+                    ..*context
+                };
+                let nodes = parse_matching_part_nodes(master, &master_context, id, true)?;
+                if let Some(node) = crate::find_node(&nodes, id) {
+                    return Ok(crate::node_artwork(node));
+                }
+            }
+        }
+    }
+    if let Some(id) = node_id.strip_prefix("layout:") {
+        if let (Some(layout), Some(layout_rels)) = (context.layout_root, context.layout_rels) {
+            let layout_context = NodeParseContext {
+                artwork_id_match: ArtworkIdMatch::Prefixed("layout"),
+                source_part: context
+                    .rels
+                    .related("slideLayout", "ppt/slideLayouts/")
+                    .map(String::as_str),
+                rels: layout_rels,
+                layout_root: None,
+                master_root: None,
+                layout_rels: None,
+                master_rels: None,
+                ..*context
+            };
+            let nodes = parse_matching_part_nodes(layout, &layout_context, id, true)?;
+            if let Some(node) = crate::find_node(&nodes, id) {
+                return Ok(crate::node_artwork(node));
+            }
+        }
+    }
+    let nodes = parse_matching_part_nodes(root, context, node_id, false)?;
+    Ok(crate::find_node(&nodes, node_id).and_then(crate::node_artwork))
+}
+
+/// The shape-tree nodes of a part that can carry `target_id`, parsed as
+/// `parse_part_nodes` or `parse_decorative_part_nodes` would parse them. Nodes
+/// that cannot carry the id are skipped, as are the controls appended after the
+/// shape tree, which never carry artwork.
+fn parse_matching_part_nodes(
+    root: XmlNode<'_>,
+    context: &NodeParseContext<'_, '_>,
+    target_id: &str,
+    decorative: bool,
+) -> Result<Vec<SlideNode>, ParseError> {
+    let mut nodes = Vec::new();
+    let Some(shape_tree) = shape_tree(root) else {
+        return Ok(nodes);
+    };
+    for (node_index, node) in shape_tree.children().iter().enumerate() {
+        if decorative && placeholder_key(node).is_some() {
+            continue;
+        }
+        if !node_can_carry(node, node_index, context.slide_index, target_id) {
+            continue;
+        }
+        if let Some(node) = parse_slide_node(node, node_index, context)? {
+            nodes.push(node);
+        }
+    }
+    Ok(nodes)
+}
+
+/// Whether a shape-tree node or one of its descendants can have `target_id`.
+/// Groups and markup-compatibility wrappers are parsed to find out; every
+/// other node takes its id from its non-visual properties or its position, and
+/// materialized SmartArt children extend their frame's id with `:smartart:`.
+fn node_can_carry(node: XmlNode<'_>, node_index: usize, slide_index: usize, target_id: &str) -> bool {
+    match node.name() {
+        "grpSp" | "AlternateContent" => true,
+        "sp" | "cxnSp" | "pic" | "contentPart" | "model3d" | "graphicFrame" => {
+            let (id, _) = node_identity(node, slide_index, node_index);
+            id == target_id
+                || (node.name() == "graphicFrame"
+                    && target_id
+                        .strip_prefix(id.as_str())
+                        .is_some_and(|rest| rest.starts_with(":smartart:")))
+        }
+        _ => false,
+    }
 }
 
 #[cfg(test)]

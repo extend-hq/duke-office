@@ -45,6 +45,56 @@ pub fn render_presentation_node_artwork(
         .map_err(|error| JsValue::from_str(&error.to_string()))
 }
 
+fn to_js(value: &impl Serialize) -> Result<JsValue, JsValue> {
+    value
+        .serialize(&Serializer::new().serialize_maps_as_objects(true))
+        .map_err(|error| JsValue::from_str(&error.to_string()))
+}
+
+/// A presentation parsed once with `deferArtwork` and kept for rendering many
+/// nodes on demand without parsing the file again.
+///
+/// `new ParsedPresentation(bytes, options)` parses the presentation; `document()`
+/// returns the deferred model, and `render_node_artwork(target)` renders one node
+/// from the retained parts with the same result as `render_presentation_node_artwork`.
+/// The handle holds the inflated parts and their XML trees in WebAssembly memory
+/// until `free()` is called.
+#[wasm_bindgen]
+pub struct ParsedPresentation {
+    inner: rust_pptx::ParsedPresentation,
+}
+
+#[wasm_bindgen]
+impl ParsedPresentation {
+    #[wasm_bindgen(constructor)]
+    pub fn new(bytes: &[u8], options: Option<JsValue>) -> Result<ParsedPresentation, JsValue> {
+        let options = parse_options(options)?;
+        let inner =
+            rust_pptx::parse_presentation_retained(bytes, &ParseLimits::default(), &options)
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        Ok(Self { inner })
+    }
+
+    /// The deferred model, as `parse_presentation(bytes, { ...options, deferArtwork: true })`
+    /// returns it.
+    pub fn document(&self) -> Result<JsValue, JsValue> {
+        to_js(self.inner.document())
+    }
+
+    /// Renders one node's `{ svg, paintBounds?, fallbackPicture? }`, or `undefined`
+    /// when the node has none or does not exist. `target` is
+    /// `{ slideIndex | layoutId | masterId, nodeId }`.
+    pub fn render_node_artwork(&self, target: JsValue) -> Result<JsValue, JsValue> {
+        let target: rust_pptx::ArtworkTarget = serde_wasm_bindgen::from_value(target)
+            .map_err(|error| JsValue::from_str(&format!("Invalid artwork target: {error}")))?;
+        let artwork = self
+            .inner
+            .render_node_artwork(&target)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        to_js(&artwork)
+    }
+}
+
 #[wasm_bindgen]
 pub fn parse_presentation(bytes: &[u8], options: Option<JsValue>) -> Result<JsValue, JsValue> {
     let options = parse_options(options)?;

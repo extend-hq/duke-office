@@ -68,9 +68,9 @@ fn take_editing(v: &mut Value, path: &str, nodes: &mut Vec<Value>) {
     }
 }
 
-/// Collects the first `limit` nodes with eager artwork (first occurrence of each id
-/// per node list, in model order) and compares on-demand renders with them.
-fn artwork_check(bytes: &[u8], limit: usize) -> Result<Value, String> {
+/// The first `limit` nodes with eager artwork (first occurrence of each id per
+/// node list, in model order) with that artwork, and the eager document.
+fn artwork_targets(bytes: &[u8], limit: usize) -> Result<(rust_pptx::PresentationDocument, Vec<(rust_pptx::ArtworkTarget, rust_pptx::NodeArtwork)>), String> {
     use rust_pptx::{ArtworkTarget, NodeArtwork, SlideNode};
     use std::collections::HashSet;
     fn artwork(node: &SlideNode) -> Option<NodeArtwork> {
@@ -110,13 +110,69 @@ fn artwork_check(bytes: &[u8], limit: usize) -> Result<Value, String> {
         let mut seen = HashSet::new();
         collect(&master.nodes, &mut seen, &|node_id| ArtworkTarget { master_id: Some(master.id.clone()), node_id, ..Default::default() }, &mut targets, limit);
     }
-    let mut matched = 0;
+    Ok((document, targets))
+}
+
+/// Compares on-demand renders of the first `limit` eager artwork nodes with the
+/// eager artwork, both through `render_node_artwork` (one parse per render) and
+/// through a retained `ParsedPresentation`, whose model must equal the deferred parse.
+fn artwork_check(bytes: &[u8], limit: usize) -> Result<Value, String> {
+    let limits = rust_pptx::ParseLimits::default();
+    let options = rust_pptx::ParseOptions::default();
+    let (_, targets) = artwork_targets(bytes, limit)?;
+    let deferred = rust_pptx::parse_presentation_with_options(bytes, &limits, &rust_pptx::ParseOptions { defer_artwork: true, ..options }).map_err(|e| e.to_string())?;
+    let retained = rust_pptx::parse_presentation_retained(bytes, &limits, &options).map_err(|e| e.to_string())?;
+    let retained_document_equal = serde_json::to_vec(retained.document()).map_err(|e| e.to_string())? == serde_json::to_vec(&deferred).map_err(|e| e.to_string())?;
+    drop(deferred);
+    let (mut matched, mut reparse_matched, mut retained_matched) = (0, 0, 0);
     let mut mismatches = Vec::new();
     for (target, expected) in &targets {
-        let actual = rust_pptx::render_node_artwork(bytes, &limits, &options, target).map_err(|e| e.to_string())?;
-        if actual.as_ref() == Some(expected) { matched += 1; } else { mismatches.push(json!({"target": target, "expected_bytes": expected.svg.len(), "actual_bytes": actual.map(|a| a.svg.len())})); }
+        let reparsed = rust_pptx::render_node_artwork(bytes, &limits, &options, target).map_err(|e| e.to_string())?;
+        let through_handle = retained.render_node_artwork(target).map_err(|e| e.to_string())?;
+        let reparse_ok = reparsed.as_ref() == Some(expected);
+        let retained_ok = through_handle.as_ref() == Some(expected);
+        reparse_matched += usize::from(reparse_ok);
+        retained_matched += usize::from(retained_ok);
+        if reparse_ok && retained_ok { matched += 1; } else { mismatches.push(json!({"target": target, "expected_bytes": expected.svg.len(), "reparse_bytes": reparsed.map(|a| a.svg.len()), "retained_bytes": through_handle.map(|a| a.svg.len())})); }
     }
-    Ok(json!({"status": "ok", "checked": targets.len(), "matched": matched, "mismatches": mismatches}))
+    Ok(json!({"status": "ok", "checked": targets.len(), "matched": matched, "reparse_matched": reparse_matched, "retained_matched": retained_matched, "retained_document_equal": retained_document_equal, "mismatches": mismatches}))
+}
+
+/// Times, interleaved within this process, `targets.len()` on-demand renders
+/// through `render_node_artwork` against one `parse_presentation_retained` plus the
+/// same renders through the handle. Each sample is one complete pass; the order
+/// of the two methods alternates between samples.
+fn render_timing(bytes: &[u8], limit: usize, samples: usize) -> Result<Value, String> {
+    let limits = rust_pptx::ParseLimits::default();
+    let options = rust_pptx::ParseOptions::default();
+    let (document, targets) = artwork_targets(bytes, limit)?;
+    let slides = document.slides.len();
+    drop(document);
+    let (mut reparse_ms, mut retained_ms, mut handle_ms, mut handle_render_ms) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+    for sample in 0..samples {
+        for method in if sample % 2 == 0 { [0, 1] } else { [1, 0] } {
+            if method == 0 {
+                let start = Instant::now();
+                for (target, _) in &targets {
+                    black_box(rust_pptx::render_node_artwork(bytes, &limits, &options, target).map_err(|e| e.to_string())?);
+                }
+                reparse_ms.push(start.elapsed().as_secs_f64() * 1000.);
+            } else {
+                let start = Instant::now();
+                let handle = rust_pptx::parse_presentation_retained(bytes, &limits, &options).map_err(|e| e.to_string())?;
+                let created = start.elapsed().as_secs_f64() * 1000.;
+                for (target, _) in &targets {
+                    black_box(handle.render_node_artwork(target).map_err(|e| e.to_string())?);
+                }
+                let total = start.elapsed().as_secs_f64() * 1000.;
+                drop(handle);
+                handle_ms.push(created);
+                handle_render_ms.push(total - created);
+                retained_ms.push(total);
+            }
+        }
+    }
+    Ok(json!({"status": "ok", "targets": targets.len(), "slides": slides, "samples": samples, "reparse_ms": reparse_ms, "retained_ms": retained_ms, "handle_ms": handle_ms, "handle_render_ms": handle_render_ms}))
 }
 
 fn run(args: &[String]) -> Result<Value,String> {
@@ -124,6 +180,10 @@ fn run(args: &[String]) -> Result<Value,String> {
     let legacy=bytes.starts_with(b"\xd0\xcf\x11\xe0");
     let repeats:usize=args[4].parse().unwrap();
     if args[1]=="rust-pptx-artwork-check" { return artwork_check(&bytes, if repeats==0 {6} else {repeats}); }
+    if args[1]=="rust-pptx-render-timing" {
+        let limit=args.get(5).and_then(|value| value.parse().ok()).unwrap_or(12);
+        return render_timing(&bytes, limit, if repeats==0 {7} else {repeats});
+    }
     let start=Instant::now();
     let first=parse(&args[1],&bytes,legacy)?;
     let cold_ms=start.elapsed().as_secs_f64()*1000.;

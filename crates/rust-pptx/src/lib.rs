@@ -156,7 +156,75 @@ pub fn render_node_artwork(
     Ok(find_node(nodes, &target.node_id).and_then(node_artwork))
 }
 
-fn find_node<'a>(nodes: &'a [SlideNode], id: &str) -> Option<&'a SlideNode> {
+/// A presentation parsed once with artwork deferred, kept for rendering many
+/// nodes on demand.
+///
+/// Besides the deferred model, the handle retains the inflated slide, layout,
+/// master and theme parts with their XML trees, relationships, color maps and
+/// related chart, diagram, ink and control parts, so a render never reads the
+/// archive again. Each render parses only the node list that can hold the
+/// target and renders the one node; the result equals the eager parse's
+/// artwork for that node and what [`render_node_artwork`] returns. The handle
+/// is larger than the model alone and is not `Sync`; drop it when the viewer
+/// closes the presentation.
+pub struct ParsedPresentation {
+    document: PresentationDocument,
+    retained: Option<pptx::RetainedParse>,
+}
+
+impl ParsedPresentation {
+    /// The model, as `parse_presentation_with_options` returns it with
+    /// `defer_artwork` set.
+    pub fn document(&self) -> &PresentationDocument {
+        &self.document
+    }
+
+    /// Gives up the retained state and keeps the model.
+    pub fn into_document(self) -> PresentationDocument {
+        self.document
+    }
+
+    /// Renders the artwork of one node from the retained state, or `None` when
+    /// the node has none or does not exist. Legacy binary presentations have no
+    /// generated artwork and always yield `None`.
+    pub fn render_node_artwork(
+        &self,
+        target: &ArtworkTarget,
+    ) -> Result<Option<NodeArtwork>, ParseError> {
+        match &self.retained {
+            Some(retained) => retained.render_node_artwork(&self.document.assets, target),
+            None => Ok(None),
+        }
+    }
+}
+
+/// Parses a presentation with artwork deferred and keeps what later renders
+/// need. `options.defer_artwork` is treated as set; the other options apply as
+/// in [`parse_presentation_with_options`].
+pub fn parse_presentation_retained(
+    bytes: &[u8],
+    limits: &ParseLimits,
+    options: &ParseOptions,
+) -> Result<ParsedPresentation, ParseError> {
+    if bytes.len() > limits.max_input_bytes {
+        return Err(ParseError::InputLimit(limits.max_input_bytes));
+    }
+    match detect_format(bytes)? {
+        PresentationFormat::Pptx => {
+            let (document, retained) = pptx::parse_retained(bytes, limits, options)?;
+            Ok(ParsedPresentation {
+                document,
+                retained: Some(retained),
+            })
+        }
+        PresentationFormat::Ppt => Ok(ParsedPresentation {
+            document: legacy::parse(bytes, limits)?,
+            retained: None,
+        }),
+    }
+}
+
+pub(crate) fn find_node<'a>(nodes: &'a [SlideNode], id: &str) -> Option<&'a SlideNode> {
     for node in nodes {
         let node_id = match node {
             SlideNode::Shape { id, .. }
@@ -179,7 +247,7 @@ fn find_node<'a>(nodes: &'a [SlideNode], id: &str) -> Option<&'a SlideNode> {
     None
 }
 
-fn node_artwork(node: &SlideNode) -> Option<NodeArtwork> {
+pub(crate) fn node_artwork(node: &SlideNode) -> Option<NodeArtwork> {
     match node {
         SlideNode::Shape {
             shape_svg: Some(svg),

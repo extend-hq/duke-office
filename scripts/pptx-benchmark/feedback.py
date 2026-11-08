@@ -12,8 +12,8 @@ import time
 ROOT=Path(__file__).resolve().parents[2]
 OUT=ROOT/'output/pptx-benchmark-20261106'
 
-def invoke(binary,engine,row,output,repeats):
-    result=subprocess.run([str(binary),engine,row['path'],str(output),str(repeats)],capture_output=True,text=True,timeout=120)
+def invoke(binary,engine,row,output,repeats,*extra):
+    result=subprocess.run([str(binary),engine,row['path'],str(output),str(repeats),*map(str,extra)],capture_output=True,text=True,timeout=120)
     if not result.stdout.strip():return dict(status='process_error',error=result.stderr[-2000:])
     return json.loads(result.stdout.splitlines()[-1])
 
