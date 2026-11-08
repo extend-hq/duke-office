@@ -2,16 +2,16 @@
 
 Run from the repository root. Generated inputs, native output, digests, profiles and reports stay under `output/pptx-benchmark-20261106/`. Source fixtures are fetched at pinned public repository commits; packages are content-hash deduplicated. The corpus is a regression suite, not a production prevalence sample.
 
-The current retained native candidate is `editing-namespaces1`; the current eight-parser phase is `expanded-editing` (630 attempted inputs, 628 source references). The [current report](../../output/pptx-benchmark-20261106/report/peers/index.html) and [audit](../../docs/pptx-parser-audit.md) distinguish paired optimization evidence from cross-parser timings. The combined collection contains 1,854 distinct inputs with 323 reserved; the latest 35 additions are metadata-classified only. Commands and phase descriptions below retain their historical scope.
+The current retained native candidate is `deferred-artwork2`, measured in its eager default; the current eight-parser phase is `expanded-deferred-artwork` (630 attempted inputs, 628 source references, 610 common nonempty timing inputs, measured November 8, 2026). The [current report](../../output/pptx-benchmark-20261106/report/peers/index.html) and [audit](../../docs/pptx-parser-audit.md) distinguish paired optimization evidence from cross-parser timings. The combined collection contains 1,854 distinct inputs with 323 reserved; the latest 35 additions are metadata-classified only. Commands and phase descriptions below retain their historical scope.
 
 Regenerate the current report and the published README heatmaps from the completed assessment:
 
 ```sh
-output/pptx-benchmark-20261106/venv/bin/python scripts/pptx-benchmark/peer_report.py expanded-editing
-output/pptx-benchmark-20261106/venv/bin/python scripts/parser-benchmark/feature_heatmaps.py --pptx output/pptx-benchmark-20261106/expanded-editing/assessment.json --snapshot --pptx-label 0.1.6
+output/pptx-benchmark-20261106/venv/bin/python scripts/pptx-benchmark/peer_report.py expanded-deferred-artwork --rust-label '0.1.6 + local'
+output/pptx-benchmark-20261106/venv/bin/python scripts/parser-benchmark/feature_heatmaps.py --pptx output/pptx-benchmark-20261106/expanded-deferred-artwork/assessment.json --snapshot --pptx-label '0.1.6 + local'
 ```
 
-Without `--snapshot`, figures are labelled as previews. The generator writes to `output/pptx-benchmark-20261106/readme-preview/` and never edits the root README. The published copies are `docs/readme-assets/pptx-expanded-editing-20261107-feature-recall.*` and `docs/readme-assets/docx-optimized-20261102-feature-recall.*`. The `expanded-editing` assessment's recorded Rust source hashes match the rust-pptx 0.1.6 sources exactly.
+Without `--snapshot`, figures are labelled as previews. The generator writes to `output/pptx-benchmark-20261106/readme-preview/` and never edits the root README; receipt paths stay repository-relative when `output/` is a symbolic link into another checkout, as in a worktree. The published copies are `docs/readme-assets/pptx-expanded-deferred-artwork-20261108-feature-recall.*` and `docs/readme-assets/docx-optimized-20261102-feature-recall.*`. The `expanded-deferred-artwork` assessment's recorded Rust source hashes match the retained `deferred-artwork2` candidate identity exactly; that source is rust-pptx 0.1.6 plus the three unreleased commits described at the end of this document, so the measured build is labelled `0.1.6 + local`. The previous phase, `expanded-editing`, measured `editing-namespaces1`, whose sources match the rust-pptx 0.1.6 sources exactly; its report is archived under `report/peers-before-deferred-artwork2/` and its preview under `readme-preview-before-deferred-artwork2/`.
 
 ```sh
 python3 scripts/pptx-benchmark/download.py
@@ -286,3 +286,16 @@ python3 scripts/pptx-benchmark/deferred_timing.py --label deferred-artwork2 --co
 ```
 
 The gate parses every manifest input with the runner's `rust-pptx` and `rust-pptx-deferred` engines and compares the compact models after removing `shapeSvg`, `pictureSvg`, `chartSvg`, `paintBounds`, `fallbackPicture` and the rendering-only warnings; it then runs the `rust-pptx-artwork-check` engine (`pptx-benchmark rust-pptx-artwork-check INPUT - LIMIT`), which renders up to `LIMIT` nodes of the input on demand through `render_node_artwork` and compares each with the eager artwork. It writes `artwork-deferral.jsonl` and `artwork-deferral-summary.json` and refuses to overwrite them. The timing script requires a passing gate for the same executable, selects the same 40 tuning inputs as `expanded_timing.py`, interleaves eager, deferred, Office Oxide and undoc with seven warm samples each and writes `deferred-timings.jsonl` and `deferred-timing-summary.json` (eager over deferred 1.248× (1.207–1.414×), Office Oxide over deferred 0.490× (0.416–0.596×)). Deferred ratios describe a different workload from the eager default and are never combined with it.
+
+### Eight-parser comparison of the retained build
+
+The fresh eight-parser phase is `expanded-deferred-artwork`, measured on the eager default of `deferred-artwork2` with the same manifest, engines, frozen peer binary and fixed 610-input timing cohort as `expanded-editing`:
+
+```sh
+python3 scripts/pptx-benchmark/run.py --phase expanded-deferred-artwork --repeats 5 --manifest output/pptx-benchmark-20261106/expanded-with-aspose.json --split tuning --containers pptx --binary output/pptx-benchmark-20261106/experiments/deferred-artwork2/candidate --engines rust-pptx,office_oxide,undoc,python-pptx,markitdown,pptxboss,betteroffice,rustypptx --peer-binary output/pptx-benchmark-20261106/expanded-editing/peer-benchmark --deduplicate-phase expanded-editing
+python3 scripts/pptx-benchmark/assess.py expanded-deferred-artwork --exclude-empty --fixed-cohort expanded-editing
+python3 scripts/pptx-benchmark/table_grid_measurement.py --phase expanded-deferred-artwork --label deferred-artwork2 --baseline-phase expanded-editing --exact-gate
+python3 scripts/pptx-benchmark/assessment_verification.py expanded-deferred-artwork --baseline-phase expanded-editing
+```
+
+The exact-gate verifier requires every measured Rust output to equal both the candidate's gate record and the `expanded-editing` output, and every peer output to remain exact except independently replayed undoc table-block permutation (six inputs, 26 replays). `assessment_verification.py` then requires the common timing cohort and every engine's feature aggregates to be identical to the previous phase and writes `assessment-verification.json`. Run `peer_report.py` only after both verifications: its build-specific paragraphs read `measurement-verification.json`. The run shared the machine with unrelated user processes; the one-minute load average sampled after each invocation ranged from 8.2 to 21.3 on 14 logical cores (median 10.0, against 4.6–8.2 during `expanded-editing`), so medians are not compared across phases as paired evidence. The phase directory also holds `rebuild-check.json`: the runner rebuilt from the retained commit in a separate worktree matches the candidate's 78 recorded source hashes and all named Rust symbols, but not its executable hash, because Cargo embeds the absolute checkout path of path dependencies in panic locations and symbol metadata; the phase runs the retained candidate executable, as every phase does. The previous report is archived under `report/peers-before-deferred-artwork2/`, the previous preview under `readme-preview-before-deferred-artwork2/`.

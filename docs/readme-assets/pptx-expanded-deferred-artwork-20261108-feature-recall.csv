@@ -1,5 +1,5 @@
 feature,expected_units,"rust-pptx
-0.1.6","office_oxide
+0.1.6 + local","office_oxide
 0.1.16","undoc
 0.27.3","python-pptx
 1.0.2","MarkItDown

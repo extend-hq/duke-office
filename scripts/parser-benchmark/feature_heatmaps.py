@@ -11,6 +11,18 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def repo_relative(path):
+    """Repository-relative receipt path. Files under the output tree are written as output/..., also when output/ is a symbolic link into another checkout."""
+    path = Path(path)
+    resolved = path.resolve()
+    if resolved.is_relative_to(ROOT):
+        return str(resolved.relative_to(ROOT))
+    output = (ROOT / 'output').resolve()
+    if resolved.is_relative_to(output):
+        return str(Path('output') / resolved.relative_to(output))
+    return str(path)
 # The superseded image node-count proxy is omitted; payload-matched occurrences replace it.
 DOCX = [
     ('image_payload_occurrences', 'Images · payload occurrences'),
@@ -76,7 +88,7 @@ def matrix(kind, source, output, features, engines, labels, stats, scope, identi
                 if not np.isclose(recall,value['matched']/value['expected'],rtol=1e-10,atol=1e-12):raise ValueError('Recall does not match source counts')
             cells.append(dict(engine=engine,recall=recall,matched=None if missing else value.get('matched'),expected=expected,unit=value.get('unit')))
         rows.append(dict(feature=key,label=label,expected=expected,cells=cells))
-    receipt=dict(format=kind,scope=scope,identity=identity,generator_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),matplotlib_version=matplotlib.__version__,numpy_version=np.__version__,source=str(source.resolve().relative_to(ROOT)),source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),scale=[0,100],unscored='Not scored',rows=rows)
+    receipt=dict(format=kind,scope=scope,identity=identity,generator_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),matplotlib_version=matplotlib.__version__,numpy_version=np.__version__,source=repo_relative(source),source_sha256=hashlib.sha256(source.read_bytes()).hexdigest(),scale=[0,100],unscored='Not scored',rows=rows)
     (output/f'{kind}-feature-recall.json').write_text(json.dumps(receipt,indent=2))
     with (output/f'{kind}-feature-recall.csv').open('w',newline='') as stream:
         writer=csv.writer(stream);writer.writerow(['feature','expected_units',*labels])
@@ -111,7 +123,7 @@ def main():
     matrix('docx',args.docx,args.output,DOCX,engines,labels,d['docx']['engines'],d['scope'],{**{k:d[k] for k in ['measured_date','measured_commit','binary_sha256','versions']},'display_scope':'1,000 reference inputs · measured '+d['measured_date']},snapshot=args.snapshot)
     d=json.loads(args.pptx.read_text());engines=d['identity'].get('selected_engines',['rust-pptx','office_oxide','undoc','python-pptx','markitdown']);names={'rust-pptx':'rust-pptx\n'+args.pptx_label,'office_oxide':'office_oxide\n0.1.16','undoc':'undoc\n0.27.3','python-pptx':'python-pptx\n1.0.2','markitdown':'MarkItDown\n0.1.9','pptxboss':'pptxboss-core\n2.3.0','betteroffice':'BetterOffice\n0.5.1','rustypptx':'rustypptx\n0.2.0'};labels=[names[e] for e in engines];summary=d['summary']['rust-pptx']
     scope=f"{summary['total']} attempted OOXML inputs; {summary['reference_total']} source-reference packages. Failed parses count as zero on reference-bearing features. Reference exclusions and unscored adapter dimensions remain explicit. This is the retained {d['phase']} phase, not a benchmark of later code."
-    identity={k:(str(Path(v).resolve().relative_to(ROOT)) if k.endswith('_path') and isinstance(v,str) and Path(v).is_absolute() and Path(v).resolve().is_relative_to(ROOT) else v) for k,v in d['identity'].items()}
+    identity={k:(repo_relative(v) if k.endswith('_path') and isinstance(v,str) and Path(v).is_absolute() else v) for k,v in d['identity'].items()}
     matrix('pptx',args.pptx,args.output,PPTX,engines,labels,d['summary'],scope,{**identity,'display_scope':f"{summary['reference_total']} reference packages · {d['phase']} · measured "+datetime.fromtimestamp(d['identity']['start'],timezone.utc).strftime('%Y-%m-%d')},snapshot=args.snapshot)
     print(json.dumps(dict(output=str(args.output),readme_changed=False,publication='measured snapshot' if args.snapshot else 'pending final optimization and validation')))
 

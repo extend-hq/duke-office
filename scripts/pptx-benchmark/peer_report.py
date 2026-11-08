@@ -4,6 +4,7 @@ import gzip
 import hashlib
 import html
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -25,12 +26,12 @@ def unscored(engine, feature):
     return peer_unscored(engine, feature) if engine in PEER_ENGINES else ns(engine, feature)
 
 
-def main(phase):
+def main(phase, rust_label='0.1.6 + local'):
     source = OUT / phase / 'assessment.json'
     data = json.loads(source.read_text())
     engines = data['identity']['selected_engines']
     assert engines == ORIGINAL_ENGINES + PEER_ENGINES
-    labels = ['rust-pptx 0.1.5 + local', *ORIGINAL_LABELS[1:], *PEER_LABELS]
+    labels = [f'rust-pptx {rust_label}', *ORIGINAL_LABELS[1:], *PEER_LABELS]
     colors = [*COLORS, '#008b9b', '#657d25', '#626b7b']
     summary = data['summary']
     site = OUT / 'report/peers'
@@ -38,7 +39,7 @@ def main(phase):
     date = datetime.fromtimestamp(data['identity']['start'], timezone.utc).strftime('%Y-%m-%d')
     scope = f"{summary['rust-pptx']['reference_total']} reference packages · {phase} · measured {date}"
     receipt = matrix('pptx', source, site, PPTX, engines,
-        ['rust-pptx\n0.1.5 + local', *[label.rsplit(' ', 1)[0] + '\n' + label.rsplit(' ', 1)[1] for label in labels[1:]]],
+        [f'rust-pptx\n{rust_label}', *[label.rsplit(' ', 1)[0] + '\n' + label.rsplit(' ', 1)[1] for label in labels[1:]]],
         summary, scope, {**data['identity'], 'display_scope': scope}, snapshot=True, unscored_features=unscored)
     fig, ax = plt.subplots(figsize=(11, 6))
     for index, (engine, color) in enumerate(zip(engines, colors)):
@@ -91,7 +92,7 @@ def main(phase):
         'Feature recall measures source extraction, not rendered fidelity or all PowerPoint capabilities. Macro text F1 is averaged over documents with source body text; it is not an average over feature rows. Literal text references can penalize legitimate inherited, equation, chart or diagram text additions. Image occurrence scores retain the selected-SVG versus fallback-payload distinction. Gray cells identify dimensions not scored by an adapter; they are not 100% support.',
         'The frozen source reference visits the first Markup Compatibility branch and the primary picture blip. It is not an application-compatibility oracle. Inspected text omissions in the new structured peers include text within an a14 Choice branch; selecting a raster fallback can preserve appearance while losing extractable text. Rust-pptx retains both the preferred SVG and saved fallback payload for its 113 previously reviewed image-score mismatches, without changing the raw score. Sparse-chart scores also retain omitted interior and trailing absent points.',
         'Adding BetterOffice removes one input from the original five-parser 611-input common timing cohort: it rejects a package with a missing referenced slide layout. That input remains in the 628-file source accuracy denominator. Source-reference definitions and failure penalties remain fixed. Build-specific regression receipts distinguish exact output preservation from reviewed semantic changes.',
-        'This benchmark cohort was frozen within a collection of 1,819 distinct files, including legacy and alternative presentation containers, with 317 reserved inputs. The headline comparison covers OOXML tuning inputs; legacy agreement and the additional Strict-OOXML SDK study remain separate. Matching DOCX/PPTX README matrices are prepared locally; publication remains pending final optimization and validation.',
+        'This benchmark cohort was frozen within a collection of 1,819 distinct files, including legacy and alternative presentation containers, with 317 reserved inputs. The headline comparison covers OOXML tuning inputs; legacy agreement and the additional Strict-OOXML SDK study remain separate. Matching DOCX/PPTX README matrices are generated from retained assessments by the shared heatmap generator; the root README publishes the snapshot of the current retained phase.',
     ]
     optimization = OUT / 'experiments/xml-recent1/decision.json'
     if optimization.exists():
@@ -146,6 +147,23 @@ def main(phase):
             method.append(f"Two output-identical optimizations retain parsed editing metadata in a bounded per-parse cache and reuse serialized namespace declarations until their XML scope changes. The latter has a separate {timing['inputs']}-input paired speed ratio of {timing['median_paired_speedup']:.3f}× versus object-editing-cache1 (95% document-bootstrap interval {low:.3f}–{high:.3f}×), with summed per-input medians reduced by {editing['summed_latency_reduction']:.2%}. A separate direct comparison of the complete richer contract against the pre-feature xml-indexed1 build gives {cost['median_paired_speedup']:.3f}× ({cost_low:.3f}–{cost_high:.3f}×). These are tuning measurements, not multiplied ratios, and are distinct from the fresh eight-parser run.")
             method.append('Complete native outputs/errors remain exact on 1,156 established and 156 SDK inputs. The actual WASM build preserves all previous models/errors and artwork/editing XML hashes on 711 inputs, plus 23 property and 16 namespace-scope probes. All 32 existing Rust checks pass. The prior strict native/WASM curved-3D numerical difference remains open; this regression evidence does not establish native rendering parity. Modern comments, covered table cells, preferred SVG with fallback payloads and typed equations remain included. Headline image and equation-reference discrepancies stay scored.')
             method.append('The collected corpus contains 1,854 unique documents, including legacy PowerPoint and other presentation containers, with 323 reserved. The latest 35 public original presentations have only container/header classification and do not enter this frozen OOXML comparison. Broader legacy fidelity, remaining specification/consumer gaps and untouched validation remain open.')
+    deferred_path = OUT / 'experiments/deferred-artwork2/decision.json'
+    if deferred_path.exists():
+        deferred = json.loads(deferred_path.read_text())
+        if deferred['status'] == 'retained' and deferred['candidate_sha256'] == data['identity']['binary_sha256']:
+            verification = json.loads((OUT / phase / 'measurement-verification.json').read_text())
+            assert verification['exact_native_output_gate'] and not verification['native_changed_inputs'] and verification['candidate_sha256'] == deferred['candidate_sha256']
+            chain_labels = ['xml-offset-index1', 'xml-numbers1', 'pattern-cache1', 'arena-dom1']
+            chain = [json.loads((OUT / 'experiments' / label / 'decision.json').read_text()) for label in chain_labels]
+            assert all(c['status'] == 'retained' for c in chain) and deferred['baseline'] == chain_labels[-1] and chain[0]['baseline'] == 'editing-namespaces1'
+            pilots = '; '.join(f"{label} {c['pilot']['median_paired_speedup']:.3f}× ({c['pilot']['median_speedup_ci95'][0]:.3f}–{c['pilot']['median_speedup_ci95'][1]:.3f}×)" for label, c in zip(chain_labels, chain))
+            method.append(f"This measured build is the eager default of deferred-artwork2, the fifth output-identical candidate after editing-namespaces1 ({', '.join(chain_labels)}, deferred-artwork2). Each is exact against its immediate predecessor on all {deferred['eager_exact']['total']:,} established outputs and errors, and the measurement verification confirms that every Rust output in this phase equals the output of the preceding phase, {verification['baseline_phase']}, so the feature matrix is unchanged. Their separate 40-input tuning pilots against each predecessor measure {pilots}; these are separate paired measurements on one fixed tuning selection, not untouched validation, and they are not multiplied with each other or with the cross-parser timings above.")
+            gate = deferred['deferred_semantic_gate']; pilot = deferred['deferred_pilot']
+            ed, od, oe = pilot['eager_over_deferred'], pilot['oxide_over_deferred'], pilot['oxide_over_eager']
+            method.append(f"The build adds a deferArtwork parse option and on-demand single-node artwork rendering, which this eight-parser comparison does not measure. The deferred mode's semantic gate passes {gate['passed']:,}/{gate['total']:,} inputs, with {gate['matched']:,}/{gate['checked']:,} on-demand renders equal to the eagerly stored artwork. Its separate 40-input pilot measures eager over deferred time at {ed['median']:.3f}× ({ed['ci95'][0]:.3f}–{ed['ci95'][1]:.3f}×) and Office Oxide over deferred time at {od['median']:.3f}× ({od['ci95'][0]:.3f}–{od['ci95'][1]:.3f}×), beside Office Oxide over eager time at {oe['median']:.3f}× ({oe['ci95'][0]:.3f}–{oe['ci95'][1]:.3f}×). Deferred mode omits generated artwork and is a different workload; its ratios are reported apart from the eager default measured here and never combined with it.")
+            wasm = deferred['wasm_regression']; checks = deferred['existing_rust_checks']
+            loads = [r['load'][0] for r in map(json.loads, (OUT / phase / 'records.jsonl').read_text().splitlines())]
+            method.append(f"The actual WASM build is exact against its predecessor on {wasm['exact_to_previous_wasm']} inputs ({wasm['successful_models']} compact models, {wasm['artwork_hashes']:,} generated-artwork hashes). All {checks['passed']} workspace checks pass with {checks['ignored']} pre-existing ignored check, and the wasm32 workspace check compiles. The known strict native/WASM curved-3D numerical difference remains open. The collected corpus is unchanged at 1,854 unique documents with 323 reserved, and the frozen OOXML comparison cohort and denominators are unchanged. The one-minute load average sampled after each of the {len(loads):,} timed invocations ranged from {min(loads):.1f} to {max(loads):.1f} on {os.cpu_count()} logical cores while unrelated user processes ran; engine order is randomized per input, so the cross-parser comparison relies on interleaving rather than an idle machine.")
     replay_path = OUT / phase / 'undoc-replay-summary.json'
     if replay_path.exists():
         replay = json.loads(replay_path.read_text())
@@ -179,4 +197,6 @@ def main(phase):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('phase', nargs='?', default='expanded-peers')
-    main(parser.parse_args().phase)
+    parser.add_argument('--rust-label', default='0.1.6 + local', help='version label for the measured rust-pptx build')
+    arguments = parser.parse_args()
+    main(arguments.phase, arguments.rust_label)
