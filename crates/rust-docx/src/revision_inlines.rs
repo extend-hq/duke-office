@@ -244,16 +244,40 @@ pub fn revision_inlines(
             .get(block.id.as_str())
             .copied()
             .unwrap_or(inherited);
-        let changes = edits.get(block.id.as_str());
         let paragraph = match &block.details {
             BlockDetails::Paragraph(_) => true,
             BlockDetails::Raw(d) => d["kind"] == "paragraph",
             _ => false,
         };
-        if paragraph && (changes.is_some() || state != InlineChange::Unchanged) {
+        let mut mapped = Vec::new();
+        let changes = if paragraph && block.source_refs.len() > 1 {
+            let mut base = 0;
+            for source in &block.source_refs {
+                let (Some(start), Some(end)) = (source.start, source.end) else {
+                    continue;
+                };
+                if end < start {
+                    continue;
+                }
+                for edit in edits.get(source.node_id.as_str()).into_iter().flatten() {
+                    if edit.start >= start && edit.end <= end {
+                        mapped.push(Edit {
+                            start: base + edit.start - start,
+                            end: base + edit.end - start,
+                            removed: edit.removed.clone(),
+                        });
+                    }
+                }
+                base += end - start;
+            }
+            mapped.as_slice()
+        } else {
+            edits.get(block.id.as_str()).map(Vec::as_slice).unwrap_or_default()
+        };
+        if paragraph && (!changes.is_empty() || state != InlineChange::Unchanged) {
             output.insert(
                 block.id.clone(),
-                paragraph_inlines(block, changes.map(Vec::as_slice).unwrap_or_default(), state),
+                paragraph_inlines(block, changes, state),
             );
         }
         for child in &block.children {

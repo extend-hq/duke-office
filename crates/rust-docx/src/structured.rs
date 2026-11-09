@@ -1,3 +1,4 @@
+mod drop_caps;
 mod list_labels;
 
 use std::collections::HashSet;
@@ -129,6 +130,13 @@ impl Serialize for FormFieldSemanticDetails<'_> {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParagraphDropCapRange {
+    pub start: usize,
+    pub end: usize,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParagraphDetails {
@@ -138,6 +146,8 @@ pub struct ParagraphDetails {
     pub style_id: String,
     pub heading_level: Option<HeadingLevel>,
     pub numbering: Option<ParagraphNumbering>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub drop_cap: Option<ParagraphDropCapRange>,
     /// Visible list marker, separate from the text addressed by source offsets.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub list_label: Option<String>,
@@ -494,6 +504,7 @@ struct Extractor<'a> {
     include_words: bool,
     include_3d_models: bool,
     review: Option<RevisionCollector>,
+    body_section_starts: HashSet<usize>,
 }
 
 impl Extractor<'_> {
@@ -527,7 +538,10 @@ impl Extractor<'_> {
         }
     }
 
-    fn words(&self, block_id: &str, content: &str) -> Vec<DocumentWord> {
+    fn words(&self, block: &DocumentBlock) -> Vec<DocumentWord> {
+        let block_id = &block.id;
+        let content = &block.content;
+        let length = content.encode_utf16().count();
         let mut offset = 0;
         content
             .split_word_bounds()
@@ -540,17 +554,28 @@ impl Extractor<'_> {
                 Some(DocumentWord {
                     object: "word".into(),
                     id: indexed_path(block_id, [("/word/", start), ("-", offset)]),
-                    block_id: block_id.into(),
+                    block_id: block_id.clone(),
                     content: word.into(),
-                    source_refs: vec![SourceRef {
-                        document_id: self.document_id.clone(),
-                        node_id: block_id.into(),
-                        part_name: self.part_name.clone(),
-                        story: self.story.clone(),
-                        start: Some(start),
-                        end: Some(offset),
-                        offset_encoding: "utf-16".into(),
-                    }],
+                    source_refs: {
+                        let mut base = 0;
+                        block
+                            .source_refs
+                            .iter()
+                            .filter_map(|source| {
+                                let source_start = source.start.unwrap_or(0);
+                                let source_length = source.end.unwrap_or(length) - source_start;
+                                let from = start.max(base);
+                                let to = offset.min(base + source_length);
+                                let reference = (from < to).then(|| SourceRef {
+                                    start: Some(source_start + from - base),
+                                    end: Some(source_start + to - base),
+                                    ..source.clone()
+                                });
+                                base += source_length;
+                                reference
+                            })
+                            .collect()
+                    },
                 })
             })
             .collect()
@@ -584,17 +609,44 @@ impl Extractor<'_> {
         parent: Option<&str>,
         lists: &mut StoryLists,
     ) -> Vec<DocumentBlock> {
-        nodes
-            .iter()
-            .enumerate()
-            .map(|(index, node)| {
-                let fallback = indexed_path(parent.unwrap_or("document"), [("/", index)]);
-                match node {
-                    DocNode::Paragraph(p) => self.paragraph(p, &fallback, parent, lists),
-                    DocNode::Table(t) => self.table(t, &fallback, parent, lists),
+        let mut blocks = Vec::with_capacity(nodes.len());
+        let mut previous = None;
+        for (index, node) in nodes.iter().enumerate() {
+            if parent.is_none() && self.story == "body" && self.body_section_starts.contains(&index) {
+                previous = None;
+            }
+            let fallback = indexed_path(parent.unwrap_or("document"), [("/", index)]);
+            match node {
+                DocNode::Paragraph(p) => {
+                    let block = self.paragraph(p, &fallback, parent, lists);
+                    self.push_paragraph(&mut blocks, block, previous, p);
+                    previous = Some(p);
                 }
-            })
-            .collect()
+                DocNode::Table(t) => {
+                    blocks.push(self.table(t, &fallback, parent, lists));
+                    previous = None;
+                }
+            }
+        }
+        blocks
+    }
+
+    fn push_paragraph(
+        &self,
+        blocks: &mut Vec<DocumentBlock>,
+        mut block: DocumentBlock,
+        previous: Option<&ParagraphNode>,
+        paragraph: &ParagraphNode,
+    ) {
+        if previous.is_some_and(|cap| drop_caps::can_join(cap, paragraph)) {
+            if let Some(cap) = blocks.pop() {
+                block = drop_caps::join(cap, block);
+                if self.include_words {
+                    block.words = Some(self.words(&block));
+                }
+            }
+        }
+        blocks.push(block);
     }
 
     fn paragraph(
@@ -767,6 +819,8 @@ impl Extractor<'_> {
             style_id: style_id.into(),
             heading_level: style.and_then(|s| s.heading_level),
             numbering: style.and_then(|s| s.numbering.clone()),
+            drop_cap: style.and_then(|s| s.drop_cap.as_ref())
+                .map(|_| ParagraphDropCapRange { start: 0, end: text_offset }),
             list_label: lists.label(p, &self.lists),
             field_instructions,
             inlines: inline,
@@ -776,7 +830,7 @@ impl Extractor<'_> {
             review.paragraph(xml, &block, p);
         }
         if self.include_words {
-            block.words = Some(self.words(id, &block.content));
+            block.words = Some(self.words(&block));
         }
         block
     }
@@ -816,19 +870,25 @@ impl Extractor<'_> {
             for (ci, cell) in row.cells.iter().enumerate() {
                 let cell_id = indexed_path(&row_id, [("/cell/", ci)]);
                 lists.break_paragraph_flow();
-                let content = cell
-                    .nodes
-                    .iter()
-                    .enumerate()
-                    .map(|(ni, node)| match node {
+                let mut content = Vec::with_capacity(cell.nodes.len());
+                let mut previous = None;
+                for (ni, node) in cell.nodes.iter().enumerate() {
+                    match node {
                         TableCellContentNode::Paragraph(p) => {
-                            self.paragraph(p, &indexed_path(&cell_id, [("/", ni)]), Some(&cell_id), lists)
+                            let block = self.paragraph(
+                                p, &indexed_path(&cell_id, [("/", ni)]), Some(&cell_id), lists,
+                            );
+                            self.push_paragraph(&mut content, block, previous, p);
+                            previous = Some(p);
                         }
                         TableCellContentNode::Table(t) => {
-                            self.table(t, &indexed_path(&cell_id, [("/", ni)]), Some(&cell_id), lists)
+                            content.push(self.table(
+                                t, &indexed_path(&cell_id, [("/", ni)]), Some(&cell_id), lists,
+                            ));
+                            previous = None;
                         }
-                    })
-                    .collect::<Vec<_>>();
+                    }
+                }
                 let text = joined_block_content(&content, "\n");
                 cells.push(self.block(
                     cell_id,
@@ -978,12 +1038,15 @@ fn extract(
         include_words: options.include_words,
         include_3d_models: options.include_3d_models,
         review: include_revisions.then(RevisionCollector::default),
+        body_section_starts: model.metadata.sections.iter().flatten()
+            .filter_map(|section| usize::try_from(section.start_node_index).ok())
+            .collect(),
     };
     let mut blocks = extractor.story_nodes(&model.nodes, None);
     if let (Some(review), Some(section), Some(source)) = (
         &mut extractor.review,
         model.metadata.section_properties_xml.as_deref(),
-        blocks.last().and_then(|b| b.source_refs.first()),
+        blocks.last().and_then(|b| b.source_refs.last()),
     ) {
         // A terminal section can also be the last paragraph's section break.
         let in_paragraph = matches!(model.nodes.last(), Some(DocNode::Paragraph(p))
@@ -1178,6 +1241,7 @@ mod inplace_block_cleanup_tests {
     fn invisible_containers_flatten_objects_and_repair_only_parent_links() {
         use super::*;
         let extractor = Extractor {
+            body_section_starts: HashSet::new(),
             lists: ListDefinitions::new(None),
             document_id: "document".into(), part_name: "part".into(),
             story: "body".into(), include_words: false, include_3d_models: false, review: None,

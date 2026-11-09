@@ -13,6 +13,10 @@ The unreleased `rust-docx` APIs provide application-independent extraction and H
 
 `ExtractDocumentBundleOptions` defaults to ordinary blocks with comments. `includeWords`, `include3dModels`, `includeRevisions`, `includeCharts`, and `deduplicateAssets` opt into additional output. The existing block and reviewed-document APIs remain available.
 
+A dropped or margin initial and its following paragraph are emitted as one logical paragraph. The block retains the initial's ID, combines the text without inserting a separator, and uses the following paragraph's formatting with the initial's `style.dropCap` metadata. `details.dropCap` identifies the initial with an explicit `{ start, end }` range in the combined text, using zero-based UTF-16 offsets with an exclusive end. The initial's font and other run formatting remain on its text inlines. Ordinary paragraphs omit this range.
+
+Inline offsets address the combined text. Its ordered `sourceRefs` retain both original paragraph IDs and their UTF-16 ranges; a word spanning the join has references to both sources. Revisions and comments retain their original source coordinates, while `revisionInlines` uses the combined paragraph's offsets. The editable document model and serialized Word structure retain the separate source paragraphs. Pairing stays within a story and table cell and does not cross a section break or an explicit page break before the following paragraph.
+
 `revision_inlines(blocks, revisions)` is also public independently. Each span contains a typed paragraph inline and an `unchanged`, `insertion`, or `deletion` change. Removed text is anchored at an empty current-text range; it does not shift later offsets. Table-row and cell changes propagate to their paragraphs. Formatting and structural revision metadata remain in the revision list rather than being approximated as text edits. Invalid ranges, including ranges splitting a Unicode scalar, are ignored.
 
 ## Export
