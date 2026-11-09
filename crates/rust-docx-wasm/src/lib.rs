@@ -14,6 +14,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 mod model_transport;
+mod split_json;
 
 #[wasm_bindgen]
 extern "C" {

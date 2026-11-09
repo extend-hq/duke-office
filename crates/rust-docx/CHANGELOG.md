@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.20
+
+- `rust-docx-wasm`: `build_doc_model_from_bytes` and `build_doc_model_from_package_js` return a model whose JSON is longer than the JavaScript engine's maximum string length (about 512 MiB in V8) instead of failing with "Cannot create a string longer than 0x1fffffe8 characters". Model JSON above 128 MiB is parsed in pieces; the returned object is the same as before for every other document. The parser crate itself is unchanged from 0.2.19.
+
 ## 0.2.19
 
 - Write legacy `.doc` media content types in a fixed order, so a file with several image formats gets the same document identity on every parse. For such a file the model's document id, and the block ids that embed it, can differ from the ones an earlier version returned.

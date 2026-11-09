@@ -243,7 +243,7 @@ pub(crate) fn model_to_js(
     let json = serde_json::to_string(&model)
         .map_err(|error| JsValue::from_str(&format!("Model serialization failed: {error}")))?;
     drop(model);
-    let result = js_sys::JSON::parse(&json)?;
+    let result = crate::split_json::parse(&json)?;
     for payload in transport.payloads {
         let mut target = result.clone();
         for key in payload.path {
