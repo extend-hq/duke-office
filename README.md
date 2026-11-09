@@ -141,13 +141,15 @@ Each cell is recall against the independent source-XML reference on all 1,000 in
 
 ### PPTX parser benchmarks
 
-[![PPTX feature recall heatmap: rust-pptx and seven other PowerPoint parsers across 19 source-XML checks](docs/readme-assets/pptx-expanded-deferred-artwork-20261108-feature-recall.png)](docs/readme-assets/pptx-expanded-deferred-artwork-20261108-feature-recall.png)
+[![PPTX feature recall heatmap: rust-pptx and seven other PowerPoint parsers across 19 source-XML checks](docs/readme-assets/pptx-current-20261109-feature-recall.png)](docs/readme-assets/pptx-current-20261109-feature-recall.png)
 
-November 8, 2026, rust-pptx 0.1.6 plus the retained local build `deferred-artwork2` in its eager default (phase `expanded-deferred-artwork`): **eight parsers on 630 OOXML inputs**, scored against **628 independent source-XML references**. Each cell is recall on a fixed 0–100% scale; failed parses count as zero, and gray cells are checks a parser's output model cannot express. These measure extraction, not rendering fidelity.
+November 9, 2026, rust-pptx 0.1.7 in its eager default (commit `d665c48`, phase `current-20261109`): **eight parsers on 630 OOXML inputs**, scored against **628 independent source-XML references**. Each cell is recall on a fixed 0–100% scale; failed parses count as zero, and gray cells are checks a parser's output model cannot express. These measure extraction, not rendering fidelity.
+
+On the 610 common nonempty inputs, default parsing measures **1.112 ms median and 13.288 ms p95**, versus Office Oxide’s 0.323 ms and 3.884 ms. These are shared-machine native timings; rust-pptx includes model construction and generated artwork.
 
 rust-pptx leads or ties on 18 of 19 checks. Image payload occurrences reach 93.791%: all 113 misses are pictures with a preferred SVG alternative, where rust-pptx selects the SVG and retains the fallback bitmap separately, while the reference counts only the primary blip.
 
-[Specification audit, timing and methodology](docs/pptx-parser-audit.md) · [Benchmark tools](scripts/pptx-benchmark/README.md) · [Measurements](docs/readme-assets/pptx-expanded-deferred-artwork-20261108-feature-recall.csv) · [Provenance](docs/readme-assets/pptx-expanded-deferred-artwork-20261108-feature-recall.json)
+[Specification audit, timing and methodology](docs/pptx-parser-audit.md) · [Benchmark tools](scripts/pptx-benchmark/README.md) · [Measurements](docs/readme-assets/pptx-current-20261109-feature-recall.csv) · [Provenance](docs/readme-assets/pptx-current-20261109-feature-recall.json)
 
 ## License
 
