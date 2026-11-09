@@ -796,7 +796,7 @@ dependencies = [
 
 [[package]]
 name = "rust-pptx"
-version = "0.1.7"
+version = "0.2.0"
 dependencies = [
  "base64",
  "cfb",
@@ -809,13 +809,15 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
+ "sha2",
  "thiserror",
+ "unicode-segmentation",
  "zip",
 ]
 
 [[package]]
 name = "rust-pptx-wasm"
-version = "0.1.7"
+version = "0.2.0"
 dependencies = [
  "rust-pptx",
  "serde",

@@ -7300,6 +7300,7 @@ fn parse_cached(
         read_entry(&mut archive, core_path, limits)?.map(|xml| parse_core_metadata(&xml));
     document_warnings.extend(font_warnings);
     let document = PresentationDocument {
+        document_id: None,
         format: PresentationFormat::Pptx,
         size,
         slides,

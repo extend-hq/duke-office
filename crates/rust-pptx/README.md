@@ -18,6 +18,8 @@ fn parse(bytes: &[u8]) -> Result<PresentationDocument, ParseError> {
 
 The WebAssembly bindings are available as `rust-pptx-wasm`.
 
+`extract_presentation_blocks` provides nested object, paragraph, table-cell and optional word blocks with document-scoped source references for React PPTX citation overlays. See the [citation contract](../../docs/pptx-citations.md).
+
 Legacy binary presentations follow the current edit/persist graph, including the newer stream in dual-storage containers. Speaker notes follow the live notes references and retain plain text and paragraph boundaries; unresolved or mismatched references produce explicit warnings. Notes-page headers, footers, dates and slide numbers are excluded from speaker notes. Legacy rich-text formatting and notes-page rendering remain incomplete.
 
 Use `parse_presentation_with_options(&bytes, &ParseLimits::default(), &ParseOptions { include_3d_models: true, ..ParseOptions::default() })` to include original embedded 3D models. Image nodes then expose `model3d`, containing the model asset bytes, part name, content type, relationship IDs, optional preview metadata and source XML preserving camera, transform and lighting settings. The saved 2D preview remains the image's `assetId`. Missing previews do not discard the model asset. The option defaults to `false`: `parse_presentation` omits `model3d` and 3D model payloads from the asset map. This does not decode meshes or render new camera views.

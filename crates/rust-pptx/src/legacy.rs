@@ -1204,6 +1204,7 @@ fn fallback_document(data: &[u8], source_part: &str, limits: &ParseLimits) -> Pr
         })
         .collect();
     PresentationDocument {
+        document_id: None,
         format: PresentationFormat::Ppt,
         size: PresentationSize {
             width_emu: DEFAULT_WIDTH,
@@ -1360,6 +1361,7 @@ fn parse_live_document(
         });
     }
     Ok(PresentationDocument {
+        document_id: None,
         format: PresentationFormat::Ppt,
         size,
         slides,

@@ -3,11 +3,14 @@ mod legacy;
 mod legacy_cfb;
 mod model;
 mod pptx;
+mod structured;
 
 pub use animation_model::*;
 pub use model::*;
+pub use structured::*;
 pub use rust_office_art::ParseOptions;
 
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -87,10 +90,12 @@ pub fn parse_presentation_with_options(
     if bytes.len() > limits.max_input_bytes {
         return Err(ParseError::InputLimit(limits.max_input_bytes));
     }
-    match detect_format(bytes)? {
-        PresentationFormat::Pptx => pptx::parse(bytes, limits, options),
-        PresentationFormat::Ppt => legacy::parse(bytes, limits),
-    }
+    let mut document = match detect_format(bytes)? {
+        PresentationFormat::Pptx => pptx::parse(bytes, limits, options)?,
+        PresentationFormat::Ppt => legacy::parse(bytes, limits)?,
+    };
+    document.document_id = Some(presentation_identity(bytes));
+    Ok(document)
 }
 
 /// One node of a presentation, addressed for on-demand artwork rendering.
@@ -209,19 +214,21 @@ pub fn parse_presentation_retained(
     if bytes.len() > limits.max_input_bytes {
         return Err(ParseError::InputLimit(limits.max_input_bytes));
     }
-    match detect_format(bytes)? {
+    let mut parsed = match detect_format(bytes)? {
         PresentationFormat::Pptx => {
             let (document, retained) = pptx::parse_retained(bytes, limits, options)?;
-            Ok(ParsedPresentation {
+            ParsedPresentation {
                 document,
                 retained: Some(retained),
-            })
+            }
         }
-        PresentationFormat::Ppt => Ok(ParsedPresentation {
+        PresentationFormat::Ppt => ParsedPresentation {
             document: legacy::parse(bytes, limits)?,
             retained: None,
-        }),
-    }
+        },
+    };
+    parsed.document.document_id = Some(presentation_identity(bytes));
+    Ok(parsed)
 }
 
 pub(crate) fn find_node<'a>(nodes: &'a [SlideNode], id: &str) -> Option<&'a SlideNode> {
@@ -302,4 +309,8 @@ mod tests {
             Err(ParseError::UnsupportedFormat)
         ));
     }
+}
+
+fn presentation_identity(bytes: &[u8]) -> String {
+    format!("pptx-v1:sha256:{:x}", Sha256::digest(bytes))
 }

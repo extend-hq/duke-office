@@ -108,3 +108,20 @@ pub fn parse_presentation(bytes: &[u8], options: Option<JsValue>) -> Result<JsVa
         .serialize(&Serializer::new().serialize_maps_as_objects(true))
         .map_err(|error| JsValue::from_str(&error.to_string()))
 }
+
+#[wasm_bindgen]
+pub fn extract_presentation_blocks(
+    document: JsValue,
+    options: Option<JsValue>,
+) -> Result<JsValue, JsValue> {
+    let document: rust_pptx::PresentationBlockInput = serde_wasm_bindgen::from_value(document)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let options = match options.filter(|v| !v.is_null() && !v.is_undefined()) {
+        Some(value) => serde_wasm_bindgen::from_value(value)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?,
+        None => rust_pptx::ExtractPresentationBlocksOptions::default(),
+    };
+    let structured = rust_pptx::extract_presentation_block_input(&document, &options)
+        .map_err(|error| JsValue::from_str(&error))?;
+    to_js(&structured)
+}
