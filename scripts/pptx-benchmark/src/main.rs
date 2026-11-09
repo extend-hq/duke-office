@@ -202,6 +202,8 @@ fn run(args: &[String]) -> Result<Value,String> {
     }
     let mut full_sha256=None;
     let mut without_editing_sha256=None;
+    let mut without_document_identity_sha256=None;
+    let mut source_identity_matches=None;
     if args[3]!="-" {
         let mut v=match first {
             Parsed::Core(d)=>serde_json::to_value(d),
@@ -216,6 +218,14 @@ fn run(args: &[String]) -> Result<Value,String> {
         let canonical=serde_json::to_vec(&v).map_err(|e|e.to_string())?;
         full_sha256=Some(format!("{:x}",Sha256::digest(&canonical)));
         drop(canonical);
+        if args.get(5).map(String::as_str)==Some("identity") {
+            let identity=v.as_object_mut().and_then(|object| object.remove("documentId"));
+            let expected=format!("pptx-v1:sha256:{:x}",Sha256::digest(&bytes));
+            source_identity_matches=Some(identity.as_ref().and_then(Value::as_str)==Some(expected.as_str()));
+            let canonical=serde_json::to_vec(&v).map_err(|e|e.to_string())?;
+            without_document_identity_sha256=Some(format!("{:x}",Sha256::digest(&canonical)));
+            if let Some(identity)=identity { v["documentId"]=identity; }
+        }
         if args.get(5).map(String::as_str)==Some("editing") {
             let mut nodes=Vec::new();
             take_editing(&mut v, "", &mut nodes);
@@ -232,6 +242,8 @@ fn run(args: &[String]) -> Result<Value,String> {
     }
     let mut record=json!({"status":"ok","cold_ms":cold_ms,"loops":loops,"samples_ms":samples,"full_sha256":full_sha256});
     if let Some(hash)=without_editing_sha256 { record["without_editing_sha256"]=json!(hash); }
+    if let Some(hash)=without_document_identity_sha256 { record["without_document_identity_sha256"]=json!(hash); }
+    if let Some(matches)=source_identity_matches { record["source_identity_matches"]=json!(matches); }
     Ok(record)
 }
 

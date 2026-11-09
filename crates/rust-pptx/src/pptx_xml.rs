@@ -21,6 +21,7 @@ pub(super) enum StrRef {
 pub(super) struct RawAttribute {
     pub(super) name: StrRef,
     pub(super) value: StrRef,
+    pub(super) prefixed: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -129,9 +130,14 @@ fn push_owned(document: &mut XmlDocument, node: OwnedNode) -> u32 {
     let name = document.intern(name);
     let attributes_start = document.attributes.len() as u32;
     for (key, value) in attributes {
+        let prefixed = key.contains(':');
         let name = document.intern(key);
         let value = document.intern(value);
-        document.attributes.push(RawAttribute { name, value });
+        document.attributes.push(RawAttribute {
+            name,
+            value,
+            prefixed,
+        });
     }
     let attributes_len = document.attributes.len() as u32 - attributes_start;
     let index = document.nodes.len() as u32;
@@ -241,8 +247,28 @@ impl<'t> XmlNode<'t> {
     }
 
     pub(super) fn attr(self, name: &str) -> Option<&'t str> {
-        self.attributes()
-            .find_map(|(key, value)| (key == name).then_some(value))
+        let raw = self.raw();
+        let start = raw.attributes_start as usize;
+        let end = start + raw.attributes_len as usize;
+        self.document.attributes[start..end]
+            .iter()
+            .find(|attribute| self.document.resolve(attribute.name) == name)
+            .map(|attribute| self.document.resolve(attribute.value))
+    }
+
+    pub(super) fn unqualified_attributes(self) -> impl Iterator<Item = (&'t str, &'t str)> {
+        let raw = self.raw();
+        let start = raw.attributes_start as usize;
+        let end = start + raw.attributes_len as usize;
+        self.document.attributes[start..end]
+            .iter()
+            .filter(|attribute| !attribute.prefixed)
+            .map(|attribute| {
+                (
+                    self.document.resolve(attribute.name),
+                    self.document.resolve(attribute.value),
+                )
+            })
     }
 
     pub(super) fn children(self) -> Children<'t> {

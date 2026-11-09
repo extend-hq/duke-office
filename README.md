@@ -147,6 +147,8 @@ November 9, 2026, rust-pptx 0.1.7 in its eager default (commit `d665c48`, phase 
 
 On the 610 common nonempty inputs, default parsing measures **1.112 ms median and 13.288 ms p95**, versus Office Oxide’s 0.323 ms and 3.884 ms. These are shared-machine native timings; rust-pptx includes model construction and generated artwork.
 
+The **retained follow-up implementation for 0.2.1** measures **1.044 ms median / 12.788 ms p95** on the same 610 inputs, versus Office Oxide **0.304 / 3.711 ms** and undoc **0.319 / 9.433 ms** in that run. This preserves the full eager model and source-feature coverage and fixes foreign-qualified text-style attributes. The revised target is a sub-1 ms median with verified feature advantages; it remains unmet. The matrix above retains its original build and scoring provenance. [Latest audit and receipts](docs/pptx-parser-audit.md).
+
 rust-pptx leads or ties on 18 of 19 checks. Image payload occurrences reach 93.791%: all 113 misses are pictures with a preferred SVG alternative, where rust-pptx selects the SVG and retains the fallback bitmap separately, while the reference counts only the primary blip.
 
 [Specification audit, timing and methodology](docs/pptx-parser-audit.md) · [Benchmark tools](scripts/pptx-benchmark/README.md) · [Measurements](docs/readme-assets/pptx-current-20261109-feature-recall.csv) · [Provenance](docs/readme-assets/pptx-current-20261109-feature-recall.json)

@@ -10,6 +10,34 @@ const MAX_TEXT_BYTES: usize = 64 * 1024;
 const MAX_GLYPHS: usize = 8192;
 const MAX_ELEMENTS: usize = 1_000_000;
 
+fn svg_path(path: &BezPath) -> String {
+    let mut result = String::new();
+    let mut emit = |command: char, points: &[Point]| {
+        if !result.is_empty() {
+            result.push(' ');
+        }
+        result.push(command);
+        for (index, point) in points.iter().enumerate() {
+            if index > 0 {
+                result.push(' ');
+            }
+            result.push_str(&point.x.to_string());
+            result.push(',');
+            result.push_str(&point.y.to_string());
+        }
+    };
+    for element in path.elements() {
+        match *element {
+            PathEl::MoveTo(p) => emit('M', &[p]),
+            PathEl::LineTo(p) => emit('L', &[p]),
+            PathEl::QuadTo(a, b) => emit('Q', &[a, b]),
+            PathEl::CurveTo(a, b, c) => emit('C', &[a, b, c]),
+            PathEl::ClosePath => emit('Z', &[]),
+        }
+    }
+    result
+}
+
 #[derive(Clone, Copy, Debug)]
 pub struct TextFont<'a> {
     pub family: &'a str,
@@ -170,7 +198,7 @@ fn outline_with_font(
         .map(|table| (table.windows_ascender(), table.windows_descender(), 0))
         .unwrap_or_else(|| (face.ascender(), face.descender(), face.line_gap()));
     Some(OutlinedText {
-        path: path.to_svg(),
+        path: svg_path(&path),
         advance_width: x.abs(),
         ascent: f64::from(ascent) * scale,
         descent: -f64::from(descent) * scale,
@@ -487,7 +515,7 @@ pub fn warp_text_aligned(
     if output.elements().len() > MAX_ELEMENTS {
         return None;
     }
-    Some(output.to_svg())
+    Some(svg_path(&output))
 }
 
 /// Translate or scale an outline without changing its winding or curve segments.
@@ -512,5 +540,5 @@ pub fn transform_path(path: &str, scale_x: f64, scale_y: f64, x: f64, y: f64) ->
     }) {
         return None;
     }
-    Some(transformed.to_svg())
+    Some(svg_path(&transformed))
 }

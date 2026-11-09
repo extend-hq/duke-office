@@ -16,6 +16,7 @@ use std::{
     sync::OnceLock,
 };
 
+#[cfg(target_arch = "wasm32")]
 use base64::Engine;
 use compact_str::CompactString;
 use quick_xml::{
@@ -789,7 +790,10 @@ impl<'x> TreeBuilder<'x> {
             if !preflight {
                 budget.consume_attribute(&attribute);
             }
-            let name = self.name_ref(local_name(attribute.key.as_ref()));
+            let key = attribute.key.as_ref();
+            let local = local_name(key);
+            let prefixed = key.len() != local.len();
+            let name = self.name_ref(local);
             let raw = attribute.value.as_ref();
             let value = if self.borrowable && memchr::memchr(b'&', raw).is_none() {
                 self.name_ref(raw)
@@ -799,7 +803,11 @@ impl<'x> TreeBuilder<'x> {
                     .map_err(|error| ParseError::Corrupt(format!("{}: {error}", self.context)))?;
                 self.intern(decoded.into_owned())
             };
-            self.attributes.push(RawAttribute { name, value });
+            self.attributes.push(RawAttribute {
+                name,
+                value,
+                prefixed,
+            });
         }
         let attributes_len = self.attributes.len() as u32 - attributes_start;
         let qualified = start.name();
@@ -940,7 +948,8 @@ fn parse_xml_tree(
     let buffer = xml;
     let base = if buffer.starts_with(b"\xef\xbb\xbf") { 3 } else { 0 };
     let xml: &[u8] = &buffer[base..];
-    let borrowable = xml.len() < u32::MAX as usize && std::str::from_utf8(xml).is_ok();
+    let xml_text = std::str::from_utf8(xml).ok();
+    let borrowable = xml.len() < u32::MAX as usize && xml_text.is_some();
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(false);
     let mut builder = TreeBuilder {
@@ -958,7 +967,7 @@ fn parse_xml_tree(
     let mut budget = XmlBudget::default();
     let track_image_extensions = memchr::memmem::find(xml, b"svgBlip").is_some();
     let track_editing = memchr::memmem::find(xml, b"cNv").is_some();
-    let track_existing_namespaces = std::str::from_utf8(xml).is_ok_and(|xml| {
+    let track_existing_namespaces = xml_text.is_some_and(|xml| {
         xml.contains("oMath")
             || xml.contains("transition")
             || xml.contains("timing")
@@ -1172,9 +1181,15 @@ fn parse_xml_tree(
 }
 
 fn bool_value(value: &str) -> Option<bool> {
-    match value.to_ascii_lowercase().as_str() {
-        "1" | "true" | "t" | "on" => Some(true),
-        "0" | "false" | "f" | "off" => Some(false),
+    match value {
+        "1" => Some(true),
+        "0" => Some(false),
+        _ if value.eq_ignore_ascii_case("true")
+            || value.eq_ignore_ascii_case("t")
+            || value.eq_ignore_ascii_case("on") => Some(true),
+        _ if value.eq_ignore_ascii_case("false")
+            || value.eq_ignore_ascii_case("f")
+            || value.eq_ignore_ascii_case("off") => Some(false),
         _ => None,
     }
 }
@@ -2238,6 +2253,27 @@ fn parse_run_style(
         .and_then(|link| link.attr("id"))
         .and_then(|id| rels.get(id))
         .cloned();
+    let mut attributes = [None; 10];
+    for (name, value) in properties.unqualified_attributes() {
+        let index = match name {
+            "sz" => 0,
+            "b" => 1,
+            "i" => 2,
+            "u" => 3,
+            "strike" => 4,
+            "baseline" => 5,
+            "lang" => 6,
+            "altLang" => 7,
+            "spc" => 8,
+            "kern" => 9,
+            _ => continue,
+        };
+        if attributes[index].is_none() {
+            attributes[index] = Some(value);
+        }
+    }
+    let [size, bold, italic, underline, strike, baseline, language, alternative_language, spacing, kerning] =
+        attributes;
     RunStyle {
         font_family: font_family
             .clone()
@@ -2246,35 +2282,27 @@ fn parse_run_style(
         east_asian_font_family,
         complex_script_font_family,
         symbol_font_family,
-        font_size_pt: properties
-            .attr("sz")
+        font_size_pt: size
             .and_then(|value| value.parse::<f64>().ok())
             .map(|value| value / 100.0),
-        bold: properties.attr("b").and_then(bool_value),
-        italic: properties.attr("i").and_then(bool_value),
-        underline: properties
-            .attr("u")
-            .map(|value| value != "none" && value != "0"),
-        strike: properties
-            .attr("strike")
-            .map(|value| value != "noStrike" && value != "none" && value != "0"),
+        bold: bold.and_then(bool_value),
+        italic: italic.and_then(bool_value),
+        underline: underline.map(|value| value != "none" && value != "0"),
+        strike: strike.map(|value| value != "noStrike" && value != "none" && value != "0"),
         color: parse_color(properties, colors),
-        baseline: properties
-            .attr("baseline")
+        baseline: baseline
             .and_then(|value| value.parse::<f64>().ok())
             .map(|value| value / 1_000.0),
-        language: properties.attr("lang").map(str::to_owned),
-        alternative_language: properties.attr("altLang").map(str::to_owned),
+        language: language.map(str::to_owned),
+        alternative_language: alternative_language.map(str::to_owned),
         right_to_left: properties
             .child("rtl")
             .map(|node| node.attr("val").and_then(bool_value).unwrap_or(true)),
         hyperlink,
-        character_spacing_pt: properties
-            .attr("spc")
+        character_spacing_pt: spacing
             .and_then(|value| value.parse::<f64>().ok())
             .map(|value| value / 100.0),
-        kerning_threshold_pt: properties
-            .attr("kern")
+        kerning_threshold_pt: kerning
             .and_then(|value| value.parse::<f64>().ok())
             .map(|value| value / 100.0),
     }
@@ -3524,6 +3552,17 @@ struct OfficeArtColors<'a, 'b> {
     relationships: &'a Relationships,
 }
 
+fn encode_asset_base64(bytes: &[u8]) -> String {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        base64_simd::STANDARD.encode_to_string(bytes)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        base64::engine::general_purpose::STANDARD.encode(bytes)
+    }
+}
+
 impl rust_office_art::PictureContext for OfficeArtColors<'_, '_> {
     fn resolve_image(&self, relationship_id: &str) -> Option<String> {
         let id = self
@@ -3535,7 +3574,7 @@ impl rust_office_art::PictureContext for OfficeArtColors<'_, '_> {
         Some(format!(
             "data:{};base64,{}",
             asset.content_type,
-            base64::engine::general_purpose::STANDARD.encode(asset.data.as_ref()?)
+            encode_asset_base64(asset.data.as_ref()?)
         ))
     }
 
@@ -3960,7 +3999,7 @@ fn parse_image_node(
         let source = format!(
             "data:{};base64,{}",
             asset.content_type,
-            base64::engine::general_purpose::STANDARD.encode(bytes)
+            encode_asset_base64(bytes)
         );
         let appearance = picture_appearance_xml(fill, &sources, &transform);
         rust_office_art::render_picture(

@@ -1,6 +1,6 @@
 [package]
 name = "rust-office-art"
-version = "0.1.6"
+version = "0.1.7"
 edition.workspace = true
 license = "MIT AND Apache-2.0 AND OFL-1.1"
 repository.workspace = true
@@ -19,5 +19,5 @@ serde.workspace = true
 serde_bytes.workspace = true
 quick-xml.workspace = true
 roxmltree = "0.20"
-kurbo = "0.13.1"
+kurbo = { version = "0.13.1", default-features = false, features = ["libm"] }
 rustybuzz = "0.20.1"

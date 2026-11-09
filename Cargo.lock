@@ -446,6 +446,7 @@ checksum = "4b60dfc32f652b926df6192e55525b16d186c69d47876c3ead4da5cc9f8450e2"
 dependencies = [
  "arrayvec",
  "euclid",
+ "libm",
  "polycool",
  "smallvec",
 ]
@@ -607,6 +608,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "50596ddc09eb5ad5f75cacd40209568e66df71baf86e1499a0e99c4cff12a5a6"
 dependencies = [
  "arrayvec",
+ "libm",
 ]
 
 [[package]]
@@ -720,7 +722,7 @@ checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
 name = "rust-docx"
-version = "0.2.17"
+version = "0.2.18"
 dependencies = [
  "arc-swap",
  "base64",
@@ -745,7 +747,7 @@ dependencies = [
 
 [[package]]
 name = "rust-docx-wasm"
-version = "0.2.17"
+version = "0.2.18"
 dependencies = [
  "js-sys",
  "rust-docx",
@@ -757,7 +759,7 @@ dependencies = [
 
 [[package]]
 name = "rust-office-art"
-version = "0.1.6"
+version = "0.1.7"
 dependencies = [
  "base64",
  "image",
@@ -773,7 +775,7 @@ dependencies = [
 
 [[package]]
 name = "rust-office-charts"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "base64",
  "kurbo",
@@ -786,7 +788,7 @@ dependencies = [
 
 [[package]]
 name = "rust-office-charts-wasm"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "rust-office-charts",
  "serde",
@@ -796,9 +798,10 @@ dependencies = [
 
 [[package]]
 name = "rust-pptx"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64",
+ "base64-simd",
  "cfb",
  "compact_str",
  "flate2",
@@ -817,7 +820,7 @@ dependencies = [
 
 [[package]]
 name = "rust-pptx-wasm"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "rust-pptx",
  "serde",

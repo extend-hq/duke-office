@@ -19,6 +19,7 @@ def main():
     parser.add_argument('--run-tag', default='')
     parser.add_argument('--semantic-reference-label')
     parser.add_argument('--baseline-label')
+    parser.add_argument('--peer-binary', type=Path)
     parser.add_argument('--svg-definition-gate', action='store_true')
     parser.add_argument('--exact-gate', action='store_true')
     parser.add_argument('--artwork-math-gate', action='store_true')
@@ -198,6 +199,8 @@ def main():
         records = [json.loads(line) for line in (run / 'parity.jsonl').read_text().splitlines()]
         if original_gate['equal'] != original_gate['total'] or len(records) != original_gate['total'] or not all(r['equal'] for r in records):
             raise SystemExit('The complete exact-output gate must pass.')
+        if hashlib.sha256((run / 'parity.jsonl').read_bytes()).hexdigest() != original_gate['records_sha256']:
+            raise SystemExit('Exact-output audit records changed.')
         baseline = Path(original_gate['baseline_path'])
         gate = original_gate
     elif args.svg_definition_gate:
@@ -242,6 +245,18 @@ def main():
     for binary, key in [(candidate, 'candidate_sha256'), (baseline, 'baseline_sha256')]:
         if hashlib.sha256(binary.read_bytes()).hexdigest() != gate[key]:
             raise SystemExit('Executable identity changed.')
+    peer_binary = args.peer_binary or candidate
+    peer_sha256 = hashlib.sha256(peer_binary.read_bytes()).hexdigest()
+    identity_path = run / 'identity.json'
+    identity = json.loads(identity_path.read_text()) if identity_path.exists() else {}
+    build_files = identity.get('build_files', {})
+    source_files = identity.get('sources', {})
+    root = Path(__file__).resolve().parents[2]
+    if any(hashlib.sha256((root / path).read_bytes()).hexdigest() != digest for path, digest in source_files.items()):
+        raise SystemExit('Parser source changed after the candidate snapshot.')
+    if any(hashlib.sha256((root / path).read_bytes()).hexdigest() != digest for path, digest in build_files.items()):
+        raise SystemExit('Build configuration changed after the candidate snapshot.')
+    harness_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     reference = json.loads((OUT / args.cohort_phase / 'assessment.json').read_text())
     manifest = {r['id']: r for r in json.loads((OUT / args.cohort_phase / 'cohort.json').read_text())}
     eligible = sorted([r for r in reference['rows'] if r['engine'] == 'rust-pptx' and r['id'] in reference['common_ids']], key=lambda r: r['median_ms'])
@@ -264,7 +279,7 @@ def main():
         raise SystemExit('Timing output already exists; preserve the original run.')
     with output.open('w', buffering=1) as stream:
         for ident in selected:
-            engines = [('baseline', baseline, 'rust-pptx'), ('candidate', candidate, 'rust-pptx'), ('office_oxide', candidate, 'office_oxide'), ('undoc', candidate, 'undoc')]
+            engines = [('baseline', baseline, 'rust-pptx'), ('candidate', candidate, 'rust-pptx'), ('office_oxide', peer_binary, 'office_oxide'), ('undoc', peer_binary, 'undoc')]
             rng.shuffle(engines)
             for label, binary, engine in engines:
                 record = invoke(binary, engine, manifest[ident], '-', 7)
@@ -274,6 +289,12 @@ def main():
                 if record['status'] != 'ok':
                     raise SystemExit('A selected timing input failed.')
             print(ident, flush=True)
+    if hashlib.sha256(peer_binary.read_bytes()).hexdigest() != peer_sha256:
+        raise SystemExit('Peer executable changed during timing.')
+    if any(hashlib.sha256((root / path).read_bytes()).hexdigest() != digest for path, digest in source_files.items()):
+        raise SystemExit('Parser source changed during timing.')
+    if any(hashlib.sha256((root / path).read_bytes()).hexdigest() != digest for path, digest in build_files.items()):
+        raise SystemExit('Build configuration changed during timing.')
     times = {(r['id'], r['label']): statistics.median(r['samples_ms']) for r in records}
     ratios = [times[ident, 'baseline'] / times[ident, 'candidate'] for ident in selected]
     bootstrap = sorted(statistics.median(rng.choices(ratios, k=len(ratios))) for _ in range(4000))
@@ -283,6 +304,9 @@ def main():
     summary['cohort_phase'] = args.cohort_phase
     summary['run_tag'] = args.run_tag
     summary['entire_eligible_cohort'] = count == len(eligible)
+    summary['peer_binary_path'] = str(peer_binary)
+    summary['peer_binary_sha256'] = peer_sha256
+    summary['harness_sha256'] = harness_sha256
     if args.object_editing_gate:
         summary['object_editing_source_review'] = True
         summary['object_editing_source_label'] = editing_source_run.name

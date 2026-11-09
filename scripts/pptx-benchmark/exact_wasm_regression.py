@@ -17,17 +17,24 @@ def main():
     parser.add_argument('--manifest', required=True, type=Path)
     parser.add_argument('--baseline-check', required=True)
     parser.add_argument('--current-check', required=True)
+    parser.add_argument('--native-proof', default='parity-summary.json')
+    parser.add_argument('--native-records', default='parity.jsonl')
     args = parser.parse_args()
     run = OUT / 'experiments' / args.label
     before_dir, after_dir = [OUT / name for name in [args.baseline_check, args.current_check]]
     destination = after_dir / 'exact-regression.json'
     if destination.exists():
         raise SystemExit('Preserve existing regression receipts.')
-    proof = json.loads((run / 'parity-summary.json').read_text())
-    assert proof['equal'] == proof['total']
+    proof_path = run / args.native_proof
+    records_path = run / args.native_records
+    proof = json.loads(proof_path.read_text())
+    assert proof.get('equal', proof.get('passed')) == proof['total']
     assert sha(run / 'candidate') == proof['candidate_sha256']
-    assert sha(run / 'parity.jsonl') == proof['records_sha256']
-    native = {row['id']: row for row in map(json.loads, (run / 'parity.jsonl').read_text().splitlines())}
+    assert sha(records_path) == proof['records_sha256']
+    for name, expected in proof.get('review_sha256', {}).items():
+        assert sha(run / name) == expected
+    native = {row['id']: row for row in map(json.loads, records_path.read_text().splitlines())}
+    assert len(native) == proof['total']
     manifest = json.loads(args.manifest.read_text())
     expected_ids = {row['id'] for row in manifest}
     assert len(expected_ids) == len(manifest) and expected_ids <= native.keys()
@@ -62,7 +69,8 @@ def main():
                   successful_models=sum(row['status'] == 'ok' for row in receipts),
                   artwork_hashes=sum(row.get('artwork_hashes', 0) for row in receipts),
                   baseline_identity=identities[0], candidate_identity=identities[1],
-                  manifest_sha256=sha(args.manifest), native_proof_sha256=sha(run / 'parity-summary.json'),
+                  manifest_sha256=sha(args.manifest), native_proof_sha256=sha(proof_path),
+                  native_proof_path=str(proof_path), native_records_path=str(records_path),
                   baseline_records_sha256=sha(before_dir / 'records.json'),
                   candidate_records_sha256=sha(after_dir / 'records.json'),
                   harness_sha256=sha(__file__), receipts=receipts,

@@ -311,3 +311,55 @@ python3 scripts/pptx-benchmark/retained_render_timing.py --label retained-parse1
 ```
 
 `wasm_retained_check.mjs` exercises the WASM class on the 687-input cohort: `document()` must equal `parse_presentation(bytes, { deferArtwork: true })` after compacting, and for up to `LIMIT` eager artwork nodes per input `render_node_artwork(target)` must equal both the eager artwork and `render_presentation_node_artwork`; inputs the bridge rejects must be rejected by the class with the same error. It writes `records.json` and `summary.json` into the named output directory and refuses to overwrite them. `retained_render_timing.py` requires a passing deferral gate for the same executable, selects the same 40 tuning inputs as `expanded_timing.py` and runs the runner's `rust-pptx-render-timing` engine (`pptx-benchmark rust-pptx-render-timing INPUT - SAMPLES TARGETS`), which collects the first `TARGETS` nodes with eager artwork and times, interleaved within one process and alternating in order, `TARGETS` renders through `render_node_artwork` against one `parse_presentation_retained` plus the same renders through the handle; the handle's creation is reported inside its total and alone. It records the load average per input and writes `retained-render-timings.jsonl` and `retained-render-timing-summary.json` with paired per-input ratios and 95% bootstrap intervals (re-parsing over retained 9.98× (9.52–10.82×) with the handle's creation included, 67.6× (54.1–77.2×) for the renders alone, on 39 inputs with artwork and 438 renders). Inputs without eager artwork carry no ratio. These ratios compare two ways of producing the same on-demand artwork and say nothing about the eager default; the `peak-rss.json` receipt in the experiment directory records `/usr/bin/time -l` peak resident sizes of standalone eager, deferred and retained parses on the three retained profiling inputs.
+
+
+## Document identity and ARM hashing
+
+The `released-020` baseline adds exact-input SHA-256 identity to the model. `source_identity_gate.py --label released-020 --baseline retained-parse1 --manifest output/pptx-benchmark-20261106/bom-source-cohort.json` independently verifies that identity against the manifest digest, removes only the root `documentId`, and requires the complete remaining model hash to equal the preceding release on all 1,156 inputs. Errors must remain exact. It preserves mismatches and refuses to overwrite its records. The runner's `identity` mode is untimed and restores the identity before writing the compact model.
+
+`sha2-arm1` then enables the same target-specific SHA-256 acceleration as rust-docx. It changes no parsed fields. Stage the standalone benchmark with `stage_candidate.py`, which now archives and hashes every parser Rust source and the workspace, crate and benchmark Cargo configuration, and records the compiler version. Workspace feature unification can otherwise conceal the standalone hashing cost.
+
+```sh
+python3 scripts/pptx-benchmark/exact_candidate_gate.py --label sha2-arm1 --baseline released-020 --baseline-proof source-identity-summary.json --baseline-records source-identity.jsonl --manifest output/pptx-benchmark-20261106/bom-source-cohort.json
+python3 scripts/pptx-benchmark/expanded_timing.py --label sha2-arm1 --exact-gate --count 40 --cohort-phase current-20261109 --run-tag pilot --peer-binary output/pptx-benchmark-20261106/current-20261109/parser-benchmark
+python3 scripts/pptx-benchmark/expanded_timing.py --label sha2-arm1 --exact-gate --count 610 --cohort-phase current-20261109 --run-tag full-main --peer-binary output/pptx-benchmark-20261106/current-20261109/parser-benchmark
+```
+
+The peer executable is explicitly frozen so candidate dependency features cannot change peer implementations. Timing requires a complete exact-output gate with unchanged records, verifies build configuration before and after the run, and records the peer and harness hashes. The pilot gives 1.044× paired median speedup (95% interval 1.032–1.078×); the predeclared 610-input follow-up gives 1.068× (1.065–1.076×). Only 15/610 inputs beat Office Oxide. The two incomplete attempts are preserved under `excluded-npm-overlap` and `interrupted-main-switch`; neither contributes to the final measurement. The reserved corpus remains untouched.
+
+
+## Attribute lookup follow-up
+
+`attr-values1` uses the same 1,156-input exact gate against `sha2-arm1`. The matching WASM builds are `wasm-released-020` and `wasm-attr-values1`; `wasm_check.mjs` records both on `wasm-bom-cohort.json` with `--hash-artwork --hash-editing`, and `exact_wasm_regression.py --label attr-values1 --manifest output/pptx-benchmark-20261106/wasm-bom-cohort.json --baseline-check wasm-check-released-020 --current-check wasm-check-attr-values1` verifies all 687 results and 41,467 artwork hashes. This preserves the previous WASM behavior without waiving the prior strict native/WASM numerical difference.
+
+## Portable curve math follow-up
+
+`kurbo-libm1` switches the shared geometry dependencies to their portable-math features. The native baseline is `attr-values1`; the WASM baseline remains `wasm-check-attr-values1`. The complete native audit uses `artwork_math_gate.py`, followed by `artwork_bounds_review.py` and `review_artwork_math.py`. Exact cross-platform equality is checked separately and is not replaced by the numerical-change review.
+
+```sh
+python3 scripts/pptx-benchmark/artwork_math_gate.py --label kurbo-libm1 --baseline-label attr-values1 --manifest output/pptx-benchmark-20261106/bom-source-cohort.json
+python3 scripts/pptx-benchmark/artwork_bounds_review.py --label kurbo-libm1
+python3 scripts/pptx-benchmark/review_artwork_math.py --label kurbo-libm1
+python3 scripts/pptx-benchmark/compare_wasm.py --semantic-label kurbo-libm1 --record-file artwork-math.jsonl --native-experiment kurbo-libm1 --wasm-dir wasm-check-kurbo-libm1 --manifest output/pptx-benchmark-20261106/wasm-bom-cohort.json --exact-artwork
+python3 scripts/pptx-benchmark/exact_wasm_regression.py --label kurbo-libm1 --native-proof artwork-reviewed-summary.json --native-records artwork-math.jsonl --manifest output/pptx-benchmark-20261106/wasm-bom-cohort.json --baseline-check wasm-check-attr-values1 --current-check wasm-check-kurbo-libm1
+```
+
+Use fresh experiment and WASM output directories when reproducing. Dependency features must be checked for the actual consumer graph: another dependency can re-enable `kurbo/std` through Cargo feature unification. Timing uses `--artwork-math-gate` and the same frozen peer executable as the preceding experiments, after all owned build and validation processes finish. Every staged parser-source and build-configuration hash is verified before and after timing.
+
+`kurbo-libm1` passes all 1,156 native reviews, with 1,153 exact outputs/errors and three models changing only tiny artwork numbers. No bounds change. All 687 previous WASM results remain exact. Strict native/WASM comparison now passes all 625 successful models and artwork sets, plus two changed inputs outside that cohort. The full 610-input paired ratio is 1.00017× (95% interval 0.99895–1.00129×); retain for consistency, without claiming a speed gain.
+
+The subsequent `geometry-reuse1` trial reuses parsed curves and flattened contours and writes coordinates directly into the output string. Run `exact_candidate_gate.py --label geometry-reuse1 --baseline kurbo-libm1 --baseline-proof artwork-reviewed-summary.json --baseline-records artwork-math.jsonl --manifest output/pptx-benchmark-20261106/bom-source-cohort.json --jobs 2` for its exact native audit. `--jobs` controls isolated correctness processes only; timing remains serial and starts after all validation completes. All 1,156 native and 689 WASM results remain exact, including 41,540 artwork hashes. The full paired ratio is 0.99623× (0.99510–0.99710×), a small regression, so the trial is reverted. All 80 retained parser-source hashes again match `kurbo-libm1`. Its predeclared source-3D subset is derived from the same full run and is not an independent benchmark.
+
+The fixed 40-input pilot and predeclared 610-input follow-up use `expanded_timing.py --label attr-values1 --exact-gate --cohort-phase current-20261109 --peer-binary output/pptx-benchmark-20261106/current-20261109/parser-benchmark`, with `--count 40 --run-tag pilot` and `--count 610 --run-tag full`. They measure 1.019× (1.008–1.034×) and 1.011× (1.010–1.012×), respectively. The full run wins 15/610 inputs against Office Oxide. Source review and subsequent binary analysis are kept outside the timing window; the original data and retention decision remain in the experiment directory.
+
+
+`run-style-scan1` follows `kurbo-libm1` using `--baseline-proof artwork-reviewed-summary.json --baseline-records artwork-math.jsonl`. It preserves all 1,156 native and 689 WASM results and improves the paired median by 1.00642× (95% interval 1.00490–1.00794×) on all 610 common timing inputs. Its absolute median is 1.022 ms. The focused probes record the old foreign-attribute collision as a source failure, not a passing accuracy result. `run-style-ns1` fixes that separately and uses `run-style-scan1` as its exact corpus baseline with `--baseline-proof parity-summary.json --baseline-records parity.jsonl`. The generated namespace probes separately check corrected source expectations.
+
+
+`attr-inline1` is rejected: exact output is preserved, but full paired timing is inconclusive at 1.00075× (0.99815–1.00292×), with larger native and WASM binaries. Production code is restored to `run-style-ns1`. `base64-simd1` then applies native SIMD base64 encoding to the two PPTX asset paths with the same corpus/native/WASM/namespace gates, plus 16,544 encoding comparisons. The full paired ratio is 1.00598× (1.00368–1.00849×); summed medians fall 7.52%, and absolute median/p95 are 1.039/12.961 ms. Retain this change. The scalar WASM path and all scored source features remain unchanged.
+
+
+`bool-noalloc1` follows `base64-simd1` and removes lowercase-string allocation during Boolean attribute parsing. It preserves all corpus and namespace outputs and passes 100,342 direct boundary/Unicode comparisons. Its predeclared full paired timing gives 1.00501× (95% interval 1.00401–1.00605×); absolute median/p95 are 1.005/12.886 ms. Retain it, while reporting that default-mode median remains above 1 ms. `xml-utf8-once1` subsequently trials reusing the XML part’s validated UTF-8 view for namespace-retention detection. It follows the same exact native/WASM and fixed 40→610 timing protocol; decisions require the complete run.
+
+
+The completed `xml-utf8-once1` run passes all 1,156 native, 689 previous WASM and 96 namespace/BOM checks with strict artwork equality. The full paired ratio is 1.00549× (95% interval 1.00350–1.00787×); absolute median/p95 are 1.044/12.788 ms. Retain it. Source/build hashes match the frozen snapshot. The under-1 ms median target remains unmet; the earlier 0.2.0 crate and 0.4.1 React releases do not contain these subsequent local changes.
