@@ -479,6 +479,16 @@ fn joined_block_content(blocks: &[DocumentBlock], separator: &str) -> String {
     content
 }
 
+/// The number of UTF-16 code units in `text`, equal to `text.encode_utf16().count()`.
+#[inline]
+fn utf16_len(text: &str) -> usize {
+    if text.is_ascii() {
+        return text.len();
+    }
+    // Every scalar is one unit, plus one more for each four-byte sequence (lead byte 0xF0..).
+    text.chars().count() + text.bytes().filter(|byte| *byte >= 0xf0).count()
+}
+
 fn paragraph_field_instructions(xml: &str) -> Vec<String> {
     if crate::xml::find_ignore_ascii_case(xml, 0, "<w:instrText").is_none() {
         return Vec::new();
@@ -541,13 +551,13 @@ impl Extractor<'_> {
     fn words(&self, block: &DocumentBlock) -> Vec<DocumentWord> {
         let block_id = &block.id;
         let content = &block.content;
-        let length = content.encode_utf16().count();
+        let length = utf16_len(content);
         let mut offset = 0;
         content
             .split_word_bounds()
             .filter_map(|word| {
                 let start = offset;
-                offset += word.encode_utf16().count();
+                offset += utf16_len(word);
                 if word.chars().all(char::is_whitespace) {
                     return None;
                 }
@@ -681,7 +691,16 @@ impl Extractor<'_> {
         } else {
             BlockType::Text
         };
-        let mut content = String::new();
+        // Sized for the text runs up front so appending them never regrows the buffer.
+        let mut content = String::with_capacity(
+            p.children
+                .iter()
+                .map(|child| match child {
+                    ParagraphChildNode::Text(run) => run.text.len(),
+                    _ => 0,
+                })
+                .sum(),
+        );
         let mut inline = Vec::with_capacity(p.children.len());
         let mut children = Vec::new();
         let mut text_offset = 0;
@@ -689,7 +708,7 @@ impl Extractor<'_> {
             match child {
                 ParagraphChildNode::Text(run) => {
                     let start = text_offset;
-                    text_offset += run.text.encode_utf16().count();
+                    text_offset += utf16_len(&run.text);
                     content.push_str(&run.text);
                     inline.push(ParagraphInline::Text {
                         start,
@@ -709,7 +728,7 @@ impl Extractor<'_> {
                             .unwrap_or_default()
                     });
                     let start = text_offset;
-                    text_offset += value.encode_utf16().count();
+                    text_offset += utf16_len(&value);
                     content.push_str(&value);
                     inline.push(ParagraphInline::FormField {
                         block_id: child_id.clone(),
@@ -1183,6 +1202,24 @@ mod typed_table_tests {
             assert_eq!(details["columnSpan"], 2);
             assert_eq!(details["isHeader"], true);
             assert_eq!(details["style"]["backgroundColor"], "#FFCC00");
+        }
+    }
+}
+
+#[cfg(test)]
+mod utf16_len_tests {
+    use super::utf16_len;
+
+    #[test]
+    fn counts_code_units_for_every_scalar_and_for_mixed_text() {
+        let mut buffer = [0u8; 4];
+        for code in 0..=0x10ffffu32 {
+            if let Some(scalar) = char::from_u32(code) {
+                assert_eq!(utf16_len(scalar.encode_utf8(&mut buffer)), scalar.len_utf16());
+            }
+        }
+        for text in ["", "plain ascii", "naïve café", "中文段落", "A😀B", "\u{7f}\u{80}\u{7ff}\u{800}\u{ffff}\u{10000}\u{10ffff}", "e\u{301}👩‍👩‍👧‍👦 mixed 文 text"] {
+            assert_eq!(utf16_len(text), text.encode_utf16().count(), "{text:?}");
         }
     }
 }

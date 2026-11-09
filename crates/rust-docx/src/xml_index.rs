@@ -13,6 +13,41 @@ fn token_requires_edit_checks(token: &str) -> bool {
         || memchr::memchr_iter(b'&', bytes).any(|at| bytes.get(at + 1) == Some(&b'#'))
 }
 
+/// Byte equality for short markup tokens, settled with inline word loads so the hot
+/// comparisons skip the `memcmp` call. Longer slices use the library comparison.
+#[inline(always)]
+fn same_bytes(left: &[u8], right: &[u8]) -> bool {
+    let len = left.len();
+    if len != right.len() {
+        return false;
+    }
+    if len > 64 {
+        return left == right;
+    }
+    if len >= 8 {
+        let word = |bytes: &[u8], at: usize| {
+            u64::from_le_bytes(bytes[at..at + 8].try_into().unwrap())
+        };
+        let last = len - 8;
+        let mut at = 0;
+        while at < last {
+            if word(left, at) != word(right, at) {
+                return false;
+            }
+            at += 8;
+        }
+        // The final word overlaps bytes already compared when `len` is not a multiple of 8.
+        return word(left, last) == word(right, last);
+    }
+    if len >= 4 {
+        let word = |bytes: &[u8], at: usize| {
+            u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap())
+        };
+        return word(left, 0) == word(right, 0) && word(left, len - 4) == word(right, len - 4);
+    }
+    left.iter().zip(right).all(|(left, right)| left == right)
+}
+
 struct Element {
     start: u32,
     open_end: u32,
@@ -210,9 +245,10 @@ impl Index {
                 let id = stack.pop()?;
                 let next = index.elements.len();
                 let element = &mut index.elements[id];
-                if xml.as_bytes()[element.name_range(&index.named_elements, 0)]
-                    != xml.as_bytes()[start + 2..end - 1]
-                {
+                if !same_bytes(
+                    &xml.as_bytes()[element.name_range(&index.named_elements, 0)],
+                    &xml.as_bytes()[start + 2..end - 1],
+                ) {
                     return None;
                 }
                 if SERIALIZED && element.open_end as usize == start {
@@ -239,7 +275,9 @@ impl Index {
                 };
                 let scope_cacheable = CANONICAL && (!HOIST
                     || canonical.activations.last().is_none_or(|(depth, _)| *depth == 0));
-                let cached = !root && scope_cacheable && open_cache[cache_slot].0 == token;
+                let cached = !root
+                    && scope_cacheable
+                    && same_bytes(open_cache[cache_slot].0.as_bytes(), token.as_bytes());
                 let name_id = if cached {
                     // Exact validated tokens retain their interned name in the same index.
                     open_cache[cache_slot].1
@@ -283,7 +321,7 @@ impl Index {
                         ^ ((bytes[bytes.len() / 2] as usize) << 1)
                         ^ bytes[bytes.len() - 1] as usize)
                         & (name_cache.len() - 1);
-                    let name_id = if name_cache[slot].0 == name {
+                    let name_id = if same_bytes(name_cache[slot].0.as_bytes(), bytes) {
                         name_cache[slot].1
                     } else {
                         if SERIALIZED && !canonical_name(name) {
@@ -468,7 +506,7 @@ impl Index {
             cache.resize(128, NameCacheEntry::default());
         }
         let entry = &mut cache[slot];
-        if entry.len as usize == bytes.len() && &entry.name[..bytes.len()] == bytes {
+        if entry.len as usize == bytes.len() && same_bytes(&entry.name[..bytes.len()], bytes) {
             return entry.id;
         }
         let id = self.find_name_id(name);
@@ -613,6 +651,10 @@ impl<'a> Canonical<'a> {
         if outside {
             return text.bytes().all(|b| b.is_ascii_whitespace());
         }
+        // Most text holds neither byte the checks below look for; one scan settles it.
+        if memchr::memchr2(b'>', b'&', text.as_bytes()).is_none() {
+            return true;
+        }
         if SERIALIZED && memchr::memchr(b'>', text.as_bytes()).is_some() {
             self.serialized = false;
         }
@@ -680,15 +722,20 @@ impl<'a> Canonical<'a> {
                 return false;
             };
             let key = &trimmed[..key_end];
-            if key.is_empty() || self.attributes.contains(&key) {
+            let bytes = key.as_bytes();
+            if key.is_empty()
+                || self
+                    .attributes
+                    .iter()
+                    .any(|seen| same_bytes(seen.as_bytes(), bytes))
+            {
                 return false;
             }
-            let bytes = key.as_bytes();
             let slot = (bytes.len().wrapping_mul(31)
                 ^ ((bytes[0] as usize) << 3)
                 ^ ((bytes[bytes.len() / 2] as usize) << 1)
                 ^ bytes[bytes.len() - 1] as usize) & (self.attribute_names.len() - 1);
-            let canonical = if self.attribute_names[slot].0 == key {
+            let canonical = if same_bytes(self.attribute_names[slot].0.as_bytes(), bytes) {
                 self.attribute_names[slot].1
             } else {
                 if !bytes.iter().all(|&b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b':' | b'-' | b'.')) {
@@ -1386,6 +1433,31 @@ pub(crate) fn child<'a>(xml: &'a str, name: &str) -> Option<Option<&'a str>> {
         Some(None)
     })
     .flatten()
+}
+
+#[cfg(test)]
+mod same_bytes_tests {
+    #[test]
+    fn inline_comparison_equals_slice_equality_at_every_length_and_position() {
+        let source: Vec<u8> = (0..96u32).map(|at| (at * 37 + 11) as u8).collect();
+        for len in 0..=source.len() {
+            let left = &source[..len];
+            assert!(super::same_bytes(left, left));
+            assert!(super::same_bytes(left, &left.to_vec()));
+            if len > 0 {
+                assert!(!super::same_bytes(left, &source[..len - 1]));
+                assert!(!super::same_bytes(&source[..len - 1], left));
+            }
+            for at in 0..len {
+                for flip in [1u8, 0x80] {
+                    let mut right = left.to_vec();
+                    right[at] ^= flip;
+                    assert_eq!(super::same_bytes(left, &right), left == right.as_slice());
+                    assert!(!super::same_bytes(&right, left), "length {len}, byte {at}");
+                }
+            }
+        }
+    }
 }
 
 #[cfg(test)]

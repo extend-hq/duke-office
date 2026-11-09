@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.2
+
+- Look up cached shape artwork by a memoized keyed hash and build the owned cache key only when a shape is stored, with unchanged output.
+- Build each part's relationship cache key once instead of once per shape.
+- Skip subtrees that cannot contain a match when collecting XML descendants.
+- Settle XML name comparisons on length and first byte before comparing the full name.
+- Detect namespace declarations and namespace-tracking triggers with plain byte searches.
+
 ## 0.2.1
 
 - Enable runtime-checked ARM SHA-256 acceleration in standalone builds, preserving exact document identity and parser outputs.

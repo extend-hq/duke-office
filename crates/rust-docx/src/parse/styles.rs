@@ -2490,6 +2490,9 @@ fn parse_style_sheet_selected(
     }
 
     let mut raw_styles_by_id = HashMap::new();
+    // Style ids in styles.xml order (first definition wins the position). Everything that
+    // walks the styles follows this order, never the map's, so the output is deterministic.
+    let mut style_order: Vec<String> = Vec::new();
     let mut raw_table_styles_by_id = HashMap::new();
     let mut default_table_style_id = None;
 
@@ -2522,7 +2525,7 @@ fn parse_style_sheet_selected(
         let parsed_style_numbering = parse_paragraph_numbering_from_xml(&paragraph_properties_xml);
         let tab_stops = parse_paragraph_tab_stops_from_xml(&paragraph_properties_xml);
 
-        raw_styles_by_id.insert(
+        let redefined = raw_styles_by_id.insert(
             style_id.clone(),
             RawStyleDefinition {
                 id: style_id.clone(),
@@ -2573,6 +2576,9 @@ fn parse_style_sheet_selected(
                 is_primary: super::scan::contains_tag(&style_xml, "w:qFormat").then_some(true),
             },
         );
+        if redefined.is_none() {
+            style_order.push(style_id.clone());
+        }
 
         if style_type == RawStyleType::Table
             && selected_styles.is_none_or(|ids| ids.contains(&style_id))
@@ -2805,8 +2811,9 @@ fn parse_style_sheet_selected(
         Some(resolved)
     }
 
-    let mut paragraph_styles: Vec<ParagraphStyleDefinition> = raw_styles_by_id
-        .values()
+    let mut paragraph_styles: Vec<ParagraphStyleDefinition> = style_order
+        .iter()
+        .filter_map(|style_id| raw_styles_by_id.get(style_id))
         .filter(|style| style.style_type == RawStyleType::Paragraph)
         .filter_map(|style| {
             let mut stack = HashSet::new();
@@ -2844,7 +2851,7 @@ fn parse_style_sheet_selected(
         .collect::<HashMap<_, _>>();
 
     let mut run_style_by_id = HashMap::new();
-    for style_id in raw_styles_by_id.keys() {
+    for style_id in &style_order {
         let mut stack = HashSet::new();
         if let Some(resolved) = resolve_run_style(
             style_id,
@@ -2912,7 +2919,10 @@ fn parse_style_sheet_selected(
     }
 
     let mut table_style_by_id = HashMap::new();
-    for style_id in raw_table_styles_by_id.keys() {
+    for style_id in style_order
+        .iter()
+        .filter(|style_id| raw_table_styles_by_id.contains_key(*style_id))
+    {
         let mut stack = HashSet::new();
         if let Some(resolved) = resolve_table_style(
             style_id,

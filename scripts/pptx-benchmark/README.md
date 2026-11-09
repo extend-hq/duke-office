@@ -363,3 +363,6 @@ The fixed 40-input pilot and predeclared 610-input follow-up use `expanded_timin
 
 
 The completed `xml-utf8-once1` run passes all 1,156 native, 689 previous WASM and 96 namespace/BOM checks with strict artwork equality. The full paired ratio is 1.00549× (95% interval 1.00350–1.00787×); absolute median/p95 are 1.044/12.788 ms. Retain it. Source/build hashes match the frozen snapshot. The under-1 ms median target remains unmet; the earlier 0.2.0 crate and 0.4.1 React releases do not contain these subsequent local changes.
+
+
+`perf-bundle1` follows `xml-utf8-once1` and measures five output-preserving changes together: hashed shape-artwork cache lookups, one relationship cache key per part, subtree skipping in XML descendant collection, cheaper XML name comparisons and byte searches for namespace detection. It passes all 1,156 native and 689 previous WASM checks, and the 96 namespace/BOM probes are unchanged in both runtimes. The full paired ratio is 1.10648× (95% interval 1.10180–1.11331×); absolute median/p95 are 0.982/14.999 ms against 1.099/15.720 ms for the baseline in the same run. Retain it. The run shared the machine with heavy unrelated load, so compare only the paired ratio; the under-1 ms median needs a quiet-machine run before the target counts as met. It is included in the 0.2.2 crate source.

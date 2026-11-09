@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.19
+
+- Write legacy `.doc` media content types in a fixed order, so a file with several image formats gets the same document identity on every parse. For such a file the model's document id, and the block ids that embed it, can differ from the ones an earlier version returned.
+- Resolve paragraph, run and table styles in `styles.xml` order instead of hash-map order, so the parsed model no longer varies between runs or, in WebAssembly, with what the module parsed before.
+- Share one work queue between the calling thread and the pool workers when inflating ZIP entries and normalizing XML parts in parallel.
+- Speed up case-insensitive XML searches, XML name comparisons and block extraction with unchanged output.
+
 ## 0.2.18
 
 - Use the shared portable curve math dependencies for consistent native and WebAssembly artwork.

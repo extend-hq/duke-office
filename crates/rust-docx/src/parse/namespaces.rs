@@ -1030,34 +1030,33 @@ fn prepare_parallel_parts(
     let parts: Vec<_> = pkg.parts.values().filter(eligible).collect();
     let mut order: Vec<_> = (0..parts.len()).collect();
     order.sort_unstable_by_key(|index| std::cmp::Reverse(parts[*index].content.len()));
-    let mut weights = vec![0usize; workers];
-    let mut assignments = vec![0usize; parts.len()];
-    for index in order {
-        let worker = (0..workers).min_by_key(|worker| weights[*worker])?;
-        assignments[index] = worker;
-        weights[worker] = weights[worker].saturating_add(parts[index].content.len().max(1));
-    }
-    let mut results: Vec<Option<PreparedPart>> = (0..parts.len()).map(|_| None).collect();
-    let mut groups: Vec<Vec<_>> = (0..workers).map(|_| Vec::new()).collect();
-    for ((part, result), worker) in parts.iter().zip(results.iter_mut()).zip(assignments) {
-        groups[worker].push((*part, result));
-    }
-    let mut groups = groups.into_iter();
-    let caller = groups.next()?;
-    pool.in_place_scope(|scope| {
-        for group in groups {
-            scope.spawn(move |_| {
-                let mut prologs = PrologCache::default();
-                for (part, slot) in group {
-                    *slot = Some(prepare_part(part, names_match, &mut prologs));
-                }
-            });
-        }
+    // The caller and the workers claim parts from one queue, largest first. Byte counts
+    // predict cost poorly (a part on the slow normalization path costs far more per byte)
+    // and a worker may be busy hashing the package, so no thread is handed a fixed share:
+    // whoever is free takes the next part and the caller never waits beside unclaimed work.
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let drain = |output: &mut Vec<(usize, PreparedPart)>| {
         let mut prologs = PrologCache::default();
-        for (part, slot) in caller {
-            *slot = Some(prepare_part(part, names_match, &mut prologs));
+        while let Some(&index) =
+            order.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed))
+        {
+            output.push((index, prepare_part(parts[index], names_match, &mut prologs)));
         }
+    };
+    let drain = &drain;
+    let mut outputs: Vec<Vec<(usize, PreparedPart)>> =
+        (0..workers).map(|_| Vec::new()).collect();
+    let (caller, spawned) = outputs.split_first_mut()?;
+    pool.in_place_scope(|scope| {
+        for output in spawned {
+            scope.spawn(move |_| drain(output));
+        }
+        drain(caller);
     });
+    let mut results: Vec<Option<PreparedPart>> = (0..parts.len()).map(|_| None).collect();
+    for (index, prepared) in outputs.into_iter().flatten() {
+        results[index] = Some(prepared);
+    }
     Some(
         parts
             .into_iter()

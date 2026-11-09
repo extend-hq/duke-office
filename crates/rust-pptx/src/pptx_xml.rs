@@ -202,6 +202,14 @@ impl fmt::Debug for XmlNode<'_> {
     }
 }
 
+/// String equality that settles most mismatches on length or first byte, before any
+/// `memcmp` call.
+#[inline]
+fn same_name(candidate: &str, name: &str) -> bool {
+    let (candidate, name) = (candidate.as_bytes(), name.as_bytes());
+    candidate.len() == name.len() && candidate.first() == name.first() && candidate == name
+}
+
 impl<'t> XmlNode<'t> {
     pub(super) fn name_bit(name: &[u8]) -> u64 {
         let hash = name.iter().fold(2166136261u32, |hash, byte| {
@@ -252,7 +260,7 @@ impl<'t> XmlNode<'t> {
         let end = start + raw.attributes_len as usize;
         self.document.attributes[start..end]
             .iter()
-            .find(|attribute| self.document.resolve(attribute.name) == name)
+            .find(|attribute| same_name(self.document.resolve(attribute.name), name))
             .map(|attribute| self.document.resolve(attribute.value))
     }
 
@@ -279,7 +287,7 @@ impl<'t> XmlNode<'t> {
     }
 
     pub(super) fn child(self, name: &str) -> Option<XmlNode<'t>> {
-        self.children().find(|child| child.name() == name)
+        self.children().find(|child| same_name(child.name(), name))
     }
 
     pub(super) fn children_named<'n>(self, name: &'n str) -> ChildrenNamed<'t, 'n> {
@@ -297,7 +305,7 @@ impl<'t> XmlNode<'t> {
         if self.subtree_names() & bit == 0 {
             return None;
         }
-        if self.name() == name {
+        if same_name(self.name(), name) {
             return Some(self);
         }
         self.children()
@@ -305,11 +313,19 @@ impl<'t> XmlNode<'t> {
     }
 
     pub(super) fn collect_descendants(self, name: &str, output: &mut Vec<XmlNode<'t>>) {
-        if self.name() == name {
+        self.collect_descendants_with_bit(name, Self::name_bit(name.as_bytes()), output);
+    }
+
+    /// Skips subtrees whose name summary rules out a match, like `descendant`.
+    fn collect_descendants_with_bit(self, name: &str, bit: u64, output: &mut Vec<XmlNode<'t>>) {
+        if self.subtree_names() & bit == 0 {
+            return;
+        }
+        if same_name(self.name(), name) {
             output.push(self);
         }
         for child in self.children() {
-            child.collect_descendants(name, output);
+            child.collect_descendants_with_bit(name, bit, output);
         }
     }
 
@@ -405,6 +421,6 @@ impl<'t> Iterator for ChildrenNamed<'t, '_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         let name = self.name;
-        self.children.find(|child| child.name() == name)
+        self.children.find(|child| same_name(child.name(), name))
     }
 }

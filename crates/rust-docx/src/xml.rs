@@ -617,10 +617,52 @@ pub(crate) fn get_attribute_ref<'a>(tag_xml: &'a str, attribute: &str) -> Option
     None
 }
 
+/// How often each byte occurs in WordprocessingML markup, ASCII case folded, in
+/// hundredths of a percent measured over Word parts. Bytes that are not listed are rarer
+/// than every listed one. Only the order matters.
+const MARKUP_BYTE_SHARE: [u16; 256] = {
+    const MEASURED: &[(u8, u16)] = &[
+        (b' ', 915), (b':', 657), (b'w', 638), (b'"', 595), (b'e', 523), (b'r', 471),
+        (b't', 444), (b'l', 433), (b'<', 380), (b'>', 380), (b'a', 356), (b's', 316),
+        (b'=', 298), (b'c', 295), (b'/', 276), (b'p', 270), (b'o', 258), (b'i', 246),
+        (b'n', 214), (b'd', 169), (b'm', 165), (b'0', 158), (b'f', 149), (b'b', 146),
+        (b'v', 146), (b'h', 118), (b'y', 87), (b'x', 87), (b'g', 86), (b'u', 83),
+        (b'1', 69), (b'2', 48), (b'z', 47), (b'6', 45), (b'4', 44), (b'8', 41),
+        (b'3', 35), (b'k', 33), (b'5', 32), (b'9', 30), (b'7', 29), (b'j', 28),
+        (b'q', 24), (b'+', 11), (b'-', 11), (b'.', 7), (b'#', 3), (b';', 3), (b'&', 3),
+    ];
+    let mut shares = [1; 256];
+    let mut index = 0;
+    while index < MEASURED.len() {
+        let (byte, share) = MEASURED[index];
+        shares[byte as usize] = share;
+        shares[byte.to_ascii_uppercase() as usize] = share;
+        index += 1;
+    }
+    shares
+};
+
+/// The first occurrence of `needle` at or after `start`, comparing ASCII letters without
+/// regard to case.
+///
+/// The scan looks for one needle byte and compares the whole needle at each hit. Every
+/// choice of that byte finds the same first match, so it takes the needle's rarest byte in
+/// markup: `<w:instrText` stops at each `x`, not at each `t`.
+#[inline]
 pub(crate) fn find_ignore_ascii_case(haystack: &str, start: usize, needle: &str) -> Option<usize> {
+    let bytes = needle.as_bytes();
+    let mut anchor = 0;
+    for (index, byte) in bytes.iter().enumerate() {
+        if MARKUP_BYTE_SHARE[*byte as usize] < MARKUP_BYTE_SHARE[bytes[anchor] as usize] {
+            anchor = index;
+        }
+    }
+    find_ignore_ascii_case_from(haystack, start, needle, anchor)
+}
+
+fn find_ignore_ascii_case_from(haystack: &str, start: usize, needle: &str, anchor: usize) -> Option<usize> {
     let source = haystack.as_bytes();
     let needle = needle.as_bytes();
-    let anchor = needle.len() / 2;
     let byte = *needle.get(anchor)?;
     let limit = source.len().checked_sub(needle.len())? + 1;
     if start >= limit {
@@ -678,6 +720,27 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn case_insensitive_search_finds_the_first_match_from_every_anchor() {
+        let haystack = "<W:INSTRTEXT a=\"xX\"><w:instrtex<w:instrText>x</w:instrText>é<w:fldChar/>txTXé<w:InstrText";
+        let needles = ["<w:instrText", "<w:fldChar", "x", "X", "é", "tx", "</w:instrText>", "<w:InstrText>", "absent", ""];
+        for needle in needles {
+            for start in 0..=haystack.len() + 1 {
+                let expected = (start..=haystack.len())
+                    .filter(|_| !needle.is_empty())
+                    .find(|at| {
+                        haystack.as_bytes()[*at..]
+                            .get(..needle.len())
+                            .is_some_and(|window| window.eq_ignore_ascii_case(needle.as_bytes()))
+                    });
+                assert_eq!(find_ignore_ascii_case(haystack, start, needle), expected, "{needle:?} from {start}");
+                for anchor in 0..needle.len() {
+                    assert_eq!(find_ignore_ascii_case_from(haystack, start, needle, anchor), expected);
+                }
+            }
+        }
+    }
 
     #[test]
     fn decode_xml_entities_replaces_entities_in_order() {

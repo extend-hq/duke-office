@@ -3,7 +3,7 @@
 //! fields and tables from the piece table + FKP formatting layers, and
 //! synthesizes a complete in-memory OOXML package.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::package::{OoxmlPackage, OoxmlPart};
 
@@ -141,7 +141,8 @@ pub struct DocBuilder<'a> {
     // Outputs accumulated during emission.
     parts: HashMap<String, String>,
     media: HashMap<String, Vec<u8>>,
-    media_extensions: HashSet<&'static str>,
+    // Ordered: these are written into [Content_Types].xml, which feeds the document id.
+    media_extensions: BTreeSet<&'static str>,
     image_count: usize,
     header_count: usize,
     footer_count: usize,
@@ -204,7 +205,7 @@ impl<'a> DocBuilder<'a> {
             default_tab: 720,
             parts: HashMap::new(),
             media: HashMap::new(),
-            media_extensions: HashSet::new(),
+            media_extensions: BTreeSet::new(),
             image_count: 0,
             header_count: 0,
             footer_count: 0,

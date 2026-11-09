@@ -150,9 +150,16 @@ struct Relationship {
 #[derive(Debug, Clone, Default)]
 struct Relationships {
     entries: HashMap<String, Relationship>,
+    /// Shape-paint cache key for this part, built on first use; `entries` is final by then.
+    paint_key: OnceLock<paint::RelationshipKey>,
 }
 
 impl Relationships {
+    fn paint_key(&self) -> &paint::RelationshipKey {
+        self.paint_key
+            .get_or_init(|| paint::RelationshipKey::new(self.iter()))
+    }
+
     fn get(&self, id: &str) -> Option<&String> {
         self.entries.get(id).map(|entry| &entry.target)
     }
@@ -631,12 +638,25 @@ impl NamespaceDeclarations {
     }
 }
 
+/// Whether raw tag bytes contain `xmlns`, without building a substring searcher per tag.
+fn mentions_xmlns(tag: &[u8]) -> bool {
+    let mut rest = tag;
+    while let Some(position) = memchr::memchr(b'x', rest) {
+        rest = &rest[position..];
+        if rest.starts_with(b"xmlns") {
+            return true;
+        }
+        rest = &rest[1..];
+    }
+    false
+}
+
 fn collect_namespaces(
     start: &BytesStart<'_>,
     depth: usize,
     namespaces: &mut NamespaceDeclarations,
 ) {
-    if memchr::memmem::find(start.as_ref(), b"xmlns").is_none() {
+    if !mentions_xmlns(start.as_ref()) {
         return;
     }
     for attribute in start.attributes().with_checks(false).flatten() {
@@ -967,12 +987,12 @@ fn parse_xml_tree(
     let mut budget = XmlBudget::default();
     let track_image_extensions = memchr::memmem::find(xml, b"svgBlip").is_some();
     let track_editing = memchr::memmem::find(xml, b"cNv").is_some();
-    let track_existing_namespaces = xml_text.is_some_and(|xml| {
-        xml.contains("oMath")
-            || xml.contains("transition")
-            || xml.contains("timing")
-            || xml.contains("fld")
-    }) || track_image_extensions;
+    // For these ASCII needles a byte search over valid UTF-8 equals `str::contains`.
+    let track_existing_namespaces = (xml_text.is_some()
+        && [&b"oMath"[..], b"transition", b"timing", b"fld"]
+            .into_iter()
+            .any(|needle| memchr::memmem::find(xml, needle).is_some()))
+        || track_image_extensions;
     let track_namespaces = track_existing_namespaces || track_editing;
     let mut namespaces = NamespaceDeclarations::default();
     let mut namespace_scopes = Vec::new();

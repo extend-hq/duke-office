@@ -271,18 +271,6 @@ fn decode_xml_part(bytes: Vec<u8>) -> Result<String, String> {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn extract_entry_group(
-    bytes: &[u8],
-    entries: &[ZipEntry],
-    group: &[usize],
-) -> Vec<(usize, Result<Vec<u8>, String>)> {
-    let mut inflater = ZipInflater::default();
-    group.iter().map(|&index| {
-        (index, extract_entry_data(bytes, &entries[index], &mut inflater))
-    }).collect()
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 #[cold]
 fn parallel_entry_data(
     bytes: &[u8],
@@ -303,26 +291,33 @@ fn parallel_entry_data(
         .filter_map(|(index, entry)| (!entry.name.ends_with('/')).then_some(index))
         .collect();
     jobs.sort_unstable_by_key(|&index| std::cmp::Reverse(entries[index].uncompressed_size));
-    let mut groups: [Vec<usize>; 4] = std::array::from_fn(|_| Vec::new());
-    let mut weights = [0u64; 4];
-    for index in jobs {
-        let group = (0..4).min_by_key(|&group| weights[group]).unwrap();
-        weights[group] += u64::from(entries[index].uncompressed_size);
-        groups[group].push(index);
-    }
-    let mut outputs: [Option<Vec<(usize, Result<Vec<u8>, String>)>>; 4] = std::array::from_fn(|_| None);
+    // The caller and the workers claim entries from one queue, largest first. A worker that
+    // is busy or slow to wake leaves its share to the others instead of stalling the join.
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    let claim = || jobs.get(next.fetch_add(1, std::sync::atomic::Ordering::Relaxed)).copied();
+    let drain = |output: &mut Vec<(usize, Result<Vec<u8>, String>)>| {
+        let Some(mut index) = claim() else { return };
+        let mut inflater = ZipInflater::default();
+        loop {
+            output.push((index, extract_entry_data(bytes, &entries[index], &mut inflater)));
+            match claim() {
+                Some(claimed) => index = claimed,
+                None => return,
+            }
+        }
+    };
+    let drain = &drain;
+    let mut outputs: [Vec<(usize, Result<Vec<u8>, String>)>; 4] = std::array::from_fn(|_| Vec::new());
     let (caller, workers) = outputs.split_first_mut().unwrap();
     pool.in_place_scope(|scope| {
-        for (slot, group) in workers.iter_mut().zip(&groups[1..]) {
-            scope.spawn(move |_| *slot = Some(extract_entry_group(bytes, entries, group)));
+        for output in workers.iter_mut().take(pool.current_num_threads()) {
+            scope.spawn(move |_| drain(output));
         }
-        *caller = Some(extract_entry_group(bytes, entries, &groups[0]));
+        drain(caller);
     });
     let mut result: Vec<_> = (0..entries.len()).map(|_| None).collect();
-    for group in outputs.into_iter().flatten() {
-        for (index, value) in group {
-            result[index] = Some(value);
-        }
+    for (index, value) in outputs.into_iter().flatten() {
+        result[index] = Some(value);
     }
     Some(result)
 }

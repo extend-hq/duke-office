@@ -2554,18 +2554,24 @@ pub(crate) fn parse_paragraph_with_table_run_style(
         }));
     }
 
+    // Present only when every child is a text run. The kind check comes first so a mixed
+    // paragraph clones nothing, and the vector is sized once instead of regrown.
     let source_run_provenance = children
         .iter()
-        .map(|child| match child {
-            ParagraphChildNode::Text(run) => Some(ParagraphSourceTextPatchRun {
-                style: run.style.clone(),
-                link: run.link.clone(),
-                note_reference: run.note_reference.clone(),
-            }),
-            _ => None,
-        })
-        .collect::<Option<Vec<_>>>()
-        .map(|runs| ParagraphSourceTextPatch { runs });
+        .all(|child| matches!(child, ParagraphChildNode::Text(_)))
+        .then(|| {
+            let mut runs = Vec::with_capacity(children.len());
+            for child in &children {
+                if let ParagraphChildNode::Text(run) = child {
+                    runs.push(ParagraphSourceTextPatchRun {
+                        style: run.style.clone(),
+                        link: run.link.clone(),
+                        note_reference: run.note_reference.clone(),
+                    });
+                }
+            }
+            ParagraphSourceTextPatch { runs }
+        });
 
     let review_content = crate::revisions::removed_fragments(paragraph_xml)
         .into_iter()
