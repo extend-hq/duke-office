@@ -2362,6 +2362,8 @@ struct ParagraphStyle {
     alignment: Option<String>,
     level: Option<usize>,
     bullet: Option<Option<crate::TextBullet>>,
+    bullet_font_family: Option<Option<String>>,
+    bullet_size: Option<(Option<f64>, Option<f64>)>,
     line_spacing: Option<crate::TextSpacing>,
     space_before: Option<crate::TextSpacing>,
     space_after: Option<crate::TextSpacing>,
@@ -2385,6 +2387,21 @@ impl ParagraphStyle {
         }
         if other.bullet.is_some() {
             self.bullet = other.bullet;
+        }
+        if other.bullet_font_family.is_some() {
+            self.bullet_font_family = other.bullet_font_family;
+        }
+        if other.bullet_size.is_some() {
+            self.bullet_size = other.bullet_size;
+        }
+        if let Some(Some(bullet)) = self.bullet.as_mut() {
+            if let Some(font) = &self.bullet_font_family {
+                bullet.font_family = font.clone();
+            }
+            if let Some((points, percent)) = self.bullet_size {
+                bullet.font_size_pt = points;
+                bullet.size_percent = percent;
+            }
         }
         if other.line_spacing.is_some() {
             self.line_spacing = other.line_spacing;
@@ -2471,6 +2488,17 @@ fn parse_paragraph_style(properties: Option<XmlNode<'_>>) -> ParagraphStyle {
         .child("buSzPct")
         .and_then(|size| size.attr("val"))
         .and_then(percentage);
+    let bullet_font_family = bullet_font
+        .clone()
+        .map(Some)
+        .or_else(|| properties.child("buFontTx").map(|_| None));
+    let bullet_size = if bullet_size_pt.is_some() {
+        Some((bullet_size_pt, None))
+    } else if bullet_size_percent.is_some() {
+        Some((None, bullet_size_percent))
+    } else {
+        properties.child("buSzTx").map(|_| (None, None))
+    };
     let bullet = if let Some(character) = properties.child("buChar") {
         Some(Some(crate::TextBullet {
             kind: "character".into(),
@@ -2528,6 +2556,8 @@ fn parse_paragraph_style(properties: Option<XmlNode<'_>>) -> ParagraphStyle {
             .attr("lvl")
             .and_then(|value| value.parse::<usize>().ok()),
         bullet,
+        bullet_font_family,
+        bullet_size,
         line_spacing: spacing_value(properties.child("lnSpc")),
         space_before: spacing_value(properties.child("spcBef")),
         space_after: spacing_value(properties.child("spcAft")),
