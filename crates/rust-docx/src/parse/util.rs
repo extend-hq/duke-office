@@ -13,7 +13,7 @@ use crate::xml::{
     decode_xml_entities, extract_balanced_tag_blocks, get_attribute, normalize_alignment,
     parse_integer_attribute,
 };
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", not(target_feature = "simd128")))]
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 
 pub fn regex_capture(xml: &str, pattern: &str) -> Option<String> {
@@ -730,16 +730,16 @@ pub fn svg_data_uri(svg: &str) -> String {
 }
 
 pub fn bytes_to_base64(bytes: &[u8]) -> String {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "simd128"))]
     { base64_simd::STANDARD.encode_to_string(bytes) }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "simd128")))]
     { STANDARD.encode(bytes) }
 }
 
 pub(crate) fn append_base64(bytes: &[u8], output: &mut String) {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "simd128"))]
     base64_simd::STANDARD.encode_append(bytes, output);
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "simd128")))]
     STANDARD.encode_string(bytes, output);
 }
 

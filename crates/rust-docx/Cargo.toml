@@ -28,6 +28,7 @@ zlib-rs = { version = "0.6.8", default-features = false, features = ["std"] }
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-case", "unicode-script", "unicode-gencat", "unicode-perl"] }
 quick-xml = "0.42"
 base64 = "0.22"
+base64-simd = "=0.8.0"
 roxmltree = "0.20"
 sha2 = "0.10"
 unicode-segmentation = "=1.12.0"
@@ -36,7 +37,7 @@ unicode-segmentation = "=1.12.0"
 sha2 = { version = "0.10", features = ["asm"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+simdutf8 = "=0.1.5"
 arc-swap = "=1.9.3"
-base64-simd = "=0.8.0"
 libdeflater = { version = "1.26.1", optional = true }
 rayon = "=1.12.0"

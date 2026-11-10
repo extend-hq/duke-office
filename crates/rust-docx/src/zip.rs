@@ -266,6 +266,11 @@ fn decode_xml_part(bytes: Vec<u8>) -> Result<String, String> {
         let encoding = &*ENCODING;
         return Ok(encoding.replace(&xml, "encoding=\"UTF-8\"").into_owned());
     }
+    #[cfg(not(target_arch = "wasm32"))]
+    if simdutf8::basic::from_utf8(&bytes).is_ok() {
+        // SAFETY: The complete buffer passed UTF-8 validation.
+        return Ok(unsafe { String::from_utf8_unchecked(bytes) });
+    }
     String::from_utf8(bytes)
         .map_err(|error| format!("Invalid or unsupported XML encoding: {error}"))
 }
