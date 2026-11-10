@@ -2295,10 +2295,7 @@ fn parse_run_style(
     let [size, bold, italic, underline, strike, baseline, language, alternative_language, spacing, kerning] =
         attributes;
     RunStyle {
-        font_family: font_family
-            .clone()
-            .or_else(|| east_asian_font_family.clone())
-            .or_else(|| complex_script_font_family.clone()),
+        font_family,
         east_asian_font_family,
         complex_script_font_family,
         symbol_font_family,
@@ -2309,7 +2306,11 @@ fn parse_run_style(
         italic: italic.and_then(bool_value),
         underline: underline.map(|value| value != "none" && value != "0"),
         strike: strike.map(|value| value != "noStrike" && value != "none" && value != "0"),
-        color: parse_color(properties, colors),
+        color: properties
+            .child("solidFill")
+            .or_else(|| properties.child("gradFill"))
+            .or_else(|| properties.child("pattFill"))
+            .and_then(|fill| parse_color(fill, colors)),
         baseline: baseline
             .and_then(|value| value.parse::<f64>().ok())
             .map(|value| value / 1_000.0),
@@ -2333,7 +2334,10 @@ fn text_run(text: String, style: RunStyle) -> TextRun {
         text,
         math: None,
         field: None,
-        font_family: style.font_family,
+        font_family: style
+            .font_family
+            .or_else(|| style.east_asian_font_family.clone())
+            .or_else(|| style.complex_script_font_family.clone()),
         east_asian_font_family: style.east_asian_font_family,
         complex_script_font_family: style.complex_script_font_family,
         symbol_font_family: style.symbol_font_family,
@@ -2358,6 +2362,8 @@ struct ParagraphStyle {
     alignment: Option<String>,
     level: Option<usize>,
     bullet: Option<Option<crate::TextBullet>>,
+    bullet_font_family: Option<Option<String>>,
+    bullet_size: Option<(Option<f64>, Option<f64>)>,
     line_spacing: Option<crate::TextSpacing>,
     space_before: Option<crate::TextSpacing>,
     space_after: Option<crate::TextSpacing>,
@@ -2381,6 +2387,21 @@ impl ParagraphStyle {
         }
         if other.bullet.is_some() {
             self.bullet = other.bullet;
+        }
+        if other.bullet_font_family.is_some() {
+            self.bullet_font_family = other.bullet_font_family;
+        }
+        if other.bullet_size.is_some() {
+            self.bullet_size = other.bullet_size;
+        }
+        if let Some(Some(bullet)) = self.bullet.as_mut() {
+            if let Some(font) = &self.bullet_font_family {
+                bullet.font_family = font.clone();
+            }
+            if let Some((points, percent)) = self.bullet_size {
+                bullet.font_size_pt = points;
+                bullet.size_percent = percent;
+            }
         }
         if other.line_spacing.is_some() {
             self.line_spacing = other.line_spacing;
@@ -2467,6 +2488,17 @@ fn parse_paragraph_style(properties: Option<XmlNode<'_>>) -> ParagraphStyle {
         .child("buSzPct")
         .and_then(|size| size.attr("val"))
         .and_then(percentage);
+    let bullet_font_family = bullet_font
+        .clone()
+        .map(Some)
+        .or_else(|| properties.child("buFontTx").map(|_| None));
+    let bullet_size = if bullet_size_pt.is_some() {
+        Some((bullet_size_pt, None))
+    } else if bullet_size_percent.is_some() {
+        Some((None, bullet_size_percent))
+    } else {
+        properties.child("buSzTx").map(|_| (None, None))
+    };
     let bullet = if let Some(character) = properties.child("buChar") {
         Some(Some(crate::TextBullet {
             kind: "character".into(),
@@ -2524,6 +2556,8 @@ fn parse_paragraph_style(properties: Option<XmlNode<'_>>) -> ParagraphStyle {
             .attr("lvl")
             .and_then(|value| value.parse::<usize>().ok()),
         bullet,
+        bullet_font_family,
+        bullet_size,
         line_spacing: spacing_value(properties.child("lnSpc")),
         space_before: spacing_value(properties.child("spcBef")),
         space_after: spacing_value(properties.child("spcAft")),
@@ -2589,8 +2623,11 @@ fn parse_text_paragraphs(
                 .and_then(|value| value.parse::<usize>().ok())
                 .unwrap_or(0);
             let master_style_properties = style_level_properties(master_text_style, level);
-            let presentation_style_properties =
-                style_level_properties(context.presentation_text_style, level);
+            let presentation_style_properties = if master_style_properties.is_none() {
+                style_level_properties(context.presentation_text_style, level)
+            } else {
+                None
+            };
             let master_properties = fallback_paragraph_properties(master_text_body, level);
             let layout_properties = fallback_paragraph_properties(layout_text_body, level);
             let paragraph_style = parse_paragraph_style(presentation_style_properties)
@@ -2598,8 +2635,8 @@ fn parse_text_paragraphs(
                 .overlay(parse_paragraph_style(master_properties))
                 .overlay(parse_paragraph_style(layout_properties))
                 .overlay(parse_paragraph_style(own_properties));
-            // Presentation defaults are the base of the cascade. An explicit
-            // shape or table-cell style must override them, not vice versa.
+            // Presentation defaults apply only without a master paragraph style.
+            // Explicit shape and table-cell styles override those defaults.
             let default_style = parse_run_style(
                 presentation_style_properties.and_then(|properties| properties.child("defRPr")),
                 context.colors,
