@@ -235,6 +235,67 @@ fn resolved_paint(xml: &str, mode: PathFill, context: &impl PictureContext) -> O
     })
 }
 
+fn gradient_stop(markup: &mut String, position: f64, color: [f64; 4]) {
+    let _ = write!(
+        markup,
+        r##"<stop offset="{position}" stop-color="rgb({:.4},{:.4},{:.4})" stop-opacity="{}"/>"##,
+        color[0], color[1], color[2], color[3]
+    );
+}
+
+fn gradient_segment(markup: &mut String, start: (f64, [f64; 4]), end: (f64, [f64; 4]), depth: u8) {
+    let difference = (0..3)
+        .map(|channel| (start.1[channel] - end.1[channel]).abs())
+        .fold(0.0_f64, f64::max);
+    // SVG interpolates unassociated color and alpha separately. Subdivide until
+    // their composited difference from associated-alpha interpolation is subpixel.
+    if depth < 12 && difference * (start.1[3] - end.1[3]).abs() > 1.0 {
+        let alpha = (start.1[3] + end.1[3]) / 2.0;
+        let mut middle = [0.0, 0.0, 0.0, alpha];
+        if alpha > 0.0 {
+            for (channel, value) in middle[..3].iter_mut().enumerate() {
+                *value =
+                    (start.1[channel] * start.1[3] + end.1[channel] * end.1[3]) / (2.0 * alpha);
+            }
+        }
+        let midpoint = ((start.0 + end.0) / 2.0, middle);
+        gradient_segment(markup, start, midpoint, depth + 1);
+        gradient_segment(markup, midpoint, end, depth + 1);
+    } else {
+        gradient_stop(markup, end.0, end.1);
+    }
+}
+
+fn gradient_stops(colors: &[(f64, Paint)]) -> Option<String> {
+    let mut markup = String::new();
+    if colors
+        .windows(2)
+        .all(|pair| pair[0].1.opacity == pair[1].1.opacity)
+    {
+        for (position, paint) in colors {
+            let _ = write!(
+                markup,
+                r##"<stop offset="{position}" stop-color="{}" stop-opacity="{}"/>"##,
+                paint.value, paint.opacity
+            );
+        }
+        return Some(markup);
+    }
+    for pair in colors.windows(2) {
+        let mut start = rgba(&pair[0].1)?;
+        let mut end = rgba(&pair[1].1)?;
+        if start[3] == 0.0 {
+            start[..3].copy_from_slice(&end[..3]);
+        }
+        if end[3] == 0.0 {
+            end[..3].copy_from_slice(&start[..3]);
+        }
+        gradient_stop(&mut markup, pair[0].0, start);
+        gradient_segment(&mut markup, (pair[0].0, start), (pair[1].0, end), 0);
+    }
+    Some(markup)
+}
+
 fn gradient(
     xml: &str,
     rectangular: bool,
@@ -245,13 +306,12 @@ fn gradient(
     context: &impl PictureContext,
     defs: &mut String,
 ) -> Option<Paint> {
-    if child(xml, "tileRect").is_some_and(|tile| {
-        ["l", "t", "r", "b"]
-            .iter()
-            .any(|name| percentage(tile, name, 0.0) != Some(0.0))
-    }) {
-        return None;
-    }
+    let tile = child(xml, "tileRect").unwrap_or("");
+    let tile_left = percentage(tile, "l", 0.0)?;
+    let tile_top = percentage(tile, "t", 0.0)?;
+    let tile_right = 1.0 - percentage(tile, "r", 0.0)?;
+    let tile_bottom = 1.0 - percentage(tile, "b", 0.0)?;
+    let tiled = tile_left != 0.0 || tile_top != 0.0 || tile_right != 1.0 || tile_bottom != 1.0;
     let stops = child(xml, "gsLst")?;
     let mut colors = Vec::new();
     for stop in extract_direct_child_tag_ranges(stops) {
@@ -268,17 +328,13 @@ fn gradient(
         return None;
     }
     colors.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let mut stop_markup = String::new();
-    for (position, paint) in &colors {
-        let _ = write!(
-            stop_markup,
-            r##"<stop offset="{position}" stop-color="{}" stop-opacity="{}"/>"##,
-            paint.value, paint.opacity
-        );
-    }
+    let stop_markup = gradient_stops(&colors)?;
     if let Some(path) = child(xml, "path") {
         let kind = get_attribute_ref(path, "path").unwrap_or("shape");
         if kind == "rect" || (kind == "shape" && rectangular) {
+            if tiled {
+                return None;
+            }
             return rectangular_gradient(path, id, width, height, &colors, defs);
         }
         if kind != "circle" {
@@ -291,21 +347,46 @@ fn gradient(
         let bottom = 1.0 - percentage(destination, "b", 0.0)?;
         let cx = (left + right) * width / 2.0;
         let cy = (top + bottom) * height / 2.0;
+        if tiled
+            && (tile_left > 0.0
+                || tile_top > 0.0
+                || tile_right < 1.0
+                || tile_bottom < 1.0
+                || (left - right).abs() > f64::EPSILON
+                || (top - bottom).abs() > f64::EPSILON
+                || (tile_left + tile_right - left - right).abs() > f64::EPSILON
+                || (tile_top + tile_bottom - top - bottom).abs() > f64::EPSILON)
+        {
+            return None;
+        }
         if ![cx, cy]
             .into_iter()
             .all(|value| value.is_finite() && value.abs() <= 100_000_000.0)
         {
             return None;
         }
-        let radius = libm::hypot(
-            cx.abs().max((width - cx).abs()),
-            cy.abs().max((height - cy).abs()),
-        );
+        let radius = if tiled {
+            libm::hypot(
+                (tile_right - tile_left) * width / 2.0,
+                (tile_bottom - tile_top) * height / 2.0,
+            )
+        } else {
+            libm::hypot(
+                cx.abs().max((width - cx).abs()),
+                cy.abs().max((height - cy).abs()),
+            )
+        };
+        if !radius.is_finite() || radius > 100_000_000.0 {
+            return None;
+        }
         let _ = write!(
             defs,
             r##"<radialGradient id="{id}" gradientUnits="userSpaceOnUse" cx="{cx}" cy="{cy}" r="{radius}" fx="{cx}" fy="{cy}" color-interpolation="sRGB">{stop_markup}</radialGradient>"##
         );
     } else {
+        if tiled {
+            return None;
+        }
         let linear = child(xml, "lin").unwrap_or("");
         let radians = (number(linear, "ang", 0.0)? / 60_000.0).to_radians();
         let (mut dy, mut dx) = libm::sincos(radians);
@@ -578,6 +659,8 @@ fn paint(
 
 struct Stroke {
     attributes: String,
+    color: Paint,
+    markers: [Option<LineMarker>; 2],
     width: f64,
     margin: f64,
     inset: bool,
@@ -585,10 +668,17 @@ struct Stroke {
     mask_attributes: String,
 }
 
-fn marker(xml: &str, id: &str, paint: &Paint, defs: &mut String) -> Option<f64> {
+struct LineMarker {
+    path: kurbo::BezPath,
+    filled: bool,
+    length: f64,
+    width: f64,
+}
+
+fn marker(xml: &str) -> Option<Option<LineMarker>> {
     let kind = get_attribute_ref(xml, "type").unwrap_or("none");
     if kind == "none" {
-        return Some(0.0);
+        return Some(None);
     }
     let dimension = |value| -> Option<f64> {
         match value {
@@ -601,40 +691,112 @@ fn marker(xml: &str, id: &str, paint: &Paint, defs: &mut String) -> Option<f64> 
     let length = dimension(get_attribute_ref(xml, "len").unwrap_or("med"))?;
     let width = dimension(get_attribute_ref(xml, "w").unwrap_or("med"))?;
     let half = width / 2.0;
-    let body = match kind {
-        "triangle" => format!(
-            r##"<path d="M0 0L{length} {half}L0 {width}Z" fill="{}"/>"##,
-            paint.value
-        ),
-        "stealth" => format!(
-            r##"<path d="M0 0L{length} {half}L0 {width}L{} {half}Z" fill="{}"/>"##,
-            length / 3.0,
-            paint.value
-        ),
+    let path = match kind {
+        "triangle" => format!("M0 0L{length} {half}L0 {width}Z"),
+        "stealth" => format!("M0 0L{length} {half}L0 {width}L{} {half}Z", length / 3.0),
         "diamond" => format!(
-            r##"<path d="M0 {half}L{} 0L{length} {half}L{} {width}Z" fill="{}"/>"##,
+            "M0 {half}L{} 0L{length} {half}L{} {width}Z",
             length / 2.0,
-            length / 2.0,
-            paint.value
+            length / 2.0
         ),
         "oval" => format!(
-            r##"<ellipse cx="{}" cy="{half}" rx="{}" ry="{half}" fill="{}"/>"##,
+            "M0 {half}A{} {half} 0 1 1 {length} {half}A{} {half} 0 1 1 0 {half}Z",
             length / 2.0,
-            length / 2.0,
-            paint.value
+            length / 2.0
         ),
-        "arrow" => format!(
-            r##"<path d="M0 0L{length} {half}L0 {width}" fill="none" stroke="{}" stroke-width="1" stroke-linejoin="miter"/>"##,
-            paint.value
-        ),
+        "arrow" => format!("M0 0L{length} {half}L0 {width}"),
         _ => return None,
     };
-    let _ = write!(
-        defs,
-        r##"<marker id="{id}" markerUnits="strokeWidth" markerWidth="{length}" markerHeight="{width}" refX="{length}" refY="{half}" orient="auto-start-reverse" overflow="visible"><g opacity="{}">{body}</g></marker>"##,
-        paint.opacity
-    );
-    Some(length.max(width))
+    Some(Some(LineMarker {
+        path: kurbo::BezPath::from_svg(&path).ok()?,
+        filled: kind != "arrow",
+        length,
+        width,
+    }))
+}
+
+fn render_markers(path: &str, stroke: &Stroke, body: &mut String) -> Option<()> {
+    use kurbo::ParamCurve;
+    if stroke.color.value == "none" || stroke.markers.iter().all(Option::is_none) {
+        return Some(());
+    }
+    let path = kurbo::BezPath::from_svg(path).ok()?;
+    let segments: Vec<_> = path.segments().collect();
+    for (index, marker) in stroke.markers.iter().enumerate() {
+        let Some(marker) = marker else { continue };
+        let segment = if index == 0 {
+            segments.first()?
+        } else {
+            segments.last()?
+        };
+        let points: Vec<_> = match segment {
+            kurbo::PathSeg::Line(line) => vec![line.p0, line.p1],
+            kurbo::PathSeg::Quad(curve) => vec![curve.p0, curve.p1, curve.p2],
+            kurbo::PathSeg::Cubic(curve) => vec![curve.p0, curve.p1, curve.p2, curve.p3],
+        };
+        let endpoint = if index == 0 {
+            segment.start()
+        } else {
+            segment.end()
+        };
+        let tangent = if index == 0 {
+            points
+                .iter()
+                .find(|point| **point != endpoint)
+                .map(|point| endpoint - *point)
+        } else {
+            points
+                .iter()
+                .rev()
+                .find(|point| **point != endpoint)
+                .map(|point| endpoint - *point)
+        };
+        let Some(tangent) = tangent else { continue };
+        let scale = stroke.width / libm::hypot(tangent.x, tangent.y);
+        let a = tangent.x * scale;
+        let b = tangent.y * scale;
+        let transform = kurbo::Affine::new([
+            a,
+            b,
+            -b,
+            a,
+            endpoint.x - a * marker.length + b * marker.width / 2.0,
+            endpoint.y - b * marker.length - a * marker.width / 2.0,
+        ]);
+        let mut geometry = String::new();
+        for element in (transform * marker.path.clone()).elements() {
+            use kurbo::PathEl;
+            match element {
+                PathEl::MoveTo(p) => {
+                    let _ = write!(geometry, "M{} {}", p.x, p.y);
+                }
+                PathEl::LineTo(p) => {
+                    let _ = write!(geometry, "L{} {}", p.x, p.y);
+                }
+                PathEl::QuadTo(a, b) => {
+                    let _ = write!(geometry, "Q{} {} {} {}", a.x, a.y, b.x, b.y);
+                }
+                PathEl::CurveTo(a, b, c) => {
+                    let _ = write!(geometry, "C{} {} {} {} {} {}", a.x, a.y, b.x, b.y, c.x, c.y);
+                }
+                PathEl::ClosePath => geometry.push('Z'),
+            }
+        }
+        if marker.filled {
+            let _ = write!(
+                body,
+                r##"<path d="{geometry}" fill="{}" fill-opacity="{}"/>"##,
+                stroke.color.value, stroke.color.opacity
+            );
+        } else {
+            let _ = write!(
+                body,
+                r##"<path d="{geometry}" fill="none" stroke="{}" stroke-opacity="{}" stroke-width="{}" stroke-linejoin="miter"/>"##,
+                stroke.color.value, stroke.color.opacity, stroke.width
+            );
+        }
+    }
+    Some(())
 }
 
 fn stroke(
@@ -648,6 +810,11 @@ fn stroke(
     let Some(xml) = xml else {
         return Some(Stroke {
             attributes: "stroke=\"none\"".into(),
+            color: Paint {
+                value: "none".into(),
+                opacity: 1.0,
+            },
+            markers: [None, None],
             width: 0.0,
             margin: 0.0,
             inset: false,
@@ -737,18 +904,17 @@ fn stroke(
     } else {
         line_width / 2.0 * if join == "miter" { limit } else { 1.0 }
     };
-    for (name, position) in [("headEnd", "start"), ("tailEnd", "end")] {
+    let mut markers = [None, None];
+    for (index, name) in ["headEnd", "tailEnd"].into_iter().enumerate() {
         if let Some(endpoint) = child(xml, name) {
             if !compound.is_empty()
                 && get_attribute_ref(endpoint, "type").is_some_and(|value| value != "none")
             {
                 return None;
             }
-            let id = format!("shape-marker-{position}");
-            let extent = marker(endpoint, &id, &color, defs)?;
-            if extent > 0.0 {
-                let _ = write!(attributes, r##" marker-{position}="url(#{id})""##);
-                margin = margin.max((extent + 1.0) * line_width);
+            if let Some(marker) = marker(endpoint)? {
+                margin = margin.max((marker.length.max(marker.width) + 1.0) * line_width);
+                markers[index] = Some(marker);
             }
         }
     }
@@ -757,6 +923,8 @@ fn stroke(
     }
     Some(Stroke {
         attributes,
+        color,
+        markers,
         width: line_width,
         margin,
         inset,
@@ -1057,6 +1225,9 @@ fn render_shape_paths(
                     r##"<path d="{}" fill="none" {}{clip}/>"##,
                     path.d, stroke.attributes
                 );
+                if !path.closed {
+                    render_markers(&path.d, &stroke, &mut body)?;
+                }
             }
             silhouette.push_str(&path.d);
             silhouette.push(' ');
@@ -1141,8 +1312,8 @@ fn render_shape_paths(
         y_px: bounds.top,
         width_px: paint_width,
         height_px: paint_height,
-        layout_width_px: width.max(1.0),
-        layout_height_px: height.max(1.0),
+        layout_width_px: if width == 0.0 { 1.0 } else { width },
+        layout_height_px: if height == 0.0 { 1.0 } else { height },
     });
     let svg = format!(
         r##"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="{paint_width}" height="{paint_height}" viewBox="{} {} {paint_width} {paint_height}" preserveAspectRatio="none"><defs>{defs}</defs>{body}</svg>"##,
