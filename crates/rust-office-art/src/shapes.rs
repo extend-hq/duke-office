@@ -266,8 +266,47 @@ fn gradient_segment(markup: &mut String, start: (f64, [f64; 4]), end: (f64, [f64
     }
 }
 
+fn gradient_uses_gamma(colors: &[(f64, Paint)]) -> bool {
+    matches!(colors.len(), 2 | 3)
+        && colors.first().is_some_and(|stop| stop.0 == 0.0)
+        && colors.last().is_some_and(|stop| stop.0 == 1.0)
+        && (colors.len() == 2
+            || (colors[1].0 > 0.0
+                && colors[1].0 < 1.0
+                && colors[0].1.value == colors[2].1.value
+                && colors[0].1.opacity == colors[2].1.opacity))
+}
+
+fn gamma_gradient_color(start: [f64; 4], end: [f64; 4], ratio: f64) -> [f64; 4] {
+    let mut color = [0.0, 0.0, 0.0, start[3] + (end[3] - start[3]) * ratio];
+    for channel in 0..3 {
+        let position = if end[channel] > start[channel] {
+            1.0 - libm::pow(1.0 - ratio, 1.875)
+        } else {
+            libm::pow(ratio, 1.875)
+        };
+        color[channel] = start[channel] + (end[channel] - start[channel]) * position;
+    }
+    color
+}
+
 fn gradient_stops(colors: &[(f64, Paint)]) -> Option<String> {
     let mut markup = String::new();
+    if gradient_uses_gamma(colors) {
+        for pair in colors.windows(2) {
+            let start = rgba(&pair[0].1)?;
+            let end = rgba(&pair[1].1)?;
+            for step in 0..=64 {
+                let ratio = f64::from(step) / 64.0;
+                gradient_stop(
+                    &mut markup,
+                    pair[0].0 + (pair[1].0 - pair[0].0) * ratio,
+                    gamma_gradient_color(start, end, ratio),
+                );
+            }
+        }
+        return Some(markup);
+    }
     if colors
         .windows(2)
         .all(|pair| pair[0].1.opacity == pair[1].1.opacity)
@@ -434,6 +473,7 @@ fn rectangular_gradient(
     if left < 0.0 || top < 0.0 || right > width || bottom > height || left > right || top > bottom {
         return None;
     }
+    let gamma = gradient_uses_gamma(stops);
     let colors: Vec<_> = stops
         .iter()
         .map(|(position, paint)| Some((*position, rgba(paint)?)))
@@ -477,7 +517,17 @@ fn rectangular_gradient(
             } else {
                 0.0
             };
-            pixels.extend(mix_color(start.1, end.1, ratio));
+            if gamma {
+                let color = gamma_gradient_color(start.1, end.1, ratio);
+                pixels.extend([
+                    color[0].round().clamp(0.0, 255.0) as u8,
+                    color[1].round().clamp(0.0, 255.0) as u8,
+                    color[2].round().clamp(0.0, 255.0) as u8,
+                    (color[3] * 255.0).round().clamp(0.0, 255.0) as u8,
+                ]);
+            } else {
+                pixels.extend(mix_color(start.1, end.1, ratio));
+            }
         }
     }
     let source = png_source(&pixels, pixel_width, pixel_height)?;
