@@ -125,3 +125,75 @@ pub fn extract_presentation_blocks(
         .map_err(|error| JsValue::from_str(&error))?;
     to_js(&structured)
 }
+
+#[wasm_bindgen]
+pub fn parse_presentation_bundle_wasm(bytes: &[u8], options_json: &str) -> Result<String, JsValue> {
+    let options = serde_json::from_str(options_json)
+        .map_err(|error| JsValue::from_str(&format!("Invalid bundle options: {error}")))?;
+    let bundle = rust_pptx::parse_presentation_bundle(bytes, options)
+        .map_err(|error| JsValue::from_str(&error))?;
+    serde_json::to_string(&bundle).map_err(|error| JsValue::from_str(&error.to_string()))
+}
+
+#[wasm_bindgen]
+pub fn export_presentation_wasm(request_json: &str) -> Result<String, JsValue> {
+    let request = serde_json::from_str(request_json)
+        .map_err(|error| JsValue::from_str(&format!("Invalid export request: {error}")))?;
+    let result =
+        rust_pptx::export_presentation(&request).map_err(|error| JsValue::from_str(&error))?;
+    serde_json::to_string(&result).map_err(|error| JsValue::from_str(&error.to_string()))
+}
+
+#[wasm_bindgen]
+pub fn extract_presentation_bundle(
+    document: JsValue,
+    options: Option<JsValue>,
+) -> Result<JsValue, JsValue> {
+    let document = serde_wasm_bindgen::from_value(document)
+        .map_err(|error| JsValue::from_str(&format!("Invalid presentation: {error}")))?;
+    let options = match options.filter(|value| !value.is_null() && !value.is_undefined()) {
+        Some(value) => serde_wasm_bindgen::from_value(value)
+            .map_err(|error| JsValue::from_str(&format!("Invalid bundle options: {error}")))?,
+        None => rust_pptx::ExtractPresentationBundleOptions::default(),
+    };
+    let bundle = rust_pptx::extract_presentation_bundle(&document, options)
+        .map_err(|error| JsValue::from_str(&error))?;
+    bundle
+        .serialize(&Serializer::json_compatible())
+        .map_err(|error| JsValue::from_str(&error.to_string()))
+}
+
+#[wasm_bindgen]
+pub fn parse_presentation_with_limits(
+    bytes: &[u8],
+    options: Option<JsValue>,
+    limits: JsValue,
+) -> Result<JsValue, JsValue> {
+    let options = parse_options(options)?;
+    let limits = serde_wasm_bindgen::from_value(limits)
+        .map_err(|error| JsValue::from_str(&format!("Invalid parser limits: {error}")))?;
+    let document = parse_core_presentation(bytes, &limits, &options)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    to_js(&document)
+}
+
+#[wasm_bindgen]
+pub fn extract_presentation_blocks_with_limits(
+    document: JsValue,
+    options: Option<JsValue>,
+    limits: JsValue,
+) -> Result<JsValue, JsValue> {
+    let document = serde_wasm_bindgen::from_value(document)
+        .map_err(|error| JsValue::from_str(&error.to_string()))?;
+    let options = match options.filter(|value| !value.is_null() && !value.is_undefined()) {
+        Some(value) => serde_wasm_bindgen::from_value(value)
+            .map_err(|error| JsValue::from_str(&error.to_string()))?,
+        None => rust_pptx::ExtractPresentationBlocksOptions::default(),
+    };
+    let limits = serde_wasm_bindgen::from_value(limits)
+        .map_err(|error| JsValue::from_str(&format!("Invalid extraction limits: {error}")))?;
+    let structured =
+        rust_pptx::extract_presentation_block_input_with_limits(&document, &options, &limits)
+            .map_err(|error| JsValue::from_str(&error))?;
+    to_js(&structured)
+}

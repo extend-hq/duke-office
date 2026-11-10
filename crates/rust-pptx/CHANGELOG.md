@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add bounded presentation bundles with rich paragraph inlines, slide manifests, comments, shared chart data, and deduplicated assets.
+- Add semantic HTML export with merged HTML/Markdown/CSV tables, asset substitutions, and content overrides using shared Office export types.
+- Preserve chart part names and expose the shared lossless chart-data contract independently of rendering.
+- Add native and WASM extraction limits, bounded bundle parse defaults, and matching JSON export entry points while preserving citation references.
+
 ## 0.2.2
 
 - Look up cached shape artwork by a memoized keyed hash and build the owned cache key only when a shape is stored, with unchanged output.

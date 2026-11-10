@@ -15,3 +15,9 @@ To render many nodes of one deck, create `const handle = new ParsedPresentation(
 ## Source-grounded blocks
 
 Version 0.2.0 exports `extract_presentation_blocks(document, { includeWords, includeNotes })`. Pass the model returned by `parse_presentation`. The result contains nested blocks, document/slide/node source identity and optional UTF-16 word references. The extractor reads only identity and text fields, without copying assets or generated artwork back into WASM. React PPTX resolves these references against mounted slide DOM to render citation overlays.
+
+## Structured bundles and export
+
+`parse_presentation_bundle_wasm(bytes, options_json)` and `export_presentation_wasm(request_json)` expose the same JSON contracts as the native bundle and semantic exporter. `extract_presentation_bundle(document, options)` accepts a full existing model and returns a JavaScript object. Bundles include slide manifests, rich inlines, comments, optional shared chart data, and deduplicated assets.
+
+`parse_presentation_with_limits(bytes, options, limits)` and `extract_presentation_blocks_with_limits(document, options, limits)` allow explicit parser and extraction budgets. Existing signatures remain unchanged. See the [structured export contract](../../docs/pptx-structured-export.md) for options, defaults, chart types, and content overrides.

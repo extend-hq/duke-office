@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Re-export shared semantic export options, overrides, and escaping from `rust-office-art`, preserving existing import paths and behavior.
+
 ## 0.2.21
 
 - Continue numbering across related instances of the same abstract list, preserving parent counters, explicit starts, and level restart rules.

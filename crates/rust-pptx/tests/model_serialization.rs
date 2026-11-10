@@ -184,6 +184,7 @@ fn structured_nodes_serialize_to_the_typescript_model_contract() {
         }],
         has_legend: Some(true),
         chart_xml: Some("<c:chartSpace/>".into()),
+        chart_part_name: None,
         chart_svg: None,
         chart_style_xml: None,
         chart_colors_xml: None,

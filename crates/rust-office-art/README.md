@@ -2,6 +2,8 @@
 
 Shared Office drawing rendering for native Rust and WebAssembly. The renderer consumes DrawingML picture XML and a resolved image source, and produces SVG with separate paint bounds and layout dimensions.
 
+`export` provides shared `ExportOptions`, `TableFormat`, and `ContentOverride` types together with HTML escaping and URL checks for semantic content export. DOCX and PPTX re-export these same types and keep document-specific traversal in their own crates.
+
 `render_picture` accepts a `PictureContext` that resolves DrawingML colors against the caller's theme. `RenderedPicture.svg` contains the SVG text; `paint_bounds` describes any pixels outside the original layout box. Keep the original image bytes and drawing XML for export.
 
 Implemented picture appearance includes signed cropping, stretch fill rectangles, raster tiling with embedded DPI, rotation, flips, line borders, alpha and color operations, shadows, glow, soft edges, and reflections. Geometry supports all 187 DrawingML presets and bounded custom guide formulas, elliptical arcs, multiple paths, and quadratic/cubic commands. The preset definitions are distributed with Apache POI license, notice, revision and hash metadata.

@@ -10,6 +10,7 @@ use crate::xml::{
 use crate::xml::escape_xml_text;
 
 mod effects;
+pub mod export;
 mod geometry;
 mod ink;
 mod math;

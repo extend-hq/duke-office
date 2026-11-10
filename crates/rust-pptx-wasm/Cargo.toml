@@ -16,6 +16,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 rust-pptx = { path = "../rust-pptx", version = "=0.2.2" }
 serde.workspace = true
+serde_json.workspace = true
 serde-wasm-bindgen.workspace = true
 wasm-bindgen.workspace = true
 

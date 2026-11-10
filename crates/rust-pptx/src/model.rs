@@ -203,9 +203,9 @@ pub enum SlideNode {
         name: String,
         transform: Transform,
         rows: Vec<Vec<TableCell>>,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         column_widths: Vec<i64>,
-        #[serde(skip_serializing_if = "Vec::is_empty")]
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
         row_heights: Vec<i64>,
     },
     Chart {
@@ -224,6 +224,8 @@ pub enum SlideNode {
         /// viewers can render with full PowerPoint fidelity.
         #[serde(skip_serializing_if = "Option::is_none")]
         chart_xml: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chart_part_name: Option<String>,
         /// Chart artwork at the dimensions of the slide frame.
         #[serde(skip_serializing_if = "Option::is_none")]
         chart_svg: Option<String>,
@@ -516,7 +518,7 @@ pub struct TableCell {
     pub col_span: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fill: Option<FillStyle>,
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub borders: BTreeMap<String, LineStyle>,
     pub paragraphs: Vec<TextParagraph>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -934,9 +936,9 @@ pub struct PresentationTheme {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub colors: BTreeMap<String, String>,
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub major_fonts: BTreeMap<String, String>,
-    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub minor_fonts: BTreeMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub format_scheme_xml: Option<String>,
@@ -992,9 +994,9 @@ pub struct PresentationSlide {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timing: Option<Box<SlideTiming>>,
     pub nodes: Vec<SlideNode>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub notes: Vec<SlideNote>,
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub comments: Vec<SlideComment>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_part: Option<String>,

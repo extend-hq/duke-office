@@ -16,7 +16,7 @@ use std::{
     sync::OnceLock,
 };
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(all(target_arch = "wasm32", not(target_feature = "simd128")))]
 use base64::Engine;
 use compact_str::CompactString;
 use quick_xml::{
@@ -3573,11 +3573,11 @@ struct OfficeArtColors<'a, 'b> {
 }
 
 fn encode_asset_base64(bytes: &[u8]) -> String {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(any(not(target_arch = "wasm32"), target_feature = "simd128"))]
     {
         base64_simd::STANDARD.encode_to_string(bytes)
     }
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(all(target_arch = "wasm32", not(target_feature = "simd128")))]
     {
         base64::engine::general_purpose::STANDARD.encode(bytes)
     }
@@ -5579,6 +5579,7 @@ fn parse_graphic_frame(
             series: chart.series,
             has_legend: chart.has_legend,
             chart_xml,
+            chart_part_name: path.cloned(),
             chart_style_xml: companions.and_then(|parts| parts.style_xml.clone()),
             chart_colors_xml: companions.and_then(|parts| parts.colors_xml.clone()),
         });
@@ -7376,7 +7377,7 @@ fn parse_cached(
     };
     let retained = if retain {
         Some(RetainedParse {
-            limits: limits.clone(),
+            limits: *limits,
             options: *options,
             legacy_chart_defaults,
             presentation: presentation_document,

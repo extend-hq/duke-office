@@ -1,12 +1,23 @@
 mod animation_model;
+mod bundle;
+pub mod chart;
+mod export;
+mod extraction_limits;
 mod legacy;
 mod legacy_cfb;
 mod model;
 mod pptx;
+mod semantic;
 mod structured;
 
 pub use animation_model::*;
+pub use bundle::*;
+pub use chart::ChartSeries as ExtractedChartSeries;
+pub use chart::{extract_chart_data, ChartCategory, ChartData, ChartPoint};
+pub use export::*;
+pub use extraction_limits::ExtractionLimits;
 pub use model::*;
+pub use semantic::{ParagraphDetails, ParagraphInline};
 pub use structured::*;
 pub use rust_office_art::ParseOptions;
 
@@ -29,7 +40,8 @@ pub enum ParseError {
     ResourceLimit(String),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(default = "ParseLimits::server", rename_all = "camelCase")]
 pub struct ParseLimits {
     pub max_input_bytes: usize,
     pub max_entries: usize,
@@ -40,6 +52,17 @@ pub struct ParseLimits {
     pub max_xml_attributes: usize,
     pub max_xml_text_bytes: usize,
     pub max_xml_attribute_bytes: usize,
+}
+
+impl ParseLimits {
+    pub fn server() -> Self {
+        Self {
+            max_input_bytes: 128 * 1024 * 1024,
+            max_entry_bytes: 128 * 1024 * 1024,
+            max_total_uncompressed_bytes: 512 * 1024 * 1024,
+            ..Self::default()
+        }
+    }
 }
 
 impl Default for ParseLimits {

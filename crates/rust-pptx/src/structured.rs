@@ -229,7 +229,9 @@ fn paragraphs(
     parent: &mut PresentationBlock,
     paragraphs: &[BlockParagraphInput],
     include_words: bool,
-) {
+    word_count: &mut usize,
+    limits: &crate::ExtractionLimits,
+) -> Result<(), String> {
     for (index, paragraph) in paragraphs.iter().enumerate() {
         let mut source = parent.source_refs[0].clone();
         source.paragraph_index = Some(index);
@@ -243,29 +245,29 @@ fn paragraphs(
         child.details = json!({"kind": "paragraph"});
         if include_words {
             let mut utf16 = 0;
-            child.words = Some(
-                child
-                    .content
-                    .split_word_bounds()
-                    .filter_map(|word| {
-                        let start = utf16;
-                        utf16 += word.encode_utf16().count();
-                        if !word.chars().any(char::is_alphanumeric) {
-                            return None;
-                        }
-                        let mut source = child.source_refs[0].clone();
-                        source.start = Some(start);
-                        source.end = Some(utf16);
-                        Some(PresentationWord {
-                            object: "word".into(),
-                            id: format!("{}/word/{start}-{utf16}", child.id),
-                            block_id: child.id.clone(),
-                            content: word.into(),
-                            source_refs: vec![source],
-                        })
-                    })
-                    .collect(),
-            );
+            let mut words = Vec::new();
+            for word in child.content.split_word_bounds() {
+                let start = utf16;
+                utf16 += word.encode_utf16().count();
+                if !word.chars().any(char::is_alphanumeric) {
+                    continue;
+                }
+                *word_count = word_count.saturating_add(1);
+                if *word_count > limits.max_words {
+                    return Err("LIMIT: extraction words".into());
+                }
+                let mut source = child.source_refs[0].clone();
+                source.start = Some(start);
+                source.end = Some(utf16);
+                words.push(PresentationWord {
+                    object: "word".into(),
+                    id: format!("{}/word/{start}-{utf16}", child.id),
+                    block_id: child.id.clone(),
+                    content: word.into(),
+                    source_refs: vec![source],
+                });
+            }
+            child.words = Some(words);
         }
         parent.children.push(child);
     }
@@ -275,6 +277,7 @@ fn paragraphs(
         .map(|b| b.content.as_str())
         .collect::<Vec<_>>()
         .join("\n");
+    Ok(())
 }
 
 fn nodes(
@@ -282,7 +285,9 @@ fn nodes(
     base: &PptxSourceRef,
     parent: Option<&str>,
     options: ExtractPresentationBlocksOptions,
-) -> Vec<PresentationBlock> {
+    word_count: &mut usize,
+    limits: &crate::ExtractionLimits,
+) -> Result<Vec<PresentationBlock>, String> {
     nodes.iter().enumerate().map(|(index, node)| {
         let kind = match node.r#type.as_str() { "shape" => "text_box", "table" => "table", "group" => "group", _ => "figure" };
         let mut source = base.clone();
@@ -294,9 +299,9 @@ fn nodes(
         let id = format!("{}/slide/{}/node/{path}", base.document_id, base.slide_index);
         let mut result = block(id, kind, source, parent);
         match node.r#type.as_str() {
-            "shape" => paragraphs(&mut result, &node.paragraphs, options.include_words),
+            "shape" => paragraphs(&mut result, &node.paragraphs, options.include_words, word_count, limits)?,
             "group" => {
-                result.children = self::nodes(&node.children, &result.source_refs[0], Some(&result.id), options);
+                result.children = self::nodes(&node.children, &result.source_refs[0], Some(&result.id), options, word_count, limits)?;
                 result.content = result.children.iter().map(|b| b.content.as_str()).collect::<Vec<_>>().join("\n");
             }
             "table" => {
@@ -308,7 +313,7 @@ fn nodes(
                         source.column_index = Some(column_index);
                         let mut child = block(format!("{}/cell/{row_index}/{column_index}", result.id), "table_cell", source, Some(&result.id));
                         child.details = json!({"rowIndex": row_index, "columnIndex": column_index, "rowSpan": cell.row_span.unwrap_or(1), "columnSpan": cell.col_span.unwrap_or(1)});
-                        paragraphs(&mut child, &cell.paragraphs, options.include_words);
+                        paragraphs(&mut child, &cell.paragraphs, options.include_words, word_count, limits)?;
                         result.children.push(child);
                     }
                 }
@@ -319,7 +324,7 @@ fn nodes(
             "media" => { result.details = json!({"kind": "media"}); }
             _ => { result.details = json!({"kind": "unknown", "feature": node.feature}); }
         }
-        result
+        Ok(result)
     }).collect()
 }
 
@@ -327,9 +332,23 @@ pub fn extract_presentation_block_input(
     document: &PresentationBlockInput,
     options: &ExtractPresentationBlocksOptions,
 ) -> Result<StructuredPresentation, String> {
+    extract_presentation_block_input_with_limits(
+        document,
+        options,
+        &crate::ExtractionLimits::default(),
+    )
+}
+
+pub fn extract_presentation_block_input_with_limits(
+    document: &PresentationBlockInput,
+    options: &ExtractPresentationBlocksOptions,
+    limits: &crate::ExtractionLimits,
+) -> Result<StructuredPresentation, String> {
+    crate::extraction_limits::validate_input(document, limits, options.include_notes)?;
     let document_id = document.document_id.as_ref().filter(|id| !id.is_empty())
         .ok_or("Presentation has no source identity; reparse the original bytes before extracting citations")?;
     let mut blocks = Vec::new();
+    let mut word_count = 0;
     for (slide_index, slide) in document.slides.iter().enumerate() {
         let source = PptxSourceRef {
             document_id: document_id.clone(),
@@ -347,7 +366,14 @@ pub fn extract_presentation_block_input(
             end: None,
             offset_encoding: "utf-16".into(),
         };
-        blocks.extend(nodes(&slide.nodes, &source, None, *options));
+        blocks.extend(nodes(
+            &slide.nodes,
+            &source,
+            None,
+            *options,
+            &mut word_count,
+            limits,
+        )?);
         if options.include_notes {
             for (index, note) in slide.notes.iter().enumerate() {
                 let mut source = source.clone();
@@ -361,7 +387,13 @@ pub fn extract_presentation_block_input(
                     source,
                     None,
                 );
-                paragraphs(&mut child, &note.paragraphs, options.include_words);
+                paragraphs(
+                    &mut child,
+                    &note.paragraphs,
+                    options.include_words,
+                    &mut word_count,
+                    limits,
+                )?;
                 if child.children.is_empty() {
                     child.content = note.text.clone();
                 }
@@ -369,19 +401,30 @@ pub fn extract_presentation_block_input(
             }
         }
     }
-    Ok(StructuredPresentation {
+    let result = StructuredPresentation {
         schema_version: 1,
         parser_version: env!("CARGO_PKG_VERSION").into(),
         document_id: document_id.clone(),
         blocks,
         geometry_status: "requires_layout".into(),
-    })
+    };
+    crate::extraction_limits::check_serialized_size(&result, limits.max_output_bytes)?;
+    Ok(result)
 }
 
 pub fn extract_presentation_blocks(
     document: &PresentationDocument,
     options: &ExtractPresentationBlocksOptions,
 ) -> Result<StructuredPresentation, String> {
+    extract_presentation_blocks_with_limits(document, options, &crate::ExtractionLimits::default())
+}
+
+pub fn extract_presentation_blocks_with_limits(
+    document: &PresentationDocument,
+    options: &ExtractPresentationBlocksOptions,
+    limits: &crate::ExtractionLimits,
+) -> Result<StructuredPresentation, String> {
+    crate::extraction_limits::validate_model(document, limits, options.include_notes)?;
     let input = PresentationBlockInput {
         document_id: document.document_id.clone(),
         slides: document
@@ -405,5 +448,5 @@ pub fn extract_presentation_blocks(
             })
             .collect(),
     };
-    extract_presentation_block_input(&input, options)
+    extract_presentation_block_input_with_limits(&input, options, limits)
 }
