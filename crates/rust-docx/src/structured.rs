@@ -151,6 +151,9 @@ pub struct ParagraphDetails {
     /// Visible list marker, separate from the text addressed by source offsets.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub list_label: Option<String>,
+    /// Resolved character formatting for the visible list marker.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub list_label_style: Option<TextStyle>,
     pub field_instructions: Vec<String>,
     pub inlines: Vec<ParagraphInline>,
 }
@@ -508,6 +511,7 @@ fn paragraph_field_instructions(xml: &str) -> Vec<String> {
 
 struct Extractor<'a> {
     lists: ListDefinitions<'a>,
+    non_heading_styles: HashSet<&'a str>,
     document_id: String,
     part_name: String,
     story: String,
@@ -669,6 +673,11 @@ impl Extractor<'_> {
         let id = p.block_id.as_deref().unwrap_or(fallback);
         let style = p.style.as_ref();
         let style_id = style.and_then(|s| s.style_id.as_deref()).unwrap_or("");
+        // A list's direct outline level does not turn its body style into a heading.
+        let heading_level = style.and_then(|s| s.heading_level).filter(|_| {
+            !style.and_then(|s| s.numbering.as_ref()).is_some_and(|n| n.num_id > 0)
+                || !self.non_heading_styles.contains(style_id)
+        });
         let field_instructions = p
             .source_xml
             .as_deref()
@@ -680,7 +689,7 @@ impl Extractor<'_> {
             BlockType::PageNumber
         } else if matches!(instruction_kind, "DISPLAYBARCODE" | "MERGEBARCODE") {
             BlockType::Barcode
-        } else if style.and_then(|s| s.heading_level).is_some() {
+        } else if heading_level.is_some() {
             BlockType::Heading
         } else if style_id.eq_ignore_ascii_case("title")
             || style_id.eq_ignore_ascii_case("subtitle")
@@ -831,16 +840,19 @@ impl Extractor<'_> {
                 }
             }
         }
+        let list_label = lists.label(p, &self.lists);
+        let list_label_style = list_label.as_ref().and_then(|_| self.lists.label_style(p));
         let details = ParagraphDetails {
             r#type: "text_details".into(),
             kind: "paragraph".into(),
             style: p.style.clone(),
             style_id: style_id.into(),
-            heading_level: style.and_then(|s| s.heading_level),
+            heading_level,
             numbering: style.and_then(|s| s.numbering.clone()),
             drop_cap: style.and_then(|s| s.drop_cap.as_ref())
                 .map(|_| ParagraphDropCapRange { start: 0, end: text_offset }),
-            list_label: lists.label(p, &self.lists),
+            list_label,
+            list_label_style,
             field_instructions,
             inlines: inline,
         };
@@ -1050,7 +1062,13 @@ fn extract(
         .clone()
         .unwrap_or_else(|| "unsaved".into());
     let mut extractor = Extractor {
-        lists: ListDefinitions::new(model.metadata.numbering_definitions.as_ref()),
+        lists: ListDefinitions::new(
+            model.metadata.numbering_definitions.as_ref(), &model.metadata.paragraph_styles,
+        ),
+        non_heading_styles: model.metadata.paragraph_styles.iter()
+            .filter(|style| style.heading_level.is_none())
+            .map(|style| style.id.as_str())
+            .collect(),
         document_id: document_id.clone(),
         part_name: source_part(model, "document"),
         story: "body".into(),
@@ -1279,7 +1297,8 @@ mod inplace_block_cleanup_tests {
         use super::*;
         let extractor = Extractor {
             body_section_starts: HashSet::new(),
-            lists: ListDefinitions::new(None),
+            lists: ListDefinitions::new(None, &[]),
+            non_heading_styles: HashSet::new(),
             document_id: "document".into(), part_name: "part".into(),
             story: "body".into(), include_words: false, include_3d_models: false, review: None,
         };

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.21
+
+- Continue numbering across related instances of the same abstract list, preserving parent counters, explicit starts, and level restart rules.
+- Include resolved list-marker character formatting in structured blocks and preserve it in HTML exports.
+- Keep numbered paragraphs with non-heading styles as text blocks when they carry direct outline levels, while preserving numbered heading styles and original style metadata.
+- Export minimum line spacing with normal inline line heights so wrapped text can expand above the requested minimum without overlapping.
+
 ## 0.2.20
 
 - `rust-docx-wasm`: `build_doc_model_from_bytes` and `build_doc_model_from_package_js` return a model whose JSON is longer than the JavaScript engine's maximum string length (about 512 MiB in V8) instead of failing with "Cannot create a string longer than 0x1fffffe8 characters". Model JSON above 128 MiB is parsed in pieces; the returned object is the same as before for every other document. The parser crate itself is unchanged from 0.2.19.

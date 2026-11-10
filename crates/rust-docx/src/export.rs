@@ -468,10 +468,18 @@ impl Exporter<'_> {
             } else {
                 styles::text_html(&block.content, &d["field"]["style"], None)
             };
+            let content = format!("{}{content}", styles::text_html(
+                &label("", &d, false), &d["listLabelStyle"], None,
+            ));
+            // Keep the paragraph's minimum while allowing inline font metrics to expand each line.
+            let content = if d["style"]["spacing"]["lineRule"] == "atLeast" {
+                format!("<span style=\"line-height:normal\">{content}</span>")
+            } else {
+                content
+            };
             format!(
-                "<{tag}{}>{}{content}</{tag}>",
+                "<{tag}{}>{content}</{tag}>",
                 styles::paragraph(&d["style"]),
-                escape_html(&label("", &d, false))
             )
         };
         self.bytes = self.bytes.saturating_add(content.len());

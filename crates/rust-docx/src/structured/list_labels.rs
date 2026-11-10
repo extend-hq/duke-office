@@ -2,7 +2,8 @@ use std::collections::HashMap;
 use std::fmt::Write;
 
 use crate::model::{
-    NumberingDefinitionSet, NumberingInstanceDefinition, NumberingLevelDefinition, ParagraphNode,
+    NumberingDefinitionSet, NumberingInstanceDefinition, NumberingLevelDefinition,
+    ParagraphChildNode, ParagraphNode, ParagraphStyleDefinition, TextStyle,
 };
 
 const LEVELS: usize = 9;
@@ -12,13 +13,21 @@ const MAX_LABEL_BYTES: usize = 4096;
 pub(super) struct ListDefinitions<'a> {
     abstracts: HashMap<i64, &'a [NumberingLevelDefinition]>,
     instances: HashMap<i64, &'a NumberingInstanceDefinition>,
+    paragraph_run_styles: HashMap<&'a str, &'a TextStyle>,
 }
 
 impl<'a> ListDefinitions<'a> {
-    pub fn new(definitions: Option<&'a NumberingDefinitionSet>) -> Self {
+    pub fn new(
+        definitions: Option<&'a NumberingDefinitionSet>,
+        paragraph_styles: &'a [ParagraphStyleDefinition],
+    ) -> Self {
         let mut result = Self {
             abstracts: HashMap::new(),
             instances: HashMap::new(),
+            paragraph_run_styles: paragraph_styles
+                .iter()
+                .filter_map(|s| Some((s.id.as_str(), s.run_style.as_ref()?)))
+                .collect(),
         };
         if let Some(definitions) = definitions {
             result.abstracts.extend(
@@ -52,11 +61,46 @@ impl<'a> ListDefinitions<'a> {
                     .find(|l| l.ilvl == key)
             })
     }
+
+    pub fn label_style(&self, paragraph: &ParagraphNode) -> Option<TextStyle> {
+        let paragraph_style = paragraph.style.as_ref()?;
+        let num = paragraph_style.numbering.as_ref()?;
+        let index = usize::try_from(num.ilvl).ok().filter(|&i| i < LEVELS)?;
+        let level = self.level(self.instances.get(&num.num_id)?, index)?;
+        let base = paragraph
+            .children
+            .iter()
+            .find_map(|child| match child {
+                ParagraphChildNode::Text(run) => run.style.as_deref(),
+                ParagraphChildNode::FormField(field) => field.style.as_deref(),
+                _ => None,
+            })
+            .or_else(|| {
+                self.paragraph_run_styles
+                    .get(paragraph_style.style_id.as_deref()?)
+                    .copied()
+            });
+        let mut style = crate::parse::merge_text_styles(base.cloned(), level.run_style.clone());
+        if level.format.as_deref() == Some("bullet") {
+            if let Some(font) = &level.bullet_font_family {
+                let style = style.get_or_insert_with(Default::default);
+                style.font_family = Some(font.clone());
+                style.font_family_ascii = Some(font.clone());
+                style.resolved_font_family_ascii = Some(font.clone());
+            }
+            if let Some(color) = &level.bullet_color {
+                style.get_or_insert_with(Default::default).color = Some(color.clone());
+            }
+        }
+        style
+    }
 }
 
 #[derive(Default)]
 pub(super) struct StoryLists {
     counters: HashMap<i64, [Option<u64>; LEVELS]>,
+    initialized_levels: HashMap<i64, [bool; LEVELS]>,
+    abstract_counters: HashMap<i64, [Option<u64>; LEVELS]>,
     follows_separator: bool,
 }
 
@@ -86,30 +130,69 @@ impl StoryLists {
         let instance = definitions.instances.get(&num.num_id)?;
         let level = definitions.level(instance, index)?;
         let counters = self.counters.entry(num.num_id).or_default();
-        let start = |i: usize| {
-            instance
-                .level_start_overrides
-                .as_ref()
-                .and_then(|s| s.get(LEVEL_KEYS[i]).copied())
+        let shared = self
+            .abstract_counters
+            .entry(instance.abstract_num_id)
+            .or_default();
+        let initialized = self.initialized_levels.entry(num.num_id).or_default();
+        let start = |i: usize, include_override: bool| {
+            include_override
+                .then(|| {
+                    instance
+                        .level_start_overrides
+                        .as_ref()
+                        .and_then(|s| s.get(LEVEL_KEYS[i]).copied())
+                })
+                .flatten()
                 .or_else(|| definitions.level(instance, i)?.start)
                 .and_then(|n| u64::try_from(n).ok())
                 .unwrap_or(1)
         };
+        let restart_trigger = |i: usize| {
+            definitions
+                .level(instance, i)
+                .and_then(|l| l.lvl_restart)
+                .filter(|&r| (0..=i as i64).contains(&r))
+                .unwrap_or(i as i64)
+        };
+        // Related instances share outline progress, but explicit starts apply on first use.
+        let mut parent_changed = false;
         for (i, count) in counters[..index].iter_mut().enumerate() {
-            count.get_or_insert_with(|| start(i));
+            if let Some(value) = shared[i] {
+                parent_changed |= *count != Some(value) && (i as i64) < restart_trigger(index);
+                *count = Some(value);
+            } else {
+                count.get_or_insert_with(|| start(i, true));
+            }
         }
+        let current = if parent_changed {
+            None
+        } else {
+            counters[index]
+        };
+        let first_use = !initialized[index];
+        let has_start_override = instance
+            .level_start_overrides
+            .as_ref()
+            .is_some_and(|s| s.contains_key(LEVEL_KEYS[index]))
+            || instance
+                .level_overrides
+                .iter()
+                .flatten()
+                .any(|l| l.ilvl == num.ilvl && l.start.is_some());
+        let continued = if first_use && current.is_none() && has_start_override {
+            None
+        } else {
+            shared[index].or(current)
+        };
         counters[index] =
-            Some(counters[index].map_or_else(|| start(index), |n| n.saturating_add(1)));
+            Some(continued.map_or_else(|| start(index, first_use), |n| n.saturating_add(1)));
+        initialized[index] = true;
+        shared[..=index].copy_from_slice(&counters[..=index]);
         for (i, count) in counters.iter_mut().enumerate().skip(index + 1) {
-            if count.is_some() {
-                let trigger = definitions
-                    .level(instance, i)
-                    .and_then(|l| l.lvl_restart)
-                    .filter(|&r| (0..=i as i64).contains(&r))
-                    .unwrap_or(i as i64);
-                if (index as i64) < trigger {
-                    *count = None;
-                }
+            if (index as i64) < restart_trigger(i) {
+                *count = None;
+                shared[i] = None;
             }
         }
         // A style separator joins the next paragraph to this one. Both advance

@@ -13,6 +13,10 @@ The unreleased `rust-docx` APIs provide application-independent extraction and H
 
 `ExtractDocumentBundleOptions` defaults to ordinary blocks with comments. `includeWords`, `include3dModels`, `includeRevisions`, `includeCharts`, and `deduplicateAssets` opt into additional output. The existing block and reviewed-document APIs remain available.
 
+Numbered paragraphs using a resolved non-heading paragraph style remain text blocks when they carry a direct outline level. Numbered heading styles, including inherited heading styles, retain their heading classification. The original outline level remains in `details.style.headingLevel`; `details.headingLevel` describes the semantic heading classification.
+
+List counters retain continuation across instances of the same abstract numbering definition within a story, including parent levels, while respecting explicit starts and level restart rules. `details.listLabel` contains the visible marker and optional `details.listLabelStyle` contains its resolved character formatting. Numbering-level formatting overrides the paragraph's first styled text or form-field run, with paragraph-style run formatting as the fallback. Labels remain separate from text addressed by source offsets.
+
 A dropped or margin initial and its following paragraph are emitted as one logical paragraph. The block retains the initial's ID, combines the text without inserting a separator, and uses the following paragraph's formatting with the initial's `style.dropCap` metadata. `details.dropCap` identifies the initial with an explicit `{ start, end }` range in the combined text, using zero-based UTF-16 offsets with an exclusive end. The initial's font and other run formatting remain on its text inlines. Ordinary paragraphs omit this range.
 
 Inline offsets address the combined text. Its ordered `sourceRefs` retain both original paragraph IDs and their UTF-16 ranges; a word spanning the join has references to both sources. Revisions and comments retain their original source coordinates, while `revisionInlines` uses the combined paragraph's offsets. The editable document model and serialized Word structure retain the separate source paragraphs. Pairing stays within a story and table cell and does not cross a section break or an explicit page break before the following paragraph.
@@ -39,6 +43,8 @@ fn convert(bytes: &[u8]) -> Result<String, String> {
 ```
 
 Styled export preserves paragraph/run styles, script-specific fonts and language, hyperlinks, list labels, table borders, widths, row styles, and merged cells. Revision spans use standard `ins` and `del` elements; `groupChanges` optionally wraps adjacent changes in a `change` element. Omit `revisionInlines` to export current text only.
+
+Minimum (`atLeast`) line spacing keeps the requested paragraph line height and wraps its contents in a span with `line-height:normal`, allowing larger text to expand each line. HTML sanitizers must preserve this keyword as well as numeric line heights. Exact and proportional line spacing retain their original behavior.
 
 Callers can supply `ContentOverride` entries by block ID. `replaceContent` replaces a block's content, while a figure override provides its caption. `text` is escaped for HTML; `html` is trusted caller-provided markup and must be sanitized by the caller when appropriate. `listLabelPresent` avoids duplicating a label already present in replacement text, and `suppressImage` allows callers to display a separate media viewer. Overrides do not override explicit revision spans. An `assets` map may contain the extracted payloads or caller-provided display URLs.
 
