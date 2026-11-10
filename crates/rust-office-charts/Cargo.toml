@@ -1,6 +1,6 @@
 [package]
 name = "rust-office-charts"
-version = "0.1.9"
+version = "0.1.10"
 edition = "2021"
 license = "MIT AND OFL-1.1"
 description = "Render Office Open XML charts to SVG from native Rust or WebAssembly"
@@ -18,7 +18,7 @@ map-fallback = ["extended-charts"]
 base64 = { version = "0.22", optional = true }
 miniz_oxide = { version = "0.8", optional = true }
 roxmltree = "0.20"
-rust-office-art = { version = "=0.1.7", path = "../rust-office-art" }
+rust-office-art = { version = "=0.1.8", path = "../rust-office-art" }
 svgtypes = { version = "0.16.1", default-features = false, features = ["libm"] }
 kurbo = { version = "0.13", default-features = false, features = ["libm"] }
 serde = { version = "1", features = ["derive"] }

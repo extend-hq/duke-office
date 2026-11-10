@@ -1,10 +1,11 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 - Add bounded presentation bundles with rich paragraph inlines, slide manifests, comments, shared chart data, and deduplicated assets.
 - Add semantic HTML export with merged HTML/Markdown/CSV tables, asset substitutions, and content overrides using shared Office export types.
-- Preserve chart part names and expose the shared lossless chart-data contract independently of rendering.
+- Preserve chart part names and expose the shared lossless chart-data contract independently of rendering. The new public `SlideNode::Chart` field requires updates to exhaustive Rust patterns and constructors.
+- Improve inherited text styles and bullet formatting, and use SIMD base64 when available in WebAssembly.
 - Add native and WASM extraction limits, bounded bundle parse defaults, and matching JSON export entry points while preserving citation references.
 
 ## 0.2.2

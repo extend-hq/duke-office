@@ -1,8 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.2.22
 
 - Re-export shared semantic export options, overrides, and escaping from `rust-office-art`, preserving existing import paths and behavior.
+- Speed up native UTF-8 validation and use SIMD base64 when available in WebAssembly.
+- Update shared Office Art and chart dependencies.
 
 ## 0.2.21
 
