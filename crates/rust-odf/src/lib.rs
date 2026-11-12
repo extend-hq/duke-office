@@ -9,6 +9,7 @@ pub mod chart;
 mod document;
 mod dom;
 pub mod draw;
+pub mod enhanced_geometry;
 pub mod media;
 mod package;
 pub mod style;

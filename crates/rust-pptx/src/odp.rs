@@ -117,15 +117,16 @@ fn with_id(mut node: SlideNode, id: String) -> SlideNode {
     node
 }
 
-/// A chart's stored data as a chart node. Nothing draws it yet: no chart
-/// picture is generated for OpenDocument charts.
+/// A chart's stored data and shared native artwork.
 fn chart_node(
     chart: &Chart,
+    render: bool,
     part: Option<String>,
     metadata: Option<Box<NodeMetadata>>,
     name: String,
     transform: Transform,
 ) -> SlideNode {
+    let chart_svg = render.then(|| rust_office_charts::odf::render_chart(chart, transform.width as f64 / 9525.0, transform.height as f64 / 9525.0)).flatten().map(|r| r.svg);
     let categories: Vec<serde_json::Value> = chart
         .categories
         .iter()
@@ -151,13 +152,13 @@ fn chart_node(
                 name: series.name.clone(),
                 categories: (!categories.is_empty()).then(|| categories.clone()),
                 values: series.values.clone(),
-                color: None,
+                color: series.style.graphic.fill_color.as_deref().map(|value| color(value, series.style.graphic.opacity)),
             })
             .collect(),
         has_legend: Some(chart.has_legend),
-        chart_xml: None,
+        chart_xml: rust_office_charts::odf::chart_xml(chart),
         chart_part_name: part,
-        chart_svg: None,
+        chart_svg,
         chart_style_xml: None,
         chart_colors_xml: None,
     }
@@ -774,7 +775,10 @@ impl<'a> Builder<'a> {
                 match embedded.as_ref().map(|embedded| (embedded, &embedded.body)) {
                     Some((_, Body::Chart(chart))) => {
                         let part = href.as_ref().map(|directory| format!("{directory}/content.xml"));
-                        let data = chart_node(chart, part, metadata.clone(), name.clone(), transform.clone());
+                        let data = chart_node(chart, !drawable, part, metadata.clone(), name.clone(), transform.clone());
+                        if !drawable && matches!(&data, SlideNode::Chart { chart_svg: None, .. }) {
+                            self.warn("chart-artwork-unavailable", "The chart data is retained but its native artwork is unsupported", slide_index);
+                        }
                         return Some(match preview.filter(|_| drawable) {
                             // The saved picture is what is drawn; the chart node carries the data.
                             Some(asset_id) => SlideNode::Group {
@@ -967,7 +971,9 @@ impl<'a> Builder<'a> {
                 if custom.mirror_vertical {
                     transform.flip_vertical = Some(true);
                 }
-                match custom.preset() {
+                match custom.evaluated_outline([transform.width as f64 / 360.0, transform.height as f64 / 360.0]) {
+                    Some(path) => ShapeGeometry { preset: None, path: Some(path) },
+                    None => match custom.preset() {
                     Some(preset) => ShapeGeometry {
                         preset: Some(preset.to_owned()),
                         path: None,
@@ -975,6 +981,7 @@ impl<'a> Builder<'a> {
                     None => ShapeGeometry {
                         preset: None,
                         path: custom.plain_path(),
+                    },
                     },
                 }
             }
@@ -992,6 +999,7 @@ impl<'a> Builder<'a> {
         } else {
             geometry
         };
+        let artwork = rust_office_art::odf::render_shape(shape, self.styles, scope);
         let context = self.text_context(shape, scope, slide_index.map_or(0, |index| index + 1));
         let paragraphs = self.shape_paragraphs(&shape.text, &context);
         let padding = [
@@ -1006,8 +1014,8 @@ impl<'a> Builder<'a> {
             name,
             transform,
             geometry,
-            shape_svg: None,
-            paint_bounds: None,
+            shape_svg: artwork.as_ref().map(|r| r.svg.clone()),
+            paint_bounds: artwork.and_then(|r| r.paint_bounds),
             source_xml: None,
             fill: self.fill(&props),
             line: self.line(&props),

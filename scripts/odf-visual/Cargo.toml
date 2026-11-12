@@ -1,0 +1,19 @@
+[package]
+name = "odf-visual"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+rust-pptx = { path = "../../crates/rust-pptx" }
+rust-docx = { path = "../../crates/rust-docx" }
+serde_json = "1"
+rust-odf = { path = "../../crates/rust-odf" }
+rust-office-art = { path = "../../crates/rust-office-art" }
+rust-office-charts = { path = "../../crates/rust-office-charts" }
+
+[[bin]]
+name = "odf-visual"
+path = "snapshot.rs"

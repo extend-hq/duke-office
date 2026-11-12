@@ -41,6 +41,7 @@ pub fn render_chart_svg(xml: &str, options_json: &str) -> Result<Option<String>,
         spreadsheet_defaults: options.spreadsheet_defaults,
         interactive: options.interactive,
         data: options.data.as_ref(),
+        ..Default::default()
     };
     Ok(render_chart(xml, &options).map(|chart| chart.svg))
 }

@@ -373,7 +373,8 @@ impl Ring<'_> {
         let mut angle = self.start;
         for p in slices {
             let sweep = p.weight / sum * TAU;
-            let bisector = angle + sweep / 2.;
+            let sector_start = if self.colors.pie_counterclockwise { angle - sweep } else { angle };
+            let bisector = sector_start + sweep / 2.;
             let circle = self.circle.displaced(self.circle.r * p.explosion, bisector);
             let fill = self.colors.fill(self.series, Some(p.index));
             let stroke = self
@@ -404,7 +405,7 @@ impl Ring<'_> {
                 )
                 .unwrap();
             }
-            sector(&mut body, circle, self.inner, angle, sweep, &fill, stroke);
+            sector(&mut body, circle, self.inner, sector_start, sweep, &fill, stroke);
             if width.is_some() {
                 body.push_str("</g>");
             }
@@ -470,7 +471,7 @@ impl Ring<'_> {
                 );
                 self.colors.end_hit(label_svg);
             }
-            angle += sweep;
+            angle += if self.colors.pie_counterclockwise { -sweep } else { sweep };
         }
     }
 }
@@ -1001,7 +1002,7 @@ pub(super) fn render(
             minor_latin.unwrap_or("Calibri")
         },
     );
-    if (legacy || colors.spreadsheet_defaults)
+    if (legacy || colors.spreadsheet_defaults || colors.opendocument_defaults)
         && child(plot, "layout")
             .and_then(|n| child(n, "manualLayout"))
             .is_none()

@@ -6,7 +6,7 @@ use std::collections::{BTreeMap, HashMap};
 use crate::draw::{self, Shape};
 use crate::text::{self, Block, Ctx};
 use crate::units::{parse_bool, parse_color, parse_length, parse_number, parse_percent, Length};
-use crate::xml::{attr, child, elements, is, owned, Node, DRAW, FO, OFFICE, PRESENTATION, STYLE, SVG, TABLE, TEXT};
+use crate::xml::{attr, child, elements, is, owned, Node, CHART, DRAW, FO, OFFICE, PRESENTATION, STYLE, SVG, TABLE, TEXT};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Family {
@@ -20,11 +20,12 @@ pub enum Family {
     TableRow,
     TableCell,
     Section,
+    Chart,
     Other,
 }
 
 /// The number of [`Family`] values.
-const FAMILIES: usize = 11;
+const FAMILIES: usize = 12;
 
 impl Family {
     fn index(self) -> usize {
@@ -43,6 +44,7 @@ impl Family {
             "table-row" => Self::TableRow,
             "table-cell" => Self::TableCell,
             "section" => Self::Section,
+            "chart" => Self::Chart,
             _ => Self::Other,
         }
     }
@@ -231,6 +233,7 @@ properties! {
         opacity: f64,
         stroke: Stroke,
         stroke_color: String,
+        stroke_opacity: f64,
         stroke_width: Length,
         stroke_dash: String,
         marker_start: String,
@@ -298,6 +301,7 @@ pub struct Props {
     pub paragraph: ParagraphProps,
     pub graphic: GraphicProps,
     pub table: TableProps,
+    pub chart: BTreeMap<String, String>,
 }
 
 impl Props {
@@ -307,6 +311,9 @@ impl Props {
         self.paragraph.inherit(&base.paragraph);
         self.graphic.inherit(&base.graphic);
         self.table.inherit(&base.table);
+        for (name, value) in &base.chart {
+            self.chart.entry(name.clone()).or_insert_with(|| value.clone());
+        }
     }
 }
 
@@ -667,11 +674,16 @@ impl StyleSheet {
                     if let Some(name) = owned(node, DRAW, "name") {
                         let color = |name| attr(node, DRAW, name).and_then(parse_color);
                         let angle = attr(node, DRAW, "angle").unwrap_or("0").trim();
-                        // Before OpenDocument 1.3 the angle is a bare number of tenths of a degree.
-                        let angle = match angle.strip_suffix("deg") {
-                            Some(degrees) => parse_number(degrees).unwrap_or(0.0),
-                            None => parse_number(angle).unwrap_or(0.0) / 10.0,
-                        };
+                        let legacy = attr(root, OFFICE, "version").is_none_or(|v| v == "1.0" || v == "1.1");
+                        let angle = if let Some(value) = angle.strip_suffix("deg") {
+                            parse_number(value).unwrap_or(0.0)
+                        } else if let Some(value) = angle.strip_suffix("grad") {
+                            parse_number(value).unwrap_or(0.0) * 0.9
+                        } else if let Some(value) = angle.strip_suffix("rad") {
+                            parse_number(value).unwrap_or(0.0).to_degrees()
+                        } else {
+                            parse_number(angle).unwrap_or(0.0) / if legacy { 10.0 } else { 1.0 }
+                        }.rem_euclid(360.0);
                         self.gradients.insert(
                             name,
                             Gradient {
@@ -784,6 +796,11 @@ impl StyleSheet {
                 "paragraph-properties" => props.paragraph = paragraph_props(properties),
                 "graphic-properties" | "drawing-page-properties" => {
                     props.graphic = graphic_props(properties);
+                }
+                "chart-properties" => {
+                    for attribute in properties.attributes().iter().filter(|a| a.namespace == Some(CHART)) {
+                        props.chart.insert(attribute.name.to_string(), attribute.value.to_string());
+                    }
                 }
                 "table-properties" | "table-column-properties" | "table-row-properties"
                 | "table-cell-properties" => table_props(properties, &mut props.table),
@@ -1080,6 +1097,7 @@ fn graphic_props(node: Node<'_, '_>) -> GraphicProps {
             _ => None,
         }),
         stroke_color: attr(node, SVG, "stroke-color").and_then(parse_color),
+        stroke_opacity: attr(node, SVG, "stroke-opacity").and_then(parse_percent).map(|v| (v / 100.0).clamp(0.0, 1.0)),
         stroke_width: attr(node, SVG, "stroke-width").and_then(parse_length),
         stroke_dash: text(DRAW, "stroke-dash"),
         marker_start: text(DRAW, "marker-start"),

@@ -1379,6 +1379,18 @@ impl<'a> Builder<'a> {
 
     fn shape(&mut self, shape: Shape, scope: Scope, out: &mut Vec<ParagraphChildNode>) {
         let mut shape = shape;
+        if let Some(artwork) = rust_office_art::odf::render_shape(&shape, self.styles, scope) {
+            let mut image = self.generated_image(&shape, scope, artwork.svg);
+            image.paint_bounds = artwork.paint_bounds.map(|b| Box::new(crate::ImagePaintBounds {
+                x_px: b.x_px, y_px: b.y_px, width_px: b.width_px, height_px: b.height_px,
+                layout_width_px: b.layout_width_px, layout_height_px: b.layout_height_px,
+            }));
+            if !shape.text.is_empty() {
+                image.content_nodes = Some(self.story(std::mem::take(&mut shape.text), scope));
+            }
+            out.push(ParagraphChildNode::Image(Box::new(image)));
+            return;
+        }
         match std::mem::take(&mut shape.kind) {
             ShapeKind::Image { href, fallback } => {
                 // Prefer the bitmap rendition when the primary image is a vector format.
@@ -1387,6 +1399,20 @@ impl<'a> Builder<'a> {
                 self.picture(&shape, chosen, scope, out);
             }
             ShapeKind::Object { href, replacement, math } => {
+                let chart = href.as_deref().and_then(|h| self.document.objects.get(h))
+                    .and_then(|object| object.document(&Limits::default()).ok())
+                    .and_then(|document| if let Body::Chart(chart) = document.body { Some(chart) } else { None });
+                if let Some(chart) = chart {
+                    let placement = shape.placement();
+                    if let Some(rendered) = rust_office_charts::odf::render_chart(&chart, pixels(placement.width), pixels(placement.height)) {
+                        let mut image = self.generated_image(&shape, scope, rendered.svg);
+                        image.chart_data = Some(Box::new(rendered.data));
+                        image.chart_part_name = href.map(|h| format!("{h}/content.xml"));
+                        image.semantic_kind = Some("chart".into());
+                        out.push(ParagraphChildNode::Image(Box::new(image)));
+                        return;
+                    }
+                }
                 let math = math.or_else(|| href.as_deref().and_then(|href| self.embedded_math(href)));
                 let before = out.len();
                 if let Some(replacement) = replacement {
@@ -1521,6 +1547,18 @@ impl<'a> Builder<'a> {
             behind_document: Some(props.behind_text == Some(true)),
             z_index: Some(i64::from(shape.z_index.unwrap_or(0).max(0)) + 1),
         })
+    }
+
+    fn generated_image(&self, shape: &Shape, scope: Scope, svg: String) -> ImageRunNode {
+        let placement = shape.placement();
+        let mut image = empty_image();
+        image.alt = shape.description.clone().or_else(|| shape.title.clone());
+        image.width_px = Some(pixels(placement.width));
+        image.height_px = Some(pixels(placement.height));
+        image.content_type = Some("image/svg+xml".into());
+        image.data = Some(svg.into_bytes());
+        image.floating = self.floating(shape, scope);
+        image
     }
 
     fn picture(&mut self, shape: &Shape, href: String, scope: Scope, out: &mut Vec<ParagraphChildNode>) {

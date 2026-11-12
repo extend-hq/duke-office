@@ -2,6 +2,7 @@
 
 mod chart;
 mod parse;
+pub mod odf;
 
 use std::collections::HashMap;
 
@@ -35,6 +36,10 @@ pub struct RenderOptions<'a> {
     pub legacy_defaults: bool,
     /// Apply spreadsheet host defaults for omitted chart properties.
     pub spreadsheet_defaults: bool,
+    /// Reserve native OpenDocument title and legend space in circular charts.
+    pub opendocument_defaults: bool,
+    /// Draw circular data series counterclockwise from their starting angle.
+    pub pie_counterclockwise: bool,
     /// Emit hit targets that identify the source series and data point.
     pub interactive: bool,
     /// Workbook values in chart XML series order. Point indices preserve sparse data.

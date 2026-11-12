@@ -208,7 +208,7 @@ impl OdfDocument {
                 ),
                 OdfFamily::Spreadsheet,
             ),
-            Some("chart") => (Body::Chart(chart::parse_chart(bodies[0], &mut ctx)), OdfFamily::Chart),
+            Some("chart") => (Body::Chart(chart::parse_chart(bodies[0], &mut ctx, &styles)), OdfFamily::Chart),
             Some("image") => (Body::Other, OdfFamily::Image),
             Some("database") => (Body::Other, OdfFamily::Database),
             _ => (Body::Other, OdfFamily::Formula),
@@ -241,7 +241,7 @@ impl OdfDocument {
         let metadata = child(metadata, OFFICE, "meta").map(read_metadata).unwrap_or_default();
 
         let mut binaries = std::mem::take(&mut ctx.inline);
-        let mut objects = BTreeMap::new();
+        let mut objects = std::mem::take(&mut ctx.inline_objects);
         if let Some(package) = package {
             for href in std::mem::take(&mut ctx.hrefs) {
                 match package.file(&href)? {

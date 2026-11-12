@@ -107,7 +107,7 @@ pub struct CustomGeometry {
 
 fn view_box(node: Node<'_, '_>) -> Option<[f64; 4]> {
     let mut values = attr(node, SVG, "viewBox")?
-        .split([' ', ','])
+        .split(|ch: char| ch.is_ascii_whitespace() || ch == ',')
         .filter(|part| !part.is_empty())
         .map(parse_number);
     let view_box = [values.next()??, values.next()??, values.next()??, values.next()??];
@@ -177,9 +177,21 @@ fn frame_kind(node: Node<'_, '_>, ctx: &mut Ctx<'_>, text: &mut Vec<Block>) -> S
                     };
                 }
                 "object" | "object-ole" => {
-                    let href = attr(content, XLINK, "href").and_then(internal_path);
+                    let mut href = attr(content, XLINK, "href").and_then(internal_path);
                     if let Some(path) = &href {
                         ctx.objects.insert(path.clone());
+                    }
+                    if href.is_none() {
+                        if let Some(document) = child(content, OFFICE, "document") {
+                            let key = format!("inline-object:{}", ctx.inline_objects.len() + 1);
+                            let source = document.standalone_source();
+                            if source.len() > ctx.limits.max_entry_bytes {
+                                ctx.error = Some(crate::OdfError::Limit("inline object size".into()));
+                            } else {
+                                ctx.inline_objects.insert(key.clone(), crate::EmbeddedObject { content: Some(source), styles: None });
+                                href = Some(key);
+                            }
+                        }
                     }
                     let math = child(content, MATHML, "math").map(|math| math.source().to_owned());
                     return ShapeKind::Object {
@@ -253,7 +265,7 @@ pub(crate) fn parse_shape(node: Node<'_, '_>, ctx: &mut Ctx<'_>) -> Option<Shape
                 let flag = |name| attr(geometry, DRAW, name).and_then(parse_bool) == Some(true);
                 CustomGeometry {
                     shape_type: owned(geometry, DRAW, "type"),
-                    path: owned(geometry, DRAW, "enhanced-path"),
+                    path: owned(geometry, crate::xml::Ns::DrawExt, "enhanced-path").or_else(|| owned(geometry, DRAW, "enhanced-path")),
                     view_box: view_box(geometry),
                     modifiers: attr(geometry, DRAW, "modifiers")
                         .map(|value| value.split_whitespace().filter_map(parse_number).collect())
@@ -330,6 +342,7 @@ pub enum TransformStep {
     Scale(f64, f64),
     SkewX(f64),
     SkewY(f64),
+    Matrix([f64; 6]),
 }
 
 /// Parses a `draw:transform` value. Unknown functions are skipped.
@@ -342,7 +355,7 @@ pub fn parse_transform(value: &str) -> Vec<TransformStep> {
         };
         let name = rest[..open].trim();
         let arguments: Vec<&str> = rest[open + 1..open + close]
-            .split([' ', ','])
+            .split(|ch: char| ch.is_ascii_whitespace() || ch == ',')
             .filter(|part| !part.is_empty())
             .collect();
         let number = |index: usize| arguments.get(index).copied().and_then(parse_number);
@@ -354,6 +367,10 @@ pub fn parse_transform(value: &str) -> Vec<TransformStep> {
             "scale" => number(0).map(|x| TransformStep::Scale(x, number(1).unwrap_or(x))),
             "skewX" => number(0).map(TransformStep::SkewX),
             "skewY" => number(0).map(TransformStep::SkewY),
+            "matrix" if arguments.len() == 6 => {
+                let translation = |i| length(i).map(|v| v.0 as f64).or_else(|| number(i).map(|v| v * 360.0));
+                (|| Some(TransformStep::Matrix([number(0)?, number(1)?, number(2)?, number(3)?, translation(4)?, translation(5)?])))()
+            },
             _ => None,
         };
         steps.extend(step);
@@ -380,33 +397,9 @@ impl Shape {
     pub fn placement(&self) -> Placement {
         let width = self.width.unwrap_or_default().0 as f64;
         let height = self.height.unwrap_or_default().0 as f64;
-        // Affine matrix [a c e; b d f] applied to the unrotated box at (x, y).
-        let (mut a, mut b, mut c, mut d) = (1.0f64, 0.0f64, 0.0f64, 1.0f64);
-        let mut e = self.x.unwrap_or_default().0 as f64;
-        let mut f = self.y.unwrap_or_default().0 as f64;
-        let mut rotation = 0.0;
-        for step in self.transform.as_deref().map(parse_transform).unwrap_or_default() {
-            let (sa, sb, sc, sd, se, sf) = match step {
-                TransformStep::Rotate(angle) => {
-                    rotation -= angle.to_degrees();
-                    // OpenDocument angles are counter-clockwise with y pointing down.
-                    (angle.cos(), -angle.sin(), angle.sin(), angle.cos(), 0.0, 0.0)
-                }
-                TransformStep::Translate(x, y) => (1.0, 0.0, 0.0, 1.0, x.0 as f64, y.0 as f64),
-                TransformStep::Scale(x, y) => (x, 0.0, 0.0, y, 0.0, 0.0),
-                TransformStep::SkewX(_) | TransformStep::SkewY(_) => continue,
-            };
-            (a, b, c, d, e, f) = (
-                sa * a + sc * b,
-                sb * a + sd * b,
-                sa * c + sc * d,
-                sb * c + sd * d,
-                sa * e + sc * f + se,
-                sb * e + sd * f + sf,
-            );
-        }
-        let scale_x = (a * a + b * b).sqrt();
-        let scale_y = (c * c + d * d).sqrt();
+        let [a, b, c, d, e, f] = self.affine_transform();
+        let scale_x = a.hypot(b);
+        let scale_y = c.hypot(d);
         let centre_x = a * width / 2.0 + c * height / 2.0 + e;
         let centre_y = b * width / 2.0 + d * height / 2.0 + f;
         let (width, height) = (width * scale_x, height * scale_y);
@@ -415,9 +408,32 @@ impl Shape {
             y: Length((centre_y - height / 2.0).round() as i64),
             width: Length(width.round() as i64),
             height: Length(height.round() as i64),
-            rotation: rotation.rem_euclid(360.0),
+            rotation: b.atan2(a).to_degrees().rem_euclid(360.0),
         }
     }
+
+    /// Maps untransformed local coordinates to page coordinates, in EMUs.
+    pub fn affine_transform(&self) -> [f64; 6] {
+        let (mut a, mut b, mut c, mut d) = (1.0f64, 0.0f64, 0.0f64, 1.0f64);
+        let mut e = self.x.unwrap_or_default().0 as f64;
+        let mut f = self.y.unwrap_or_default().0 as f64;
+        for step in self.transform.as_deref().map(parse_transform).unwrap_or_default() {
+            let [sa, sb, sc, sd, se, sf] = match step {
+                TransformStep::Rotate(angle) => [angle.cos(), -angle.sin(), angle.sin(), angle.cos(), 0.0, 0.0],
+                TransformStep::Translate(x, y) => [1.0, 0.0, 0.0, 1.0, x.0 as f64, y.0 as f64],
+                TransformStep::Scale(x, y) => [x, 0.0, 0.0, y, 0.0, 0.0],
+                TransformStep::SkewX(angle) => [1.0, 0.0, -angle.tan(), 1.0, 0.0, 0.0],
+                TransformStep::SkewY(angle) => [1.0, -angle.tan(), 0.0, 1.0, 0.0, 0.0],
+                TransformStep::Matrix(matrix) => matrix,
+            };
+            (a, b, c, d, e, f) = (
+                sa * a + sc * b, sb * a + sd * b, sa * c + sc * d,
+                sb * c + sd * d, sa * e + sc * f + se, sb * e + sd * f + sf,
+            );
+        }
+        [a, b, c, d, e, f]
+    }
+
 }
 
 /// OpenDocument custom shape types and the DrawingML preset each one matches.
@@ -728,7 +744,7 @@ mod tests {
                 TransformStep::Translate(Length(720_000), Length(1_080_000)),
             ]
         );
-        assert!(parse_transform("matrix(1 0 0 1 0 0)").is_empty());
+        assert_eq!(parse_transform("matrix(1 0 0 1 0 0)"), vec![TransformStep::Matrix([1.0, 0.0, 0.0, 1.0, 0.0, 0.0])]);
     }
 
     #[test]

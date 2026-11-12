@@ -103,6 +103,7 @@ pub struct Table {
     pub style: Option<String>,
     pub columns: Vec<TableColumn>,
     pub rows: Vec<TableRow>,
+    pub shapes: Vec<Shape>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -181,6 +182,7 @@ impl Table {
             style: self.style.clone(),
             columns,
             rows,
+            shapes: self.shapes.clone(),
         }
     }
 }
@@ -193,6 +195,7 @@ pub(crate) struct Ctx<'l> {
     pub hrefs: BTreeSet<String>,
     /// Package directories of embedded objects.
     pub objects: BTreeSet<String>,
+    pub inline_objects: BTreeMap<String, crate::EmbeddedObject>,
     /// Images embedded as base64 in flat XML, keyed by a generated reference.
     pub inline: BTreeMap<String, Vec<u8>>,
     pub warnings: BTreeSet<String>,
@@ -207,6 +210,7 @@ impl<'l> Ctx<'l> {
             limits,
             hrefs: BTreeSet::new(),
             objects: BTreeSet::new(),
+            inline_objects: BTreeMap::new(),
             inline: BTreeMap::new(),
             warnings: BTreeSet::new(),
             error: None,
@@ -515,6 +519,7 @@ pub(crate) fn parse_table(node: Node<'_, '_>, ctx: &mut Ctx<'_>) -> Table {
         style: owned(node, TABLE, "style-name"),
         columns: Vec::new(),
         rows: Vec::new(),
+        shapes: Vec::new(),
     };
     if ctx.enter() {
         table_children(node, ctx, &mut table, false);
@@ -529,6 +534,7 @@ fn table_children(parent: Node<'_, '_>, ctx: &mut Ctx<'_>, table: &mut Table, he
             continue;
         }
         match node.tag_name().name() {
+            "shapes" => table.shapes.extend(elements(node).filter_map(|child| draw::parse_shape(child, ctx))),
             "table-column" => table.columns.push(TableColumn {
                 style: owned(node, TABLE, "style-name"),
                 default_cell_style: owned(node, TABLE, "default-cell-style-name"),

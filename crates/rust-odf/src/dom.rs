@@ -20,6 +20,7 @@ pub(crate) enum Ns {
     Presentation,
     Meta,
     Dr3d,
+    DrawExt,
     Chart,
     Xlink,
     Dc,
@@ -54,6 +55,7 @@ impl Ns {
             "http://purl.org/dc/elements/1.1/" => Self::Dc,
             "http://www.w3.org/1998/Math/MathML" => Self::MathMl,
             "http://www.w3.org/XML/1998/namespace" => Self::Xml,
+            "http://openoffice.org/2010/draw" => Self::DrawExt,
             uri if uri.starts_with("urn:oasis:names:tc:opendocument:") => Self::OtherOdf,
             _ => Self::Foreign,
         }
@@ -182,6 +184,36 @@ impl<'a, 'i> Node<'a, 'i> {
     pub(crate) fn source(self) -> &'i str {
         let (start, end) = self.data().source;
         &self.document.input[start as usize..end as usize]
+    }
+
+    /// Retains inherited namespace bindings when an embedded document is detached.
+    pub(crate) fn standalone_source(self) -> String {
+        let mut bindings = std::collections::BTreeSet::new();
+        let mut inherited = String::new();
+        let mut current = self;
+        loop {
+            let mut reader = quick_xml::Reader::from_str(current.source());
+            if let Ok(quick_xml::events::Event::Start(start) | quick_xml::events::Event::Empty(start)) = reader.read_event() {
+                for attribute in start.attributes().flatten() {
+                    let key = attribute.key.as_ref();
+                    if (key == b"xmlns" || key.starts_with(b"xmlns:")) && bindings.insert(key.to_vec()) && current.id != self.id {
+                        if let (Ok(key), Ok(value)) = (std::str::from_utf8(key), std::str::from_utf8(&attribute.value)) {
+                            inherited.push(' ');
+                            inherited.push_str(key);
+                            inherited.push_str("=\"");
+                            inherited.push_str(&value.replace('"', "&quot;"));
+                            inherited.push('"');
+                        }
+                    }
+                }
+            }
+            let parent = current.data().parent;
+            if parent == 0 { break; }
+            current = Node { document: self.document, id: parent };
+        }
+        let source = self.source();
+        let end = source.find(|ch: char| ch.is_ascii_whitespace() || ch == '>' || ch == '/').unwrap_or(source.len());
+        format!("{}{}{}", &source[..end], inherited, &source[end..])
     }
 }
 

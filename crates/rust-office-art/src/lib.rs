@@ -14,6 +14,7 @@ pub mod export;
 mod geometry;
 mod ink;
 mod math;
+pub mod odf;
 pub mod model3d;
 mod raster;
 mod shapes;
