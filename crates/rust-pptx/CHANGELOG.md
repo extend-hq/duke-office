@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+
+- Render supported OpenDocument charts and enhanced drawing geometry, retain chart styles and scatter/bubble domains, and expose cached chart data through existing extraction APIs.
+
 ## 0.4.0
 
 - Read OpenDocument presentations and drawings (`.odp`, `.otp`, `.fodp`, `.odg`, `.otg`, `.fodg`) into `PresentationDocument` through the new `rust-odf` crate; see [OpenDocument input](../../docs/opendocument.md) for what is imported.

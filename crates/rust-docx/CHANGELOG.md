@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1
+
+- Render supported OpenDocument charts and enhanced drawing geometry, preserve cached chart data in extraction bundles independently of artwork, and retain exact numeric strings and sparse indices.
+
 ## 0.3.0
 
 - Read OpenDocument text (`.odt`, `.ott`, `.odm`, `.otm`, `.oth` and flat `.fodt`) into the document model. `parse_odt` builds the model directly from what the new `rust-odf` crate reads, with no Word package in between; see [OpenDocument input](../../docs/opendocument.md) for what is imported.
