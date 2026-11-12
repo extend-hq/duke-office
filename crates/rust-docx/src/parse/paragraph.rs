@@ -2603,5 +2603,6 @@ pub(crate) fn parse_paragraph_with_table_run_style(
         source_xml: Some(paragraph_xml.to_string()),
         source_text_patch: None,
         source_run_provenance,
+        comment_ranges: None,
     }
 }

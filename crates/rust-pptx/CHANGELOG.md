@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0
+
+- Read OpenDocument presentations and drawings (`.odp`, `.otp`, `.fodp`, `.odg`, `.otg`, `.fodg`) into `PresentationDocument` through the new `rust-odf` crate; see [OpenDocument input](../../docs/opendocument.md) for what is imported.
+- `PresentationFormat` has new `Odp` and `Odg` variants, reported as `odp` and `odg`. Exhaustive Rust matches on the format need the new arms.
+- `rust-pptx-wasm` reports the new formats and needs no new export.
+
 ## 0.3.0
 
 - Add bounded presentation bundles with rich paragraph inlines, slide manifests, comments, shared chart data, and deduplicated assets.

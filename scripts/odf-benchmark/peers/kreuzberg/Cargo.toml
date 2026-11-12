@@ -1,0 +1,14 @@
+[package]
+name = "peer-kreuzberg"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+kreuzberg = { version = "=4.10.4", default-features = false, features = ["office", "tokio-runtime"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"

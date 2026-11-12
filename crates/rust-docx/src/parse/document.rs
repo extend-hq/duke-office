@@ -117,6 +117,7 @@ fn nonempty_nodes(mut nodes: Vec<DocNode>) -> Vec<DocNode> {
             source_xml: None,
             source_text_patch: None,
             source_run_provenance: None,
+            comment_ranges: None,
         }));
     }
 

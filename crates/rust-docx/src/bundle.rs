@@ -82,6 +82,15 @@ pub fn parse_document_bundle(
     bytes: &[u8],
     options: ExtractDocumentBundleOptions,
 ) -> Result<DocumentBundle, String> {
+    if crate::is_odf_format(bytes) {
+        // OpenDocument text is built into the model directly and has no Word package.
+        let package = OoxmlPackage {
+            parts: Default::default(),
+            binary_assets: Default::default(),
+            warnings: Vec::new(),
+        };
+        return Ok(extract_document_bundle(&crate::parse_odt(bytes)?, &package, options));
+    }
     let mut package = crate::parse_document_bytes(bytes)?;
     let model = crate::build_doc_model_with_options(
         &package,

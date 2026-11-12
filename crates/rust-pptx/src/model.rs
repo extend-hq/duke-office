@@ -16,6 +16,10 @@ pub struct PictureArtwork {
 pub enum PresentationFormat {
     Pptx,
     Ppt,
+    /// OpenDocument presentation, template or flat XML.
+    Odp,
+    /// OpenDocument drawing, template or flat XML.
+    Odg,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

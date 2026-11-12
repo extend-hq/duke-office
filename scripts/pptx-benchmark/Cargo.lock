@@ -647,8 +647,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
+name = "rust-odf"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "memchr",
+ "miniz_oxide 0.8.9",
+ "quick-xml 0.37.5",
+ "zlib-rs",
+]
+
+[[package]]
 name = "rust-office-art"
-version = "0.1.7"
+version = "0.1.8"
 dependencies = [
  "base64",
  "image",
@@ -664,7 +675,7 @@ dependencies = [
 
 [[package]]
 name = "rust-office-charts"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "base64",
  "kurbo",
@@ -677,7 +688,7 @@ dependencies = [
 
 [[package]]
 name = "rust-pptx"
-version = "0.2.2"
+version = "0.4.0"
 dependencies = [
  "base64",
  "base64-simd",
@@ -686,6 +697,7 @@ dependencies = [
  "flate2",
  "memchr",
  "quick-xml 0.37.5",
+ "rust-odf",
  "rust-office-art",
  "rust-office-charts",
  "serde",

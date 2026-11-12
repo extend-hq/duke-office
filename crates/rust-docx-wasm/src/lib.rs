@@ -378,9 +378,22 @@ pub fn build_doc_model_from_package_js(
 #[wasm_bindgen]
 pub fn build_doc_model_from_bytes(bytes: &[u8], options: Option<JsValue>) -> Result<JsValue, JsValue> {
     let started_at = performance_now();
-    let pkg = parse_document_bytes(bytes).map_err(|error| JsValue::from_str(&error))?;
-    let parsed_at = performance_now();
-    let model = build_doc_model_with_options(&pkg, &parse_options(options)?);
+    // OpenDocument text is built into the model directly: it has no Word
+    // package, so the model travels with an empty one.
+    let (pkg, parsed_at, model) = if rust_docx::is_odf_format(bytes) {
+        let model = rust_docx::parse_odt(bytes).map_err(|error| JsValue::from_str(&error))?;
+        let pkg = OoxmlPackage {
+            parts: Default::default(),
+            binary_assets: Default::default(),
+            warnings: Vec::new(),
+        };
+        (pkg, started_at, model)
+    } else {
+        let pkg = parse_document_bytes(bytes).map_err(|error| JsValue::from_str(&error))?;
+        let parsed_at = performance_now();
+        let model = build_doc_model_with_options(&pkg, &parse_options(options)?);
+        (pkg, parsed_at, model)
+    };
     let package_started_at = performance_now();
     let package_js = package_to_js(&pkg)?;
     let package_ms = performance_now() - package_started_at;

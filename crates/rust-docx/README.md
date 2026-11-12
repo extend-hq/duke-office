@@ -18,7 +18,7 @@ Native builds enable `native-deflate` by default, using libdeflate for whole-buf
 
 ```toml
 [dependencies]
-rust-docx = { version = "0.2", default-features = false }
+rust-docx = { version = "0.3", default-features = false }
 ```
 
 ## Usage
@@ -30,7 +30,7 @@ let blocks = rust_docx::extract_document_blocks(&model);
 let json = serde_json::to_string(&blocks)?;
 ```
 
-`parse_document_blocks(&bytes)` combines these steps. `cargo run --example parse_blocks -- input.docx` writes the block JSON to standard output.
+`parse_document_blocks(&bytes)` combines these steps. It and `parse_document_model(&bytes)` also read OpenDocument text (`.odt`, `.fodt`), which is built into the model directly and has no Word package. `cargo run --example parse_blocks -- input.docx` writes the block JSON to standard output.
 
 Embedded 3D model output is opt-in:
 

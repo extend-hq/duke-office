@@ -678,11 +678,18 @@ impl Extractor<'_> {
             !style.and_then(|s| s.numbering.as_ref()).is_some_and(|n| n.num_id > 0)
                 || !self.non_heading_styles.contains(style_id)
         });
-        let field_instructions = p
-            .source_xml
-            .as_deref()
-            .map(paragraph_field_instructions)
-            .unwrap_or_default();
+        // A paragraph without Word markup states its fields on its runs.
+        let field_instructions = match p.source_xml.as_deref() {
+            Some(xml) => paragraph_field_instructions(xml),
+            None => p
+                .children
+                .iter()
+                .filter_map(|child| match child {
+                    ParagraphChildNode::Text(run) => run.field_instruction.clone(),
+                    _ => None,
+                })
+                .collect(),
+        };
         let joined_instructions = field_instructions.join("").to_uppercase();
         let instruction_kind = joined_instructions.split_whitespace().next().unwrap_or("");
         let kind = if matches!(instruction_kind, "PAGE" | "NUMPAGES" | "SECTIONPAGES") {

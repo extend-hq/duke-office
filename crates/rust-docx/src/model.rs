@@ -1088,6 +1088,24 @@ pub struct ParagraphNode {
     /// annotation edit is still targeting the exact parsed run state.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_run_provenance: Option<ParagraphSourceTextPatch>,
+    /// The comments anchored in a paragraph that carries no Word source
+    /// markup, as an OpenDocument import does. Word paragraphs state their
+    /// comment ranges in `source_xml` instead.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub comment_ranges: Option<Vec<CommentRange>>,
+}
+
+/// The part of one paragraph a comment covers.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommentRange {
+    pub comment_id: i64,
+    /// The first child covered.
+    pub child_start: usize,
+    /// One past the last child covered.
+    pub child_end: usize,
+    /// Whether the comment ends in this paragraph instead of running on into the next.
+    pub ends_here: bool,
 }
 
 /// Discriminator for `ParagraphNode`.

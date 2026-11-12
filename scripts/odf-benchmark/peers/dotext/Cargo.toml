@@ -1,0 +1,16 @@
+[package]
+name = "peer-dotext"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+dotext = "=0.1.1"
+# dotext turns off zip's default features, which leaves it unable to inflate entries.
+zip = { version = "0.2", features = ["deflate"] }
+
+[profile.release]
+opt-level = 3
+lto = "thin"

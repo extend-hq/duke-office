@@ -214,7 +214,9 @@ impl Collector<'_> {
                 .visit(xml);
             }
         }
-        if p.source_xml.is_none() && !active.is_empty() {
+        if let (None, Some(ranges)) = (&p.source_xml, &p.comment_ranges) {
+            self.comment_ranges(p, ranges, source);
+        } else if p.source_xml.is_none() && !active.is_empty() {
             let mut offset = 0;
             for (index, child) in p.children.iter().enumerate() {
                 let length = match child {
@@ -266,6 +268,75 @@ impl Collector<'_> {
                         &format!("{root}/content"),
                     );
                 }
+            }
+        }
+    }
+}
+
+impl Collector<'_> {
+    /// Targets of the comments a paragraph without Word markup states as child ranges.
+    fn comment_ranges(&mut self, p: &ParagraphNode, ranges: &[CommentRange], source: &SourceRef) {
+        // UTF-16 offset of every child, and of the paragraph's end.
+        let mut offsets = Vec::with_capacity(p.children.len() + 1);
+        let mut offset = 0;
+        for child in &p.children {
+            offsets.push(offset);
+            offset += match child {
+                ParagraphChildNode::Text(t) => t.text.encode_utf16().count(),
+                ParagraphChildNode::FormField(f) => {
+                    f.value.as_deref().unwrap_or("").encode_utf16().count()
+                }
+                ParagraphChildNode::Image(_) => 0,
+            };
+        }
+        offsets.push(offset);
+        for range in ranges {
+            let Some(comment) = self.comments.get_mut(&range.comment_id) else {
+                continue;
+            };
+            let end = range.child_end.min(p.children.len());
+            let mut text_start = None;
+            for index in range.child_start..=end {
+                let image = match p.children.get(index).filter(|_| index < end) {
+                    Some(ParagraphChildNode::Image(image)) => Some(image),
+                    Some(_) => {
+                        text_start.get_or_insert(index);
+                        continue;
+                    }
+                    None => None,
+                };
+                // An image, or the end of the range, closes the text before it.
+                if let Some(start) = text_start.take() {
+                    comment.targets.push(CommentTarget {
+                        source: SourceRef {
+                            start: Some(offsets[start]),
+                            end: Some(offsets[index]),
+                            ..source.clone()
+                        },
+                        child_start: start,
+                        child_end: index,
+                    });
+                }
+                if let Some(image) = image {
+                    comment.targets.push(CommentTarget {
+                        source: SourceRef {
+                            node_id: image
+                                .block_id
+                                .clone()
+                                .unwrap_or_else(|| format!("{}/child/{index}", source.node_id)),
+                            ..source.clone()
+                        },
+                        child_start: index,
+                        child_end: index + 1,
+                    });
+                }
+            }
+            if range.ends_here {
+                comment.reference = Some(SourceRef {
+                    start: Some(offsets[end]),
+                    end: Some(offsets[end]),
+                    ..source.clone()
+                });
             }
         }
     }

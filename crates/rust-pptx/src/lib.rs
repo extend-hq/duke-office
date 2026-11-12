@@ -6,6 +6,7 @@ mod extraction_limits;
 mod legacy;
 mod legacy_cfb;
 mod model;
+mod odp;
 mod pptx;
 mod semantic;
 mod structured;
@@ -85,6 +86,10 @@ pub fn detect_format(bytes: &[u8]) -> Result<PresentationFormat, ParseError> {
     if bytes.is_empty() {
         return Err(ParseError::Empty);
     }
+    // OpenDocument packages are ZIP files too, so they are identified first.
+    if let Some(format) = odp::detect(bytes) {
+        return format;
+    }
     if bytes.starts_with(b"PK\x03\x04")
         || bytes.starts_with(b"PK\x05\x06")
         || bytes.starts_with(b"PK\x07\x08")
@@ -116,6 +121,9 @@ pub fn parse_presentation_with_options(
     let mut document = match detect_format(bytes)? {
         PresentationFormat::Pptx => pptx::parse(bytes, limits, options)?,
         PresentationFormat::Ppt => legacy::parse(bytes, limits)?,
+        format @ (PresentationFormat::Odp | PresentationFormat::Odg) => {
+            odp::parse(bytes, limits, format)?
+        }
     };
     document.document_id = Some(presentation_identity(bytes));
     Ok(document)
@@ -161,7 +169,9 @@ pub fn render_node_artwork(
     }
     let document = match detect_format(bytes)? {
         PresentationFormat::Pptx => pptx::parse_with_artwork_target(bytes, limits, options, Some(target))?,
-        PresentationFormat::Ppt => return Ok(None),
+        PresentationFormat::Ppt | PresentationFormat::Odp | PresentationFormat::Odg => {
+            return Ok(None)
+        }
     };
     let nodes = if let Some(index) = target.slide_index {
         match document.slides.get(index) {
@@ -247,6 +257,10 @@ pub fn parse_presentation_retained(
         }
         PresentationFormat::Ppt => ParsedPresentation {
             document: legacy::parse(bytes, limits)?,
+            retained: None,
+        },
+        format @ (PresentationFormat::Odp | PresentationFormat::Odg) => ParsedPresentation {
+            document: odp::parse(bytes, limits, format)?,
             retained: None,
         },
     };

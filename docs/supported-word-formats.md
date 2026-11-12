@@ -2,7 +2,7 @@
 
 The [0.13.0 release comparison](benchmarks-0.13.0.md) contains the final benchmarks rerun on merged main.
 
-`rust-docx::parse_document_bytes` and `parse_document_blocks` accept bytes, not a filename or MIME type. They dispatch compound-file input to the legacy Word adapter and other input to the OOXML ZIP reader. The document structures inside the container must still be valid; a ZIP or CFB signature alone does not establish Word support.
+`rust-docx::parse_document_bytes`, `parse_document_model` and `parse_document_blocks` accept bytes, not a filename or MIME type. They dispatch compound-file input to the legacy Word adapter and other input to the OOXML ZIP reader. `parse_document_model` and `parse_document_blocks` also accept [OpenDocument text](opendocument.md), which is built into the document model directly; `parse_document_bytes` returns a Word package and rejects it. The document structures inside the container must still be valid; a ZIP or CFB signature alone does not establish Word support.
 
 The standard Word input family comprises six extensions and five distinct MIME types:
 
@@ -19,7 +19,7 @@ MIME registrations: [binary Word](https://www.iana.org/assignments/media-types/a
 
 These describe content extraction. They do not promise macro execution, template instantiation, extraction of every template resource, full format fidelity, or lossless round trips to a template or macro-enabled format. Native block extraction requires a separate layout step for page geometry. Supported bytes can also arrive with a generic `application/octet-stream` MIME type or a misleading extension; neither adds a new supported format. Strict and Transitional OOXML share these MIME types; feature coverage remains implementation-dependent.
 
-Encrypted/password-to-open documents and pre-Word-97 binary formats are not supported. There are no standalone input adapters for RTF, ODT/OTT, Word 2003 XML, Flat OPC XML, HTML/MHTML, PDF, XLS/XLSX, or PPT/PPTX. Embedded media processing does not imply standalone support for its file formats.
+Encrypted/password-to-open documents and pre-Word-97 binary formats are not supported. OpenDocument text (`.odt`, `.ott`, `.odm`, `.otm`, `.oth`, `.fodt`) is accepted through a separate adapter described in [OpenDocument input](opendocument.md); the measurements below predate it and do not cover it. There are no standalone input adapters for RTF, Word 2003 XML, Flat OPC XML, HTML/MHTML, PDF, XLS/XLSX, or PPT/PPTX. Embedded media processing does not imply standalone support for its file formats.
 
 The legacy adapter uses the repository's own CFB reader, followed by Word binary decoding and synthesis of an OOXML package for the shared model builder. It does not depend on the external Rust `cfb` crate. Swapping that crate in would replace container access, not Word decoding.
 

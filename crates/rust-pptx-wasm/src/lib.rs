@@ -12,6 +12,8 @@ pub fn detect_presentation_format(bytes: &[u8]) -> Result<String, JsValue> {
             match format {
                 rust_pptx::PresentationFormat::Pptx => "pptx",
                 rust_pptx::PresentationFormat::Ppt => "ppt",
+                rust_pptx::PresentationFormat::Odp => "odp",
+                rust_pptx::PresentationFormat::Odg => "odg",
             }
             .into()
         })

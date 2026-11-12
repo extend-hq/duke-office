@@ -1,0 +1,14 @@
+[package]
+name = "peer-odox-core"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+odox-core = "=0.16.0"
+
+[profile.release]
+opt-level = 3
+lto = "thin"

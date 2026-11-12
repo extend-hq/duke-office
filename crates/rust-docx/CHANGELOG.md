@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0
+
+- Read OpenDocument text (`.odt`, `.ott`, `.odm`, `.otm`, `.oth` and flat `.fodt`) into the document model. `parse_odt` builds the model directly from what the new `rust-odf` crate reads, with no Word package in between; see [OpenDocument input](../../docs/opendocument.md) for what is imported.
+- Add `parse_document_model` and `parse_document_model_with_options`, which return the model for DOCX, legacy `.doc` and OpenDocument text. `parse_document_blocks`, `parse_document_blocks_with_options`, `parse_document_blocks_with_revisions` and `parse_document_bundle` accept OpenDocument text as well.
+- `parse_document_bytes` returns a Word package, which OpenDocument text does not have, and now rejects OpenDocument files with an error that names the function to use.
+- `ParagraphNode` has a new `comment_ranges` field (`commentRanges` in JSON, omitted when empty) for the comments anchored in a paragraph that carries no Word source markup. Rust code that builds a `ParagraphNode` with a struct literal must set it.
+- Block extraction reads field instructions from a paragraph's runs when the paragraph has no Word source markup, so page-number paragraphs in such models are classified as page numbers.
+- `rust-docx-wasm`: `build_doc_model_from_bytes` accepts OpenDocument text and returns its model beside an empty package. `parse_docx_wasm` and `inspect_document_source_wasm` reject it.
+
 ## 0.2.22
 
 - Re-export shared semantic export options, overrides, and escaping from `rust-office-art`, preserving existing import paths and behavior.
