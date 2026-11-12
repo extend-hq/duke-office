@@ -57,6 +57,7 @@ pub fn extract_document_bundle(
     };
     let mut charts = BTreeMap::new();
     if options.include_charts {
+        collect_model_chart_data(model, &document.blocks, &mut charts);
         collect_chart_data(&document.blocks, package, &mut charts);
     }
     let revision_inlines = revisions
@@ -89,7 +90,11 @@ pub fn parse_document_bundle(
             binary_assets: Default::default(),
             warnings: Vec::new(),
         };
-        return Ok(extract_document_bundle(&crate::parse_odt(bytes)?, &package, options));
+        return Ok(extract_document_bundle(
+            &crate::parse_odt(bytes)?,
+            &package,
+            options,
+        ));
     }
     let mut package = crate::parse_document_bytes(bytes)?;
     let model = crate::build_doc_model_with_options(
@@ -129,6 +134,105 @@ pub fn collect_chart_data(
             }
         }
         collect_chart_data(&block.children, package, charts);
+    }
+}
+
+fn collect_model_chart_data(
+    model: &DocModel,
+    blocks: &[crate::DocumentBlock],
+    charts: &mut BTreeMap<String, ChartData>,
+) {
+    let mut referenced = std::collections::BTreeSet::new();
+    let mut blocks: Vec<_> = blocks.iter().collect();
+    while let Some(block) = blocks.pop() {
+        if let crate::BlockDetails::Raw(details) = &block.details {
+            if let Some(part) = details.get("chartPartName").and_then(Value::as_str) {
+                referenced.insert(part);
+            }
+        }
+        blocks.extend(&block.children);
+    }
+    if referenced.is_empty() {
+        return;
+    }
+    enum Pending<'a> {
+        Nodes(&'a [crate::DocNode]),
+        Paragraph(&'a crate::ParagraphNode),
+        Table(&'a crate::TableNode),
+    }
+    let mut pending = vec![Pending::Nodes(&model.nodes)];
+    let metadata = &model.metadata;
+    for header in metadata.header_sections.iter().chain(
+        metadata
+            .sections
+            .iter()
+            .flatten()
+            .flat_map(|s| &s.header_sections),
+    ) {
+        pending.push(Pending::Nodes(&header.nodes));
+    }
+    for footer in metadata.footer_sections.iter().chain(
+        metadata
+            .sections
+            .iter()
+            .flatten()
+            .flat_map(|s| &s.footer_sections),
+    ) {
+        pending.push(Pending::Nodes(&footer.nodes));
+    }
+    for note in metadata
+        .footnotes
+        .iter()
+        .chain(&metadata.endnotes)
+        .flatten()
+    {
+        if let Some(nodes) = &note.nodes {
+            pending.push(Pending::Nodes(nodes));
+        }
+    }
+    for comment in metadata.comments.iter().flatten() {
+        if let Some(nodes) = &comment.nodes {
+            pending.push(Pending::Nodes(nodes));
+        }
+    }
+    while let Some(item) = pending.pop() {
+        match item {
+            Pending::Nodes(nodes) => pending.extend(nodes.iter().map(|node| match node {
+                crate::DocNode::Paragraph(p) => Pending::Paragraph(p),
+                crate::DocNode::Table(t) => Pending::Table(t),
+            })),
+            Pending::Table(table) => {
+                for node in table
+                    .rows
+                    .iter()
+                    .flat_map(|r| &r.cells)
+                    .flat_map(|c| &c.nodes)
+                {
+                    pending.push(match node {
+                        crate::TableCellContentNode::Paragraph(p) => Pending::Paragraph(p),
+                        crate::TableCellContentNode::Table(t) => Pending::Table(t),
+                    });
+                }
+            }
+            Pending::Paragraph(paragraph) => {
+                for child in &paragraph.children {
+                    if let crate::ParagraphChildNode::Image(image) = child {
+                        if let (Some(part), Some(data)) =
+                            (&image.chart_part_name, &image.chart_data)
+                        {
+                            if referenced.contains(part.as_str()) {
+                                charts
+                                    .entry(part.clone())
+                                    .or_insert_with(|| (**data).clone());
+                            }
+                        }
+                        if let Some(nodes) = &image.content_nodes {
+                            pending.push(Pending::Nodes(nodes));
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 

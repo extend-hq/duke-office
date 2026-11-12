@@ -1,0 +1,67 @@
+[
+  {
+    "path": "xmloff/source/draw/ximpcustomshape.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/xmloff/source/draw/ximpcustomshape.cxx",
+    "sha256": "8a997adcb394fa5a4fe3c47ae066a4de955901e673e185fe963cfd5b8c3e6a05"
+  },
+  {
+    "path": "xmloff/source/draw/ximpshap.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/xmloff/source/draw/ximpshap.cxx",
+    "sha256": "69c0531e12739a7b0a3ccb16b1b4b9b6e871de3bfe23b4df70f43dfaa29e5517"
+  },
+  {
+    "path": "xmloff/source/draw/xexptran.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/xmloff/source/draw/xexptran.cxx",
+    "sha256": "528ebfb85a3b3b84cef2acc8573c65fbd21cfb0294438492a55eb2618e66fcdd"
+  },
+  {
+    "path": "svx/source/customshapes/EnhancedCustomShape2d.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/svx/source/customshapes/EnhancedCustomShape2d.cxx",
+    "sha256": "1c35df86a162a5041415416453cbd0f804b01a3b6a78ea3af36e05470e354623"
+  },
+  {
+    "path": "svx/source/customshapes/EnhancedCustomShapeFunctionParser.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/svx/source/customshapes/EnhancedCustomShapeFunctionParser.cxx",
+    "sha256": "169d6ee3878392faa977a00e372dfcce1c98a17a6cbe6c8bc66ab13c25b0f9ed"
+  },
+  {
+    "path": "xmloff/source/chart/SchXMLSeries2Context.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/xmloff/source/chart/SchXMLSeries2Context.cxx",
+    "sha256": "40db3c601541dda925777600f5f1a20a6ec0af315cc9d440c87f681b4655070f"
+  },
+  {
+    "path": "xmloff/source/chart/SchXMLPlotAreaContext.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/xmloff/source/chart/SchXMLPlotAreaContext.cxx",
+    "sha256": "0a09fb1f26ab4f6bb5466271ec5e90f1436790257dd02e74165b3f3d35daa3b2"
+  },
+  {
+    "path": "xmloff/source/chart/SchXMLTableContext.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/xmloff/source/chart/SchXMLTableContext.cxx",
+    "sha256": "641f69975e5a066cac478ffc704aae44e92baacf6b045576f9c8664ef66ea9ae"
+  },
+  {
+    "path": "basegfx/source/tools/gradienttools.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/basegfx/source/tools/gradienttools.cxx",
+    "sha256": "218799539a38cea3b26d01bddd2d87d4f6915e48c7c06ec6ed95e7ea5f6d093f"
+  },
+  {
+    "path": "xmloff/source/style/GradientStyle.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/xmloff/source/style/GradientStyle.cxx",
+    "sha256": "0ab425526c9693c924bd84046aa24c4602d422647956396d9c62ee3e073b344f"
+  },
+  {
+    "path": "chart2/source/view/charttypes/PieChart.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/chart2/source/view/charttypes/PieChart.cxx",
+    "sha256": "38810188db5452070b53c37de020a4db7e6c5b243cd5fe09461ac4a276af5b46"
+  },
+  {
+    "path": "chart2/source/view/main/ChartView.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/chart2/source/view/main/ChartView.cxx",
+    "sha256": "5b8ac26c375510be8331670a1cc89172e1309dc32d9fb0fe22f220f49805d2c8"
+  },
+  {
+    "path": "xmloff/source/chart/SchXMLTools.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/xmloff/source/chart/SchXMLTools.cxx",
+    "sha256": "930e6387cbb370b140c950da1251440d7f0a836e23b24b5121bc7ffe4f77e8ec"
+  }
+]

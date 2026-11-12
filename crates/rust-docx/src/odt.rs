@@ -1398,13 +1398,25 @@ impl<'a> Builder<'a> {
                 let chosen = fallback.filter(|_| vector).unwrap_or(href);
                 self.picture(&shape, chosen, scope, out);
             }
-            ShapeKind::Object { href, replacement, math } => {
+            ShapeKind::Object { href, mut replacement, math } => {
                 let chart = href.as_deref().and_then(|h| self.document.objects.get(h))
                     .and_then(|object| object.document(&Limits::default()).ok())
                     .and_then(|document| if let Body::Chart(chart) = document.body { Some(chart) } else { None });
                 if let Some(chart) = chart {
                     let placement = shape.placement();
-                    if let Some(rendered) = rust_office_charts::odf::render_chart(&chart, pixels(placement.width), pixels(placement.height)) {
+                    let chart_data = rust_office_charts::odf::extract_chart_data(&chart);
+                    let rendered = rust_office_charts::odf::render_chart(&chart, pixels(placement.width), pixels(placement.height));
+                    if let Some(preview) = replacement.take() {
+                        let before = out.len();
+                        self.picture(&shape, preview, scope, out);
+                        if let Some(ParagraphChildNode::Image(image)) = out.get_mut(before) {
+                            image.chart_data = chart_data.map(Box::new);
+                            image.chart_part_name = href.map(|h| format!("{h}/content.xml"));
+                            image.semantic_kind = Some("chart".into());
+                            return;
+                        }
+                    }
+                    if let Some(rendered) = rendered {
                         let mut image = self.generated_image(&shape, scope, rendered.svg);
                         image.chart_data = Some(Box::new(rendered.data));
                         image.chart_part_name = href.map(|h| format!("{h}/content.xml"));
@@ -1412,6 +1424,17 @@ impl<'a> Builder<'a> {
                         out.push(ParagraphChildNode::Image(Box::new(image)));
                         return;
                     }
+                    let mut image = empty_image();
+                    image.alt = shape.description.clone().or(chart.title);
+                    image.width_px = Some(pixels(placement.width));
+                    image.height_px = Some(pixels(placement.height));
+                    image.floating = self.floating(&shape, scope);
+                    image.chart_data = chart_data.map(Box::new);
+                    image.chart_part_name = href.map(|h| format!("{h}/content.xml"));
+                    image.semantic_kind = Some("chart".into());
+                    out.push(ParagraphChildNode::Image(Box::new(image)));
+                    self.warn("Chart artwork is unavailable; stored chart data is retained");
+                    return;
                 }
                 let math = math.or_else(|| href.as_deref().and_then(|href| self.embedded_math(href)));
                 let before = out.len();

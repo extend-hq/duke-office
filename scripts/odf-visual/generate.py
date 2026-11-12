@@ -85,6 +85,19 @@ def chart_xml(kind, extra='', rows=False, repeat=False):
     return f'<office:document {NS} office:version="1.3">{styles}{body}</office:document>'
 
 charts = [('columns', 'bar', '', False), ('bars', 'bar', 'chart:vertical="true"', False), ('stacked', 'bar', 'chart:stacked="true"', False), ('row-oriented', 'bar', '', True), ('lines', 'line', '', False), ('area', 'area', '', False), ('pie', 'circle', '', False), ('ring', 'ring', '', False), ('scatter', 'scatter', '', False), ('bubble', 'bubble', '', False), ('radar', 'radar', '', False)]
+if '--supplemental' in sys.argv:
+    STYLES = STYLES.replace('</office:automatic-styles>', '''
+<style:style style:name="Opacity" style:family="graphic"><style:graphic-properties draw:fill="solid" draw:fill-color="#4472c4" draw:opacity="35%" draw:stroke="solid" svg:stroke-color="#18335a" svg:stroke-width="4px" svg:stroke-opacity="70%"/></style:style>
+</office:automatic-styles>''')
+    shapes = [
+        ('affine-matrix', custom('M 0 0 L 21600 10800 0 21600 Z N').replace('svg:x="120px" svg:y="120px"', 'draw:transform="matrix(1 0.15 0.3 1 3175 3175)"')),
+        ('skew', custom('M 0 0 L 21600 10800 0 21600 Z N').replace('svg:x="120px" svg:y="120px"', 'draw:transform="skewX(0.25) translate(4cm 3.175cm)"')),
+        ('independent-opacity', custom('M 0 0 L 21600 0 21600 21600 0 21600 Z N', style='Opacity')),
+        ('logical-viewbox', custom('M 0 0 L ?w 0 ?w ?h 0 ?h Z N', '<draw:equation draw:name="w" draw:formula="logwidth"/><draw:equation draw:name="h" draw:formula="logheight"/>').replace('0 0 21600 21600','0 0 0 0')),
+        ('lazy-conditional', custom('M 0 0 L ?a 10800 0 21600 Z N', '<draw:equation draw:name="a" draw:formula="if($0, 18000, sqrt(-1))"/>', 'draw:modifiers="1"')),
+        ('transformed-preset', '<draw:custom-shape draw:style-name="Shape" draw:transform="rotate(0.3) translate(3.175cm 4.233333cm)" svg:width="192px" svg:height="128px"><draw:enhanced-geometry draw:type="ooxml-roundRect" svg:viewBox="0 0 21600 21600"/></draw:custom-shape>'),
+    ]
+    charts = []
 objects = {}
 cases = []
 for name, xml in shapes:
