@@ -52,8 +52,30 @@ def packaged_contents(data):
     return files
 
 
-def release_plan():
+def checked_workspace():
     workspace = json.loads(cargo("metadata", "--locked", "--format-version=1", "--no-deps"))
+    members = set(workspace["workspace_members"])
+    workspace["packages"] = [package for package in workspace["packages"] if package["id"] in members]
+    unexpected = sorted(package["name"] for package in workspace["packages"] if not package["name"].startswith("duke-"))
+    if unexpected:
+        sys.exit(f"Only duke-* workspace crates are supported by CI and releases: {', '.join(unexpected)}")
+    retired = {
+        "rust-docx", "rust-docx-wasm", "rust-pptx", "rust-pptx-wasm", "rust-odf",
+        "rust-office-art", "rust-office-charts", "rust-office-charts-wasm",
+    }
+    dependencies = sorted({
+        dependency["name"]
+        for package in workspace["packages"]
+        for dependency in package["dependencies"]
+        if dependency["name"] in retired
+    })
+    if dependencies:
+        sys.exit(f"Replace retired Office dependencies with duke-* crates: {', '.join(dependencies)}")
+    return workspace
+
+
+def release_plan():
+    workspace = checked_workspace()
     versions = {package["name"]: package["version"] for package in workspace["packages"]}
     if versions["duke-pages"] != versions["duke-pages-wasm"]:
         sys.exit("duke-pages and duke-pages-wasm must use the same release version.")
@@ -88,8 +110,12 @@ def release_plan():
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("mode", choices=["plan", "dry-run", "publish"])
+    parser.add_argument("mode", choices=["check-workspace", "plan", "dry-run", "publish"])
     mode = parser.parse_args().mode
+    if mode == "check-workspace":
+        workspace = checked_workspace()
+        print("Validated workspace: " + ", ".join(package["name"] for package in workspace["packages"]))
+        return
     pending = release_plan()
     if output := os.environ.get("GITHUB_OUTPUT"):
         with open(output, "a") as stream:

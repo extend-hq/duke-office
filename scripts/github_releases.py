@@ -8,14 +8,11 @@ import subprocess
 import tarfile
 import tempfile
 
-from release import fetch, published_checksum
+from release import checked_workspace, fetch, published_checksum
 
 
 def main():
-    workspace = json.loads(subprocess.check_output(
-        ["cargo", "metadata", "--locked", "--format-version=1", "--no-deps"],
-        text=True,
-    ))
+    workspace = checked_workspace()
     artifacts = Path(workspace["target_directory"]) / "package"
     artifacts.mkdir(parents=True, exist_ok=True)
     for package in workspace["packages"]:

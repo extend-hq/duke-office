@@ -6,6 +6,8 @@ Rust parsers for Word, PowerPoint and [OpenDocument](docs/opendocument.md) text 
 
 The crates and Rust imports use the `duke-` and `duke_` prefixes. Existing consumers must update their dependency names and imports to migrate. The first releases under these names retain the preceding version numbers. Historical benchmark images retain the labels captured at measurement time.
 
+The former `rust-*` Office packages are deprecated by this project and no longer receive CI builds or releases. Use the [replacement crate mapping](RELEASING.md#retired-crate-names) when migrating existing dependencies.
+
 ## Packages
 
 | Crate | Purpose | Version | Downloads | API docs |
