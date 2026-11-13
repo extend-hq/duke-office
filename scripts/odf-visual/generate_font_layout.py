@@ -11,7 +11,9 @@ import zipfile
 p = argparse.ArgumentParser(description=__doc__)
 p.add_argument('source', type=Path)
 p.add_argument('output', type=Path)
-p.add_argument('--titles-only', action='store_true')
+matrix = p.add_mutually_exclusive_group()
+matrix.add_argument('--titles-only', action='store_true')
+matrix.add_argument('--radar-layout', action='store_true')
 a = p.parse_args()
 a.output.mkdir(parents=True, exist_ok=True)
 with zipfile.ZipFile(a.source) as z:
@@ -42,6 +44,18 @@ if a.titles_only:
                      source=2, width=360, height=height, titleSize=size,
                      title='Comparative results' if size is None else 'Detailed comparison across reporting periods')
                 for height, size in [(220, None), (350, None), (330, 12), (330, 18)]]
+if a.radar_layout:
+    variants = [dict(id=f'aspect-{width}-{height}-{size}', family='Liberation Sans',
+                     size=size, source=3, width=width, height=height)
+                for width, height, size in [(300, 180, 10), (384, 180, 8),
+                    (384, 180, 10), (384, 180, 14), (384, 260, 10),
+                    (240, 384, 10), (330, 330, 10)]]
+    variants += [dict(id=f'legend-{position}', family='Liberation Sans', size=10,
+                      source=3, width=384, height=220, legend=position)
+                 for position in ['start', 'top', 'bottom', 'none']]
+    variants += [dict(id=f'wide-{family}', family=family, size=14, source=3,
+                      width=300, height=240)
+                 for family in ['Calibri', 'Times New Roman', 'Courier New']]
 output = {name: data for name, data in parts.items() if '/' not in name or name.startswith('META-INF/')}
 M = '{urn:oasis:names:tc:opendocument:xmlns:manifest:1.0}'
 ET.register_namespace('manifest', M[1:-1])
@@ -59,6 +73,12 @@ for i, case in enumerate(variants, 1):
         if case.get('style') == 'bold': n.set(tag('fo:font-weight'), 'bold')
         if case.get('style') == 'italic': n.set(tag('fo:font-style'), 'italic')
     chart = root.find('.//' + tag('chart:chart'))
+    if 'legend' in case:
+        legend = chart.find(tag('chart:legend'))
+        if case['legend'] == 'none':
+            chart.remove(legend)
+        else:
+            legend.set(tag('chart:legend-position'), case['legend'])
     if case.get('title'):
         heading = ET.Element(tag('chart:title'))
         if case['titleSize'] is not None:

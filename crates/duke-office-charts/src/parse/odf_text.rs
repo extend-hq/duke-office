@@ -140,6 +140,31 @@ pub(super) fn vertical_metrics(family: &str) -> (f64, f64) {
     (ascent / 2048., descent / 2048.)
 }
 
+pub(super) fn line_metrics(family: &str, size: f64) -> (f64, f64) {
+    let primary = family
+        .split(',')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .trim_matches(['\'', '"']);
+    let (ascent, descent) =
+        if primary.eq_ignore_ascii_case("Calibri") || primary.eq_ignore_ascii_case("Carlito") {
+            (1536. / 2048., 512. / 2048.)
+        } else {
+            vertical_metrics(family)
+        };
+    ((ascent * size).round(), (descent * size).round())
+}
+
+pub(super) fn polar_metrics(family: &str, size: f64) -> (f64, f64) {
+    if measured_family(family) == Some("Carlito") {
+        line_metrics(family, size)
+    } else {
+        let (ascent, descent) = vertical_metrics(family);
+        (ascent * size, descent * size)
+    }
+}
+
 pub(super) fn metric_family(family: &str) -> &str {
     let primary = family
         .split(',')
