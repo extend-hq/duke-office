@@ -15,10 +15,10 @@ export function thirdPartyNotices(root) {
       if (dependency.dep_kinds.some(kind => kind.kind !== "dev")) visit(dependency.pkg);
     }
   };
-  visit(metadata.packages.find(pkg => pkg.name === "rust-office-charts-wasm").id);
+  visit(metadata.packages.find(pkg => pkg.name === "duke-office-charts-wasm").id);
   const notices = metadata.packages.filter(pkg => reached.has(pkg.id)).sort((a, b) => a.name.localeCompare(b.name)).map(pkg => {
     const directory = dirname(pkg.manifest_path);
-    const extra = pkg.name === "rust-office-art" ? [
+    const extra = pkg.name === "duke-office-art" ? [
       "src/geometry_data/LICENSE.apache-poi", "src/geometry_data/NOTICE.apache-poi",
       "src/geometry_data/LICENSE.ecma", "src/geometry_data/SOURCE.md",
       ...["arimo", "carlito", "tinos", "cousine"].map(family => `src/fonts/${family}/LICENSE`),
@@ -31,7 +31,7 @@ export function thirdPartyNotices(root) {
     if (!text.trim()) throw Error(`Missing license text for ${pkg.name} ${pkg.version}.`);
     return `${pkg.name} ${pkg.version}\n${pkg.license ?? ""}\n${pkg.repository ?? ""}\n\n${text}`;
   }).join("\n\n--------------------\n\n").trimEnd() + "\n";
-  return "Scope: non-development Cargo dependencies of rust-office-charts-wasm for wasm32-unknown-unknown, with all features enabled.\n"
+  return "Scope: non-development Cargo dependencies of duke-office-charts-wasm for wasm32-unknown-unknown, with all features enabled.\n"
     + "This is not a workspace-wide dependency notice inventory.\n"
     + "Bundled font and map data notices are in FONT-DATA-LICENSE and MAP-DATA-LICENSE.\n\n"
     + notices;

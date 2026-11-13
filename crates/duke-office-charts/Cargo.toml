@@ -1,0 +1,25 @@
+[package]
+name = "duke-office-charts"
+version = "0.2.1"
+edition = "2021"
+license = "MIT AND OFL-1.1"
+description = "Render Office Open XML charts to SVG from native Rust or WebAssembly"
+repository = "https://github.com/extend-hq/duke-office"
+keywords = ["ooxml", "chart", "docx", "xlsx", "pptx"]
+categories = ["graphics", "rendering"]
+include = ["src/**", "Cargo.toml", "README.md", "LICENSE"]
+
+[features]
+default = ["extended-charts"]
+extended-charts = ["dep:base64", "dep:miniz_oxide"]
+map-fallback = ["extended-charts"]
+
+[dependencies]
+duke-odf = { version = "=0.2.1", path = "../duke-odf" }
+base64 = { version = "0.22", optional = true }
+miniz_oxide = { version = "0.8", optional = true }
+roxmltree = "0.20"
+duke-office-art = { version = "=0.1.10", path = "../duke-office-art" }
+svgtypes = { version = "0.16.1", default-features = false, features = ["libm"] }
+kurbo = { version = "0.13", default-features = false, features = ["libm"] }
+serde = { version = "1", features = ["derive"] }

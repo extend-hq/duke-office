@@ -13,7 +13,7 @@ from matplotlib.lines import Line2D
 import numpy as np
 
 ENGINES = ['docx-core', 'docx-rs', 'office_oxide', 'undoc']
-LABELS = {'docx-core': 'rust-docx'}
+LABELS = {'docx-core': 'duke-pages'}
 COLORS = ['#087f8c', '#9270ca', '#db8624', '#d24b65']
 FORMATS = ['docx', 'doc', 'dot', 'dotx', 'docm', 'dotm']
 
@@ -82,7 +82,7 @@ def docx_highlights(group, args):
         ax.set_xlabel('Milliseconds · lower is faster')
         ax.grid(axis='x', alpha=.18)
         ax.set_axisbelow(True)
-    fig.suptitle(title + '\nWarm native parse + model/IR; rust-docx includes structured blocks', fontsize=16)
+    fig.suptitle(title + '\nWarm native parse + model/IR; duke-pages includes structured blocks', fontsize=16)
     fig.savefig(args.images_output / f'{args.asset_prefix}-latency-docx-summary.png', dpi=160)
     plt.close(fig)
     fig, axes = plt.subplots(1, 3, figsize=(15, 5.5), layout='constrained')
@@ -153,7 +153,7 @@ def main():
                'binary_sha256': sorted({json.loads((run / 'format-environment.json').read_text())['binary_sha256']
                                         for run in [*args.runs, args.docx_run]}),
                'versions': {'docx-rs': '0.4.22', 'office_oxide': '0.1.15', 'undoc': '0.27.1'},
-               'scope': 'Warm native parse + model/IR; rust-docx also projects structured blocks. Common successful inputs per format. Five samples, 1–20 parses/sample. Per-document medians; p95 across documents. Excludes I/O, startup, JSON encoding, destruction, reference conversion. Shared development machine.',
+               'scope': 'Warm native parse + model/IR; duke-pages also projects structured blocks. Common successful inputs per format. Five samples, 1–20 parses/sample. Per-document medians; p95 across documents. Excludes I/O, startup, JSON encoding, destruction, reference conversion. Shared development machine.',
                'groups': groups}
     summary = {**receipt, 'groups': {fmt: {**group, 'engines': {
         e: {k: v for k, v in data.items() if k != 'points'}

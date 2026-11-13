@@ -116,7 +116,7 @@ def main():
             assert counts['editing_nodes'] == 1 and counts['endpoints'] == 0
         if variant in {'qualified-attributes', 'foreign-endpoints', 'invalid-uint', 'missing-uint'}:
             assert counts['endpoints'] == (1 if variant == 'invalid-uint' else 0)
-        record = compact(run/'candidate', 'rust-pptx', row, destination/(variant+'.compact.json.gz'), 0)
+        record = compact(run/'candidate', 'duke-slides', row, destination/(variant+'.compact.json.gz'), 0)
         assert record['full_sha256'] == new['full_sha256']
         receipts.append(dict(id=variant, input_sha256=row['sha256'], passed=True, counts=dict(counts), full_sha256=new['full_sha256'], artwork_hashes=artwork_hashes(after)))
         browser.append(dict(id=variant, model=after))

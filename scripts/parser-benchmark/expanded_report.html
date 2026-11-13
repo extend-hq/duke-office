@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>rust-docx · Expanded corpus comparison</title>
+<title>duke-pages · Expanded corpus comparison</title>
 <style>
 :root{color-scheme:light;font:15px/1.55 system-ui,-apple-system,sans-serif;color:#202b36;background:#f5f6f8}
 *{box-sizing:border-box}body{max-width:1220px;margin:0 auto;padding:48px 28px 70px}h1{font-size:38px;line-height:1.13;letter-spacing:-1.3px;font-weight:650;margin:10px 0 18px}h2{font-size:22px;letter-spacing:-.4px;margin:0 0 14px}h3{font-size:16px;margin:0 0 8px}.eyebrow{font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:#476282}.lede{max-width:900px;color:#49596c;font-size:17px}a{color:#2157a0;text-underline-offset:3px}a:focus-visible,select:focus-visible,summary:focus-visible{outline:3px solid #3c77c8;outline-offset:3px}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:30px 0}.card,section{background:white;border:1px solid #dfe4ea;border-radius:12px}.card{padding:20px}.card strong{display:block;font-size:34px;line-height:1.1;letter-spacing:-1px;margin:12px 0;color:#174f88}.card small{color:#59697b}.label{font-size:12px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:#637184}section{padding:26px;margin:20px 0}.note{background:#eff4f9;border-left:3px solid #376c9b;padding:13px 16px;margin:18px 0;font-size:14px;color:#40576f}.subtle{color:#667487;font-size:13px}.flex{display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap}select{font:inherit;border:1px solid #cdd5df;background:white;padding:7px 12px;border-radius:7px}table{border-collapse:collapse;width:100%;font-variant-numeric:tabular-nums}th,td{padding:12px 10px;text-align:right;border-bottom:1px solid #e7ebef;vertical-align:middle}th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#68798a}th:first-child,td:first-child{text-align:left}tbody tr:last-child td{border:0}.core{color:#174f88;font-weight:650}.bar{height:9px;background:#7e9bb6;border-radius:3px;margin-top:6px;min-width:2px}.core .bar{background:#2469a5}.barcell{min-width:160px}.scroll{overflow-x:auto}.detail{display:block;color:#667487;font-size:11px;font-weight:400}.grid{display:grid;grid-template-columns:1fr 1fr;gap:32px}p{margin:10px 0}ul{padding-left:20px}li{margin:7px 0}footer{color:#687789;font-size:12px;margin-top:25px;overflow-wrap:anywhere}code{font-size:12px;overflow-wrap:anywhere}details{margin:16px 0}summary{cursor:pointer;font-weight:600}.evidence{display:flex;flex-wrap:wrap;gap:10px 20px;margin-top:20px}.metric-note{max-width:100ch}.pending{color:#805a21}@media(max-width:800px){body{padding:26px 16px}.cards{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:1fr}.card strong{font-size:29px}section{padding:19px}h1{font-size:31px}}@media(max-width:460px){.cards{grid-template-columns:1fr 1fr;gap:8px}.card{padding:14px}th,td{padding:9px 6px}}
@@ -43,7 +43,7 @@ async function refreshWordReference(){
       document.getElementById('word-reference-progress').textContent+=' · '+benchmark.scope;
       const row=(values,heading=false)=>{const tr=document.createElement('tr');for(const value of values){const cell=document.createElement(heading?'th':'td');cell.textContent=value;tr.append(cell);}target.append(tr);};
       row(['Parser','Word-scored inputs','Body recall','Body F1','Median ms','p95 ms'],true);
-      for(const [engine,value] of Object.entries(benchmark.comparison))row([engine==='docx-core'?'rust-docx':engine,value.scored??0,...['recall','f1'].map(k=>value.body?.[k]==null?'Pending':(value.body[k]*100).toFixed(3)+'%'),...['median_ms','p95_ms'].map(k=>value[k]==null?'Pending':value[k].toFixed(3))]);
+      for(const [engine,value] of Object.entries(benchmark.comparison))row([engine==='docx-core'?'duke-pages':engine,value.scored??0,...['recall','f1'].map(k=>value.body?.[k]==null?'Pending':(value.body[k]*100).toFixed(3)+'%'),...['median_ms','p95_ms'].map(k=>value[k]==null?'Pending':value[k].toFixed(3))]);
     }
   }catch{}
 }
@@ -80,7 +80,7 @@ refreshWordReference();setInterval(refreshWordReference,5000);
 <div class="scroll"><table><thead><tr><th>Cohort / parser</th><th>Shared timing inputs</th><th>Median</th><th>p95</th><th>Scored inputs</th><th>Image occurrences (payload matched)</th><th>Explicit bold</th><th>Horizontal spans</th><th>Table text</th></tr></thead><tbody id="cohort-comparison-rows"></tbody></table></div>
 </section>
 <header>
-<div class="eyebrow">rust-docx · Expanded corpus · Native parser comparison</div>
+<div class="eyebrow">duke-pages · Expanded corpus · Native parser comparison</div>
 <h1>More documents. Clearer tradeoffs.</h1>
 <p class="lede" id="headline"></p>
 <p class="subtle" id="scope"></p>
@@ -97,7 +97,7 @@ refreshWordReference();setInterval(refreshWordReference,5000);
 <figure class="chart-panel" id="latency-figure"><div class="chart-scroll"><svg id="latency-chart" role="img" tabindex="0" aria-label="Median and 95th-percentile latency by parser"></svg></div><figcaption>Lower is faster. Median and p95 use separate, labeled millisecond scales. All parsers use the same common-success inputs.</figcaption><div class="chart-tooltip" id="latency-tooltip" role="tooltip"></div></figure>
 <p id="target-status" class="note"></p><p id="all-corpus-latency" class="subtle"></p>
 <details><summary>Exact latency values and every parser outcome</summary><div class="scroll"><table><thead><tr><th scope="col">Parser</th><th scope="col">Common median</th><th scope="col">Common p95</th><th scope="col">All successful median</th><th scope="col">All successful p95</th><th scope="col">Succeeded / attempted</th><th scope="col">Timing outcomes</th><th scope="col">Current accuracy outcomes</th></tr></thead><tbody id="speed-table"></tbody></table></div><p class="subtle">The all-success columns include each parser’s own successful inputs, so those columns may describe different cohorts. Failures are excluded from latency distributions and remain counted above.</p></details>
-<p class="subtle">Each percentile summarizes per-document warm medians. File reads, JSON output, and object destruction are excluded from every parser’s timer. rust-docx builds its complete editable model and structured blocks inside the timer; office_oxide includes IR conversion. Other parsers expose their native models. Outputs and feature coverage differ.</p>
+<p class="subtle">Each percentile summarizes per-document warm medians. File reads, JSON output, and object destruction are excluded from every parser’s timer. duke-pages builds its complete editable model and structured blocks inside the timer; office_oxide includes IR conversion. Other parsers expose their native models. Outputs and feature coverage differ.</p>
 </section>
 <section aria-labelledby="distribution-title">
 <div class="flex"><div><h2 id="distribution-title">The full latency distribution</h2><p class="subtle">Further left is faster. The vertical axis shows the share of inputs parsed within a given latency.</p></div><label>Latency scale <select id="ecdf-scale"><option value="log">Logarithmic</option><option value="linear">Linear</option></select></label></div>
@@ -108,10 +108,10 @@ refreshWordReference();setInterval(refreshWordReference,5000);
 <section aria-labelledby="scatter-title">
 <h2 id="scatter-title">Latency across document complexity</h2>
 <p id="scatter-build-scope" class="subtle"></p>
-<p class="subtle">Each point represents one anonymous input and one parser. Compare absolute latency or rust-docx’s latency relative to another parser.</p>
+<p class="subtle">Each point represents one anonymous input and one parser. Compare absolute latency or duke-pages’s latency relative to another parser.</p>
 <div class="chart-controls">
 <label>Horizontal axis<select id="scatter-x"></select></label>
-<label>Vertical axis<select id="scatter-y"><option value="latency">Parser latency</option><option value="ratio">rust-docx / parser latency</option></select></label>
+<label>Vertical axis<select id="scatter-y"><option value="latency">Parser latency</option><option value="ratio">duke-pages / parser latency</option></select></label>
 <label>Horizontal scale<select id="scatter-x-scale"><option value="log1p">Log1p — retains zero</option><option value="linear">Linear</option></select></label>
 <label>Vertical scale<select id="scatter-y-scale"><option value="log">Logarithmic</option><option value="linear">Linear</option></select></label>
 </div>
@@ -121,17 +121,17 @@ refreshWordReference();setInterval(refreshWordReference,5000);
 <details id="scatter-data"><summary>Exact data for the selected axes</summary><div class="scroll"><table><thead id="scatter-data-head"></thead><tbody id="scatter-data-body"></tbody></table></div></details>
 </section>
 <section id="baseline-section" aria-labelledby="baseline-title">
-<h2 id="baseline-title">Change from the prior rust-docx build</h2>
+<h2 id="baseline-title">Change from the prior duke-pages build</h2>
 <p id="baseline-summary"></p>
 <div class="scroll"><table><thead><tr><th scope="col">Paired inputs</th><th scope="col">Median paired speedup</th><th scope="col">Previous median</th><th scope="col">Current median</th><th scope="col">Previous p95</th><th scope="col">Current p95</th></tr></thead><tbody id="baseline-table"></tbody></table></div>
-<p class="subtle">Paired speedup is the median of previous/current latency ratios for matching inputs, rather than the ratio of the two corpus medians. A value above 1× means rust-docx improved.</p>
+<p class="subtle">Paired speedup is the median of previous/current latency ratios for matching inputs, rather than the ratio of the two corpus medians. A value above 1× means duke-pages improved.</p>
 </section>
 <section id="feedback-section" aria-labelledby="feedback-title">
 <p class="eyebrow">EXPERIMENTAL · DOCUMENT FEEDBACK LOOP</p>
 <h2 id="feedback-title">Latest optimization experiment</h2>
 <p id="feedback-status"></p>
 <p id="feedback-scope" class="subtle"></p>
-<details><summary>Per-document timings and validation</summary><div class="scroll"><table><thead><tr><th>Document</th><th>rust-docx before</th><th>rust-docx trial</th><th>office_oxide</th><th>Paired speedup</th><th>CPU diagnostic</th><th>Full output parity</th><th>Loop time</th><th>Assessment</th></tr></thead><tbody id="feedback-table"></tbody></table></div></details>
+<details><summary>Per-document timings and validation</summary><div class="scroll"><table><thead><tr><th>Document</th><th>duke-pages before</th><th>duke-pages trial</th><th>office_oxide</th><th>Paired speedup</th><th>CPU diagnostic</th><th>Full output parity</th><th>Loop time</th><th>Assessment</th></tr></thead><tbody id="feedback-table"></tbody></table></div></details>
 <p class="subtle">Each row uses the same input for every parser. Trial results do not replace the full-corpus measurements. Exact output parity preserves existing recall but does not establish support for missing features.</p>
 <a id="feedback-receipt">Live experiment receipt</a>
 <details><summary>Experiment history and decisions</summary><ul id="feedback-history"></ul></details>
@@ -141,7 +141,7 @@ refreshWordReference();setInterval(refreshWordReference,5000);
 <h2 id="instruction-analysis-title">Where the processor spends its work</h2>
 <p id="instruction-analysis-status"></p>
 <p id="instruction-analysis-scope" class="subtle"></p>
-<div class="scroll"><table><thead><tr><th>Evidence</th><th>rust-docx</th><th>office_oxide</th><th>Interpretation</th></tr></thead><tbody id="instruction-analysis-results"></tbody></table></div>
+<div class="scroll"><table><thead><tr><th>Evidence</th><th>duke-pages</th><th>office_oxide</th><th>Interpretation</th></tr></thead><tbody id="instruction-analysis-results"></tbody></table></div>
 <p id="instruction-analysis-findings"></p>
 <p id="instruction-analysis-limitations" class="note"></p>
 
@@ -215,7 +215,7 @@ refreshWordReference();setInterval(refreshWordReference,5000);
 <h2 id="image-audit-title">Image occurrence recall</h2>
 <p id="image-audit-summary"></p>
 <div class="scroll"><table><thead><tr><th>Check</th><th>Result</th><th>Matched / expected</th></tr></thead><tbody id="image-audit-table"></tbody></table></div>
-<p class="note">A composite SVG can retain several source pictures while counting as one output image. Occurrences are matched one-to-one against retained payload bytes; the same visual and semantic placement is counted once. A declared SVG alternative can satisfy its associated bitmap reference. Preserved package XML receives no credit. Payload retention does not establish placement, crop, or pixel accuracy. This check currently covers rust-docx only.</p>
+<p class="note">A composite SVG can retain several source pictures while counting as one output image. Occurrences are matched one-to-one against retained payload bytes; the same visual and semantic placement is counted once. A declared SVG alternative can satisfy its associated bitmap reference. Preserved package XML receives no credit. Payload retention does not establish placement, crop, or pixel accuracy. This check currently covers duke-pages only.</p>
 <p id="image-audit-scope" class="subtle"></p>
 <div class="source-links"><a id="image-audit-receipt">Payload audit receipt</a><a id="image-audit-equivalence">Current-build output equivalence</a></div>
 </section>
@@ -231,7 +231,7 @@ refreshWordReference();setInterval(refreshWordReference,5000);
 <h2 id="legacy-title">Keep the earlier benchmark distinct</h2>
 <p id="legacy-text"></p><a id="legacy-link">Open the earlier comparison</a>
 <div id="legacy-update">
-<h3>Matched inputs: previous and current rust-docx</h3>
+<h3>Matched inputs: previous and current duke-pages</h3>
 <label class="evidence-control">Original-corpus metric <select id="legacy-update-metric"></select></label>
 <p id="legacy-update-status" class="chart-status" aria-live="polite"></p>
 <figure id="legacy-update-figure" class="chart-panel"><div class="chart-scroll"><svg id="legacy-update-chart" role="img" tabindex="0" aria-label="Original-corpus feature recall before and after; arrow keys inspect values"></svg></div><figcaption>Both builds use the same original-corpus inputs and unchanged extraction-reference scoring. The expanded sample above is a separate cohort.</figcaption><div id="legacy-update-tooltip" class="chart-tooltip" role="tooltip"></div></figure>
@@ -265,7 +265,7 @@ refreshWordReference();setInterval(refreshWordReference,5000);
 </div>
 <script>
 (() => {
-const engineLabel=engine=>engine==='docx-core'?'rust-docx':engine==='docx-core-baseline'?'Previous rust-docx':engine;
+const engineLabel=engine=>engine==='docx-core'?'duke-pages':engine==='docx-core-baseline'?'Previous duke-pages':engine;
 const initialData=REPORT_DATA;
 const ENGINE_COLORS={'docx-core':'#2864d7','docx-rs':'#b86e0b','office_oxide':'#16836a','undoc':'#94518a'};
 let dashboardData=null,dashboardSource=null,dashboardMetric='median_ms';
@@ -322,7 +322,7 @@ const number=(v,d=3)=>Number.isFinite(v)?v.toFixed(d):'Pending',integer=v=>Numbe
 el('candidate-scope').textContent=`Build ${data.binary_sha256.slice(0,12)} · ${data.status} · Accuracy ${integer(data.accuracy_completed)}/${integer(data.expected_documents)} documents · Timing ${integer(data.timing_completed)}/${integer(data.expected_documents)} documents. Updated with the latest completed records.`;
 const targeted=data.targeted||{},medians=targeted.release_medians||{},accepted=Number.isFinite(targeted.accepted_release_speedup)&&targeted.binary_hashes?.native?.accepted===data.baseline_sha256,base=accepted?medians.accepted:medians.baseline,speedup=accepted?targeted.accepted_release_speedup:targeted.release_speedup;
 el('candidate-targeted').hidden=!speedup;
-el('candidate-targeted').textContent=speedup?`Separate targeted check — one profiled document: rust-docx ${number(base)} → ${number(medians.candidate)} ms; office_oxide ${number(medians.office_oxide)} ms. Paired speedup ${number(speedup,2)}× versus ${accepted?'the accepted parser':'the parent build'}. This is a single-document result.`:'';
+el('candidate-targeted').textContent=speedup?`Separate targeted check — one profiled document: duke-pages ${number(base)} → ${number(medians.candidate)} ms; office_oxide ${number(medians.office_oxide)} ms. Paired speedup ${number(speedup,2)}× versus ${accepted?'the accepted parser':'the parent build'}. This is a single-document result.`:'';
 const table=(id,engines,rows)=>{const node=el(id),head=document.createElement('thead'),header=document.createElement('tr');for(const label of ['Metric',...engines.map(engineLabel)]){const cell=document.createElement('th');cell.scope='col';cell.textContent=label;const engine=engines[header.children.length-1];if(ENGINE_COLORS[engine])cell.style.color=ENGINE_COLORS[engine];header.append(cell);}head.append(header);const body=document.createElement('tbody');for(const [key,label,values]of rows){const row=document.createElement('tr');row.dataset.metric=key;const title=document.createElement('th');title.scope='row';title.textContent=label;row.append(title);for(const value of values){const cell=document.createElement('td');cell.textContent=value;row.append(cell);}body.append(row);}node.replaceChildren(head,body);};
 const timingEngines=[...data.engines,'docx-core-baseline'];
 el('candidate-timing-note').textContent=data.timing_common?`${data.timing_complete?'Complete':'Partial'} full-corpus timing: ${integer(data.timing_common)} common successful documents; ${integer(data.timing_records)} outcome records. Each value summarizes per-document warm medians.`:'Full-corpus latency is queued behind accuracy and validation. The targeted timing above is available now.';
@@ -422,8 +422,8 @@ function renderSingleTrace(){
  const rows=Array.from({length:Math.max(core.length,oxide.length)},(_,i)=>`<tr><td>${esc(core[i])}</td><td>${esc(oxide[i])}</td></tr>`).join('');
  const trial=trace.trial,confirmation=trace.release_confirmation;
  section.innerHTML=`<p class="eyebrow">RECORDED INPUT · RUST CALL PATHS</p><h2>Where the time goes</h2>
- <p>Input ${esc(trace.ordinal)}. Recorded release medians: rust-docx ${ms(trace.release_medians?.['docx-core']?.total_ms)}; office_oxide ${ms(trace.release_medians?.office_oxide?.total_ms)}.</p>
- <div class="scroll"><table><thead><tr><th>rust-docx</th><th>office_oxide</th></tr></thead><tbody>${rows}</tbody></table></div>
+ <p>Input ${esc(trace.ordinal)}. Recorded release medians: duke-pages ${ms(trace.release_medians?.['docx-core']?.total_ms)}; office_oxide ${ms(trace.release_medians?.office_oxide?.total_ms)}.</p>
+ <div class="scroll"><table><thead><tr><th>duke-pages</th><th>office_oxide</th></tr></thead><tbody>${rows}</tbody></table></div>
  <div class="scroll"><table><thead><tr><th>Parser</th><th>Sampled function</th><th>Inclusive sampled stacks</th></tr></thead><tbody>${(trace.profile_rows||[]).map(row=>`<tr><td>${esc(row.engine)}</td><td>${esc(row.function)}</td><td>${esc(row.samples)}${row.worker_samples?` / ${esc(row.worker_samples)}`:''}</td></tr>`).join('')}</tbody></table></div>
  <p>${esc(trace.profile_scope)}</p>
  ${trial?`<p><strong>Targeted trial:</strong> ${ms(trial.baseline_ms)} → ${ms(trial.candidate_ms)}. Paired speedup: ${esc(trial.speedup)}×. This trial is separate from the release timings.</p>`:''}
@@ -530,7 +530,7 @@ function visibleScatterEngines(){return engines.filter(engine=>el('show-'+engine
 function renderScatterTable(){
  if(!el('scatter-data').open)return;
  const key=el('scatter-x').value,ratio=el('scatter-y').value==='ratio',selected=visibleScatterEngines(),head=el('scatter-data-head');head.replaceChildren();const tr=document.createElement('tr');
- for(const label of ['Anonymous input',`${metricDefinitions[key].label} (${metricDefinitions[key].unit})`,...selected.map(engine=>ratio?`rust-docx / ${engineLabel(engine)} (×)`:`${engineLabel(engine)} (ms)`)]){const th=document.createElement('th');th.scope='col';th.textContent=label;tr.append(th);}head.append(tr);
+ for(const label of ['Anonymous input',`${metricDefinitions[key].label} (${metricDefinitions[key].unit})`,...selected.map(engine=>ratio?`duke-pages / ${engineLabel(engine)} (×)`:`${engineLabel(engine)} (ms)`)]){const th=document.createElement('th');th.scope='col';th.textContent=label;tr.append(th);}head.append(tr);
  const body=el('scatter-data-body');body.replaceChildren();for(const point of chartPoints)body.append(row([inputName(point),integer(point.metrics?.[key]),...selected.map(engine=>n(ratio?point.latency_ms['docx-core']/point.latency_ms[engine]:point.latency_ms[engine],3))]));
 }
 function renderScatter(){
@@ -540,12 +540,12 @@ function renderScatter(){
  const eligible=chartPoints.filter(point=>finite(point.metrics?.[key])&&point.metrics?.[key]>=0);if(!eligible.length){svgText(frame.svg,'No measured input dimensions are available.',530,225,{class:'chart-empty'});set('scatter-status','No numeric reference dimensions for this axis.');set('scatter-caption',metricDefinitions[key].description);interactivePoints(frame.svg,'scatter-figure','scatter-tooltip',[],()=> '');renderScatterTable();return;}
  const values=eligible.flatMap(point=>selected.map(engine=>({point,engine,value:ratio?point.latency_ms['docx-core']/point.latency_ms[engine]:point.latency_ms[engine]})));
  const x=scaleFor(eligible.map(point=>point.metrics?.[key]),xKind,frame.left,frame.right),y=scaleFor([...values.map(value=>value.value),...(ratio?[1]:[])],yKind,frame.bottom,frame.top);
- drawAxes(frame,x,y,`${metricDefinitions[key].label} (${metricDefinitions[key].unit})`,ratio?'rust-docx / parser latency (×)':'Per-input warm median latency (ms)',metricDefinitions[key].unit==='bytes'?axisBytes:compact,value=>compact(value)+(ratio?'×':''));
+ drawAxes(frame,x,y,`${metricDefinitions[key].label} (${metricDefinitions[key].unit})`,ratio?'duke-pages / parser latency (×)':'Per-input warm median latency (ms)',metricDefinitions[key].unit==='bytes'?axisBytes:compact,value=>compact(value)+(ratio?'×':''));
  if(ratio){svgLine(frame.svg,frame.left,y.map(1),frame.right,y.map(1),{stroke:'#566f85','stroke-width':1.5,'stroke-dasharray':'6 4'});svgText(frame.svg,'1× · equal latency',frame.right-8,y.map(1)-8,{'text-anchor':'end',class:'guide-label'});}
  const points=values.map(value=>({...value,x:x.map(value.point.metrics?.[key]),y:y.map(value.value)}));for(const point of points)frame.svg.append(svgNode('circle',{cx:point.x,cy:point.y,r:point.engine==='docx-core'?3.1:2.6,fill:palette[point.engine],'fill-opacity':point.engine==='docx-core'?.62:.4}));
- interactivePoints(frame.svg,'scatter-figure','scatter-tooltip',points,point=>`${inputName(point.point)} · ${engineLabel(point.engine)}\n${metricDefinitions[key].label}: ${exactMetric(key,point.point.metrics?.[key])}\nParser latency: ${ms(point.point.latency_ms[point.engine])}${ratio?`\nrust-docx latency: ${ms(point.point.latency_ms['docx-core'])}\nrust-docx / parser: ${n(point.value,3)}×`:''}`);
+ interactivePoints(frame.svg,'scatter-figure','scatter-tooltip',points,point=>`${inputName(point.point)} · ${engineLabel(point.engine)}\n${metricDefinitions[key].label}: ${exactMetric(key,point.point.metrics?.[key])}\nParser latency: ${ms(point.point.latency_ms[point.engine])}${ratio?`\nduke-pages latency: ${ms(point.point.latency_ms['docx-core'])}\nduke-pages / parser: ${n(point.value,3)}×`:''}`);
  const zeroCount=eligible.filter(point=>point.metrics?.[key]===0).length;
- set('scatter-status',`${integer(points.length)} plotted measurements · ${eligible.length} inputs per visible parser · ${zeroCount} zero-count inputs retained · ${chartPoints.length-eligible.length} inputs lack this dimension.${ratio?' Above 1× means rust-docx is slower; below 1× means it is faster. rust-docx is the 1× reference line.':''}`);
+ set('scatter-status',`${integer(points.length)} plotted measurements · ${eligible.length} inputs per visible parser · ${zeroCount} zero-count inputs retained · ${chartPoints.length-eligible.length} inputs lack this dimension.${ratio?' Above 1× means duke-pages is slower; below 1× means it is faster. duke-pages is the 1× reference line.':''}`);
  set('scatter-caption',`${metricDefinitions[key].description} ${xKind==='log1p'?'The horizontal transform is ln(1 + value), retaining zeros.':'The horizontal axis is linear.'} The vertical axis is ${yKind==='log'?'logarithmic':'linear'}.`);renderScatterTable();
 }
 function qualityRecord(engine,key,all=false){return all?data.summaries[engine].features_all?.[key]:data.quality_comparison[engine]?.features?.[key];}
@@ -587,7 +587,7 @@ function renderEvidenceBars(id,figure,tooltip,title,rows){
 function legacyMetricValue(build,key){if(key==='body_f1')return build?.body_f1;return measuredRecall(build?.features?.[key]);}
 function legacyMetricEvidence(build,key){return key==='body_f1'?`Macro F1 on ${integer(data.legacy_update.documents)} matched inputs`:evidenceValue(build?.features?.[key]);}
 function renderLegacyUpdate(){
- const update=data.legacy_update,key=el('legacy-update-metric').value,rows=[{label:'Previous rust-docx',value:legacyMetricValue(update.before,key),color:'#8297aa',evidence:legacyMetricEvidence(update.before,key)},{label:'Current rust-docx',value:legacyMetricValue(update.after,key),color:palette['docx-core'],evidence:legacyMetricEvidence(update.after,key)}];
+ const update=data.legacy_update,key=el('legacy-update-metric').value,rows=[{label:'Previous duke-pages',value:legacyMetricValue(update.before,key),color:'#8297aa',evidence:legacyMetricEvidence(update.before,key)},{label:'Current duke-pages',value:legacyMetricValue(update.after,key),color:palette['docx-core'],evidence:legacyMetricEvidence(update.after,key)}];
  renderEvidenceBars('legacy-update-chart','legacy-update-figure','legacy-update-tooltip',`Matched original-corpus ${update.labels[key]}`,rows);
  const before=rows[0].value,after=rows[1].value;set('legacy-update-status',`${integer(update.documents)} matching original-corpus inputs. ${finite(before)&&finite(after)?`${update.labels[key]}: ${n(before*100)}% → ${n(after*100)}% (${after>=before?'+':''}${n((after-before)*100)} percentage points).`:'A matched score is unavailable for this category.'} Scoring rules are unchanged.`);
 }
@@ -633,17 +633,17 @@ set('latency-build-notice',latencyScopeText+(latencyIsCandidate?(latencyScope.va
 set('ecdf-build-scope',latencyScopeText);set('scatter-build-scope',latencyScopeText);
 const core=comparison.engines['docx-core'],goalOxide=comparison.engines.office_oxide;
 const goalAvailable=finite(goalOxide?.median_ms)&&finite(goalOxide?.p95_ms),goalMet=goalAvailable&&finite(core?.median_ms)&&finite(core?.p95_ms)&&core.median_ms<=goalOxide.median_ms/5&&core.p95_ms<=goalOxide.p95_ms/5;
-set('target-status',leaders.median_ms?`rust-docx: ${ms(core.median_ms)} median · ${ms(core.p95_ms)} p95. ${goalAvailable?`5× target: ≤ ${n(goalOxide.median_ms/5,3)} ms median and ≤ ${n(goalOxide.p95_ms/5,3)} ms p95. ${goalMet?'Measured latency meets this target on the displayed cohort.':'The target has not been reached on this cohort.'}`:'The 5× target is waiting for comparable office_oxide measurements.'}`:'A common latency comparison is unavailable.');
+set('target-status',leaders.median_ms?`duke-pages: ${ms(core.median_ms)} median · ${ms(core.p95_ms)} p95. ${goalAvailable?`5× target: ≤ ${n(goalOxide.median_ms/5,3)} ms median and ≤ ${n(goalOxide.p95_ms/5,3)} ms p95. ${goalMet?'Measured latency meets this target on the displayed cohort.':'The target has not been reached on this cohort.'}`:'The 5× target is waiting for comparable office_oxide measurements.'}`:'A common latency comparison is unavailable.');
 const oxideAll=comparison.engines.office_oxide;if(finite(oxideAll?.all_median_ms)&&finite(oxideAll?.all_p95_ms)){set('all-corpus-latency',`Across all ${integer(oxideAll.attempted)} attempted documents in this latency snapshot, office_oxide parsed ${integer(oxideAll.success)} successfully: ${ms(oxideAll.all_median_ms)} median and ${ms(oxideAll.all_p95_ms)} p95 per document. These full-corpus figures are separate from the ${integer(comparison.fixed_common)}-input common-success charts.`);}else el('all-corpus-latency').remove();
 for(const engine of engines){const value=comparison.engines[engine];el('speed-table').append(row([engineLabel(engine),ms(value.median_ms),ms(value.p95_ms),ms(value.all_median_ms),ms(value.all_p95_ms),data.live?`${value.success}/${value.timed_attempted??0} completed; ${value.attempted} planned`:`${value.success}/${value.attempted}`,Object.entries(value.statuses).map(([key,count])=>`${key}: ${count}`).join(' · ')||(data.live?'Pending':'Unavailable'),Object.entries(data.summaries[engine].accuracy_statuses||{}).map(([key,count])=>`${key}: ${count}`).join(' · ')||'Unavailable'],engine==='docx-core'?'core':''));}
-const measuredBaseline=latencySnapshot?latencySnapshot.baseline:data.baseline;if(measuredBaseline){const value=measuredBaseline;set('baseline-summary',`${integer(value.documents)} inputs were successfully timed with both rust-docx builds.${finite(value.attempted)?` The baseline attempted ${integer(value.attempted)} inputs.`:''}${value.statuses?` Baseline outcomes: ${Object.entries(value.statuses).map(([status,count])=>`${status}: ${count}`).join(' · ')}.`:''}`);el('baseline-table').append(row([integer(value.documents),n(value.median_paired_speedup)+'×',ms(value.baseline_median_ms),ms(value.candidate_median_ms),ms(value.baseline_p95_ms),ms(value.candidate_p95_ms)]));}else el('baseline-section').remove();
-set('quality-scope',`Current-build quality uses ${data.scope.quality_common} shared, reference-bearing inputs. Categories are ranked from lowest rust-docx feature recall. ${latencyMatchesQuality?`Latency uses ${comparison.fixed_common} shared successful inputs.${data.scope.quality_timing_same_cohort===true?' These are the same cohort.':' Matching cohort membership is not established by counts alone.'}`:'Timing and accepted feature scores belong to different builds, so the combined speed-versus-quality plot waits for validation.'} The original independent extraction scorer is unchanged.`);
+const measuredBaseline=latencySnapshot?latencySnapshot.baseline:data.baseline;if(measuredBaseline){const value=measuredBaseline;set('baseline-summary',`${integer(value.documents)} inputs were successfully timed with both duke-pages builds.${finite(value.attempted)?` The baseline attempted ${integer(value.attempted)} inputs.`:''}${value.statuses?` Baseline outcomes: ${Object.entries(value.statuses).map(([status,count])=>`${status}: ${count}`).join(' · ')}.`:''}`);el('baseline-table').append(row([integer(value.documents),n(value.median_paired_speedup)+'×',ms(value.baseline_median_ms),ms(value.candidate_median_ms),ms(value.baseline_p95_ms),ms(value.candidate_p95_ms)]));}else el('baseline-section').remove();
+set('quality-scope',`Current-build quality uses ${data.scope.quality_common} shared, reference-bearing inputs. Categories are ranked from lowest duke-pages feature recall. ${latencyMatchesQuality?`Latency uses ${comparison.fixed_common} shared successful inputs.${data.scope.quality_timing_same_cohort===true?' These are the same cohort.':' Matching cohort membership is not established by counts alone.'}`:'Timing and accepted feature scores belong to different builds, so the combined speed-versus-quality plot waits for validation.'} The original independent extraction scorer is unchanged.`);
 for(const [key,value]of Object.entries(metricDefinitions)){const option=document.createElement('option');option.value=key;option.textContent=value.label;el('scatter-x').append(option);}
 for(const engine of engines){const label=document.createElement('label');label.style.setProperty('--series-color',palette[engine]);const checkbox=document.createElement('input');checkbox.type='checkbox';checkbox.value=engine;checkbox.checked=true;checkbox.id='show-'+engine;checkbox.addEventListener('change',renderScatter);label.append(checkbox,document.createTextNode(engineLabel(engine)));el('scatter-engines').append(label);}
 for(const [key,label]of Object.entries(qualityLabels)){const option=document.createElement('option');option.value=key;option.textContent=label;el('quality-metric').append(option);}
 if(qualityEntries.length)el('quality-metric').value=qualityEntries.find(([key])=>!isLegacyMetric(key))?.[0]||qualityEntries[0][0];
 const currentImages=qualityRecord('docx-core','image_occurrences'),legacyImages=qualityRecord('docx-core','images');
-set('current-image-recall',currentImages?`Current rust-docx image-occurrence recall: ${n(currentImages.recall*100,2)}% · ${integer(currentImages.matched)} matched / ${integer(currentImages.expected)} expected. Source payloads are matched individually, including pictures inside composite SVGs and declared SVG alternatives. The comparison row below reports this same check for every measured parser.`:'Payload-matched image-occurrence recall is unavailable for this build. The original node-count comparison is retained below.');
+set('current-image-recall',currentImages?`Current duke-pages image-occurrence recall: ${n(currentImages.recall*100,2)}% · ${integer(currentImages.matched)} matched / ${integer(currentImages.expected)} expected. Source payloads are matched individually, including pictures inside composite SVGs and declared SVG alternatives. The comparison row below reports this same check for every measured parser.`:'Payload-matched image-occurrence recall is unavailable for this build. The original node-count comparison is retained below.');
 set('legacy-image-summary',legacyImages?`Original scoring details · legacy image-node count ${n(legacyImages.recall*100,2)}% (${integer(legacyImages.matched)} / ${integer(legacyImages.expected)})`:'Original scoring details');
 buildQualityTable('quality-heatmap-head','quality-heatmap',false,key=>!isLegacyMetric(key));buildQualityTable('legacy-image-head','legacy-image-table',false,isLegacyMetric);buildQualityTable('all-quality-head','all-quality-table',true);
 if(data.legacy){

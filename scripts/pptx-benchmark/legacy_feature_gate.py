@@ -76,11 +76,11 @@ def main():
             if index < completed:
                 continue
             assert hashlib.sha256(Path(row['path']).read_bytes()).hexdigest() == row['sha256']
-            current = invoke(binary, 'rust-pptx', row, run / (row['id'] + '.compact.json.gz'), 0)
+            current = invoke(binary, 'duke-slides', row, run / (row['id'] + '.compact.json.gz'), 0)
             old = previous.get(row['id'])
             if old is None:
                 baseline_output = run / (row['id'] + '.baseline-compact.json.gz')
-                old = invoke(baseline, 'rust-pptx', row, baseline_output, 0)
+                old = invoke(baseline, 'duke-slides', row, baseline_output, 0)
             exact = fields(current) == fields(old)
             hashes = old.get('artwork_hashes', []) if exact else []
             issues, changes = [], {}

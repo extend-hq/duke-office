@@ -64,7 +64,7 @@ def main():
     path=OUT/'timing.pptx' 
     with zipfile.ZipFile(path,'w',zipfile.ZIP_DEFLATED) as z:
         for name,value in parts.items():z.writestr(name,value)
-    result=subprocess.run([str(binary),'rust-pptx',str(path),str(OUT/'timing.json.gz'),'0','full'],capture_output=True,text=True,check=True)
+    result=subprocess.run([str(binary),'duke-slides',str(path),str(OUT/'timing.json.gz'),'0','full'],capture_output=True,text=True,check=True)
     record=json.loads(result.stdout.splitlines()[-1]);assert record['status']=='ok',record
     model=json.load(gzip.open(OUT/'timing.json.gz','rt'));slides=model['slides'];t=slides[0]['timing'];root=t['nodes'][0]['time'];nodes={n['kind']:n for n in root['children']};p=lambda n:nodes[n]['parameters']
     checks={

@@ -16,7 +16,7 @@ Candidate pages must have the same 432 × 432 pixel dimensions and use `page-01.
 
 This is a synthetic appearance matrix. It is not an exhaustive image-format corpus or a claim of Word rendering parity. Compare each output to the retained Word pages and report unsupported cases without excluding them from the denominator.
 
-Extract the native model with `cargo run -p rust-docx --example image_fidelity -- INPUT.docx MODEL.json ROUNDTRIP.docx`. The optional third path reconstructs the document after clearing paragraph source XML, exercising image source preservation.
+Extract the native model with `cargo run -p duke-pages --example image_fidelity -- INPUT.docx MODEL.json ROUNDTRIP.docx`. The optional third path reconstructs the document after clearing paragraph source XML, exercising image source preservation.
 
 Use `prepare-pages.py --directory DIR --model MODEL.json` to produce fixed browser pages from the native model. Serve the directory locally, then generate a CLI function with `prepare-capture.py --directory DIR --target parser --base-url URL`. For the running React DOCX playground use `--target viewer`. Run the generated function with `playwright-cli run-code --filename PATH`. Both capture routes use the same page dimensions and retain all cases.
 

@@ -63,5 +63,80 @@
     "path": "xmloff/source/chart/SchXMLTools.cxx",
     "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/xmloff/source/chart/SchXMLTools.cxx",
     "sha256": "930e6387cbb370b140c950da1251440d7f0a836e23b24b5121bc7ffe4f77e8ec"
+  },
+  {
+    "path": "chart2/source/view/axes/ScaleAutomatism.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/chart2/source/view/axes/ScaleAutomatism.cxx",
+    "sha256": "86910cd4771cb1e7af4ec00dcc73d7efd89e65614bc8049eb508e3f29fc5a3e0"
+  },
+  {
+    "path": "chart2/source/view/axes/VCartesianAxis.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/chart2/source/view/axes/VCartesianAxis.cxx",
+    "sha256": "60710b9a1b9d88120733ae9d05b0efa399f29c548d27ad1572b5ace92d2820bf"
+  },
+  {
+    "path": "chart2/source/view/main/VLegend.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/chart2/source/view/main/VLegend.cxx",
+    "sha256": "112aa89de06a5a08f853197f775b38a869ca6add11c23b7a34fc87b92c6e4362"
+  },
+  {
+    "path": "chart2/source/view/main/LabelPositionHelper.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/chart2/source/view/main/LabelPositionHelper.cxx",
+    "sha256": "c516bc85eecc829a1188cad5b9600e650067bc44eed09deb4854611f6c669344"
+  },
+  {
+    "path": "chart2/source/view/axes/Tickmarks.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/chart2/source/view/axes/Tickmarks.cxx",
+    "sha256": "51f58efa423a7c9d25b0a382b353000cd686c6fa4efa3774c6225d7ea5b0543d"
+  },
+  {
+    "path": "chart2/source/view/main/VTitle.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/chart2/source/view/main/VTitle.cxx",
+    "sha256": "840be59e89c87c4a5123a0ca2d744c807e1e34b7d39cfe7ae162bc32eba9f9c6"
+  },
+  {
+    "path": "chart2/source/view/axes/VAxisProperties.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/chart2/source/view/axes/VAxisProperties.cxx",
+    "sha256": "40fe39765a67ccf1572e8b0b63fa7cc66e64f1ee4c2840e0fa1f555dd7ef5845"
+  },
+  {
+    "path": "chart2/source/view/inc/ViewDefines.hxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/chart2/source/view/inc/ViewDefines.hxx",
+    "sha256": "fffcc9ca8e6a147d8c997897cbb94068f98e8123400435de2d229ad6b2b72ad4"
+  },
+  {
+    "path": "chart2/source/view/axes/VPolarAngleAxis.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/chart2/source/view/axes/VPolarAngleAxis.cxx",
+    "sha256": "15d4f7309c35d79e28bb75af18997d10454e2e75722fa82d340a5d13b43dd536"
+  },
+  {
+    "path": "chart2/source/view/axes/VPolarAxis.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/chart2/source/view/axes/VPolarAxis.cxx",
+    "sha256": "7949699368b4f99b1f53567267958fe5b88ff6a47400a30fc7d55556829b688f"
+  },
+  {
+    "path": "chart2/source/view/charttypes/NetChart.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/chart2/source/view/charttypes/NetChart.cxx",
+    "sha256": "00902ea86882175c6940fcaf78c0dd0cebc1dc4f59474c162822e3f9dde5e827"
+  },
+  {
+    "path": "chart2/source/view/charttypes/VSeriesPlotter.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/chart2/source/view/charttypes/VSeriesPlotter.cxx",
+    "sha256": "c237f5607f2dc29e7565a5393c03adf65463af78015ae94d4ae28f42b6280448"
+  },
+  {
+    "path": "chart2/source/view/diagram/VDiagram.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/chart2/source/view/diagram/VDiagram.cxx",
+    "sha256": "2b9d390f775c3980af14f5814e7849da5b93d070d3f30100fe0324d34fbc5d42"
+  },
+  {
+    "path": "chart2/source/view/main/PolarLabelPositionHelper.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/chart2/source/view/main/PolarLabelPositionHelper.cxx",
+    "sha256": "e67d4a403752b32c291f271b089eb334b4c713a530ee59a9d95b110b09a62aaa"
+  },
+  {
+    "path": "chart2/source/view/main/ShapeFactory.cxx",
+    "url": "https://raw.githubusercontent.com/LibreOffice/core/1f77d10d6938fd34972958f64b2bcfa54f8b1ba5/chart2/source/view/main/ShapeFactory.cxx",
+    "sha256": "28191414536ebc61ac339b9d0b02664ac93d3b76a8de625de252b1962a5407eb"
   }
 ]

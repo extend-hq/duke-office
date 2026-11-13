@@ -20,7 +20,7 @@ def main():
     wasm_records = {r['id']: r for r in json.loads((wasm_probes/'records.json').read_text())}
     probe_receipts = []
     for row in json.loads((probes/'manifest.json').read_text()):
-        result = invoke(native, 'rust-pptx', row, probes/(row['id']+'.compact.json.gz'), 0)
+        result = invoke(native, 'duke-slides', row, probes/(row['id']+'.compact.json.gz'), 0)
         other = wasm_records[row['id']]; assert result['status'] == other['status']
         if result['status'] == 'ok':
             assert read(probes/(row['id']+'.compact.json.gz')) == read(wasm_probes/(row['id']+'.json.gz'))
@@ -45,7 +45,7 @@ def main():
             if not equal:
                 assert not native_records[ident]['equal']
                 assert without_comments(before) == without_comments(after)
-                result = invoke(native, 'rust-pptx', manifest[ident], run/(ident+'.compact.json.gz'), 0)
+                result = invoke(native, 'duke-slides', manifest[ident], run/(ident+'.compact.json.gz'), 0)
                 assert result['full_sha256'] == native_records[ident]['full_sha256']
                 assert read(run/(ident+'.compact.json.gz')) == after
             else:

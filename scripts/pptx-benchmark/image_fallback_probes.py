@@ -95,7 +95,7 @@ def main():
         image = images[0]
         assert image['assetId'] == ('ppt/media/raster.png' if name in {'same-target', 'missing-svg', 'external-svg', 'linked-svg', 'raster-only', 'empty-svg-id'} else 'ppt/media/vector.svg'), (name, image['assetId'])
         assert image.get('crop') == dict(left=.1, top=.15, right=0, bottom=0), (name, image.get('crop'))
-        result = compact(run / 'candidate', 'rust-pptx', row, target / (name + '.compact.json.gz'), 0)
+        result = compact(run / 'candidate', 'duke-slides', row, target / (name + '.compact.json.gz'), 0)
         result.update(id=name, artwork_hashes=artwork_hashes(document)); records.append(result)
         receipts.append(dict(id=name, passed=True, counts=counts, selected=image['assetId'], fallback=image.get('fallbackAssetId')))
         print(name, counts, flush=True)

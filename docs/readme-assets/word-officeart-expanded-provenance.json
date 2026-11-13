@@ -1321,5 +1321,9 @@
       "beforeColorAgreement": 0.8685181980734844,
       "beforeSha256": "f628b0af1fe3c7be0c54a8d18d555766f6a6d1e5962c9a8a098bd5c40770aeae"
     }
-  ]
+  ],
+  "currentPackageNames": {
+    "rust-docx": "duke-pages",
+    "rust-office-art": "duke-office-art"
+  }
 }

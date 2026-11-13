@@ -7,7 +7,7 @@ from fontTools.ttLib import TTFont
 
 root = Path(__file__).resolve().parents[1]
 source = root / "packages/office-fonts/fonts"
-destination = root / "crates/rust-office-art/src/fonts"
+destination = root / "crates/duke-office-art/src/fonts"
 for family in ("arimo", "carlito", "tinos", "cousine"):
     target = destination / family
     target.mkdir(parents=True, exist_ok=True)

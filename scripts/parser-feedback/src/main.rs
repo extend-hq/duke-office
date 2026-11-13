@@ -10,17 +10,17 @@ use std::{
 };
 
 enum Parsed {
-    Core(rust_docx::DocModel, rust_docx::StructuredDocument),
+    Core(duke_pages::DocModel, duke_pages::StructuredDocument),
 }
 fn parse(_: &str, bytes: &Arc<[u8]>, _: &str) -> Result<(Parsed, [f64; 3]), String> {
     let start = Instant::now();
-    let package = rust_docx::parse_document_bytes(bytes)?;
+    let package = duke_pages::parse_document_bytes(bytes)?;
     let package_ms = start.elapsed().as_secs_f64() * 1000.0;
     let start = Instant::now();
-    let model = rust_docx::build_doc_model(&package);
+    let model = duke_pages::build_doc_model(&package);
     let model_ms = start.elapsed().as_secs_f64() * 1000.0;
     let start = Instant::now();
-    let blocks = rust_docx::extract_document_blocks(&model);
+    let blocks = duke_pages::extract_document_blocks(&model);
     let blocks_ms = start.elapsed().as_secs_f64() * 1000.0;
     Ok((
         Parsed::Core(model, blocks),

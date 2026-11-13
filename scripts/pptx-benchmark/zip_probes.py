@@ -72,7 +72,7 @@ def main():
     for name, data in cases.items():
         path = directory / (name + '.pptx')
         path.write_bytes(data)
-        outputs = {engine: invoke(binary, 'rust-pptx', dict(path=str(path)), directory / (name + '.' + engine + '.json.gz'), 0) for engine, binary in binaries.items()}
+        outputs = {engine: invoke(binary, 'duke-slides', dict(path=str(path)), directory / (name + '.' + engine + '.json.gz'), 0) for engine, binary in binaries.items()}
         fields = lambda record: (record['status'], record.get('full_sha256'), record.get('error'))
         records.append(dict(case=name, sha256=hashlib.sha256(data).hexdigest(), equal=fields(outputs['baseline']) == fields(outputs['candidate']), outputs=outputs))
     (directory / 'records.json').write_text(json.dumps(records, indent=2))

@@ -1,12 +1,12 @@
 {
-  "name": "@extend-ai/rust-office-charts",
-  "version": "0.3.6",
+  "name": "@extend-ai/duke-office-charts",
+  "version": "0.3.7",
   "description": "Render Office Open XML charts to SVG with WebAssembly",
   "type": "module",
   "license": "MIT AND Apache-2.0 AND OFL-1.1",
   "repository": {
     "type": "git",
-    "url": "https://github.com/extend-hq/rust-office.git"
+    "url": "https://github.com/extend-hq/duke-office.git"
   },
   "main": "./browser/index.cjs",
   "module": "./browser/index.js",

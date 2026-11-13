@@ -48,7 +48,7 @@ def main():
             f"{package['description']}\n\n"
             f"[crates.io](https://crates.io/crates/{name}/{version}) · "
             f"[API documentation](https://docs.rs/{name}/{version}) · "
-            f"[Source](https://github.com/extend-hq/rust-office/tree/{tag}/crates/{name})\n\n"
+            f"[Source](https://github.com/extend-hq/duke-office/tree/{tag}/crates/{name})\n\n"
             f"```toml\n[dependencies]\n{name} = \"{version}\"\n```\n"
         )
         with tempfile.NamedTemporaryFile(mode="w", suffix=".md") as body:

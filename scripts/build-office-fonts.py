@@ -7,7 +7,7 @@ from fontTools.ttLib import TTFont
 
 root = Path(__file__).resolve().parents[1]
 package = root / "packages/office-fonts"
-destination = root / "crates/rust-office-charts/src/parse/font_metrics"
+destination = root / "crates/duke-office-charts/src/parse/font_metrics"
 destination.mkdir(exist_ok=True)
 families = json.loads((package / "families.json").read_text())
 licenses = []

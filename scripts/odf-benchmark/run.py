@@ -14,7 +14,7 @@ SLIDES = ('odp', 'otp', 'fodp')
 DRAWINGS = ('odg', 'otg', 'fodg')
 # Extensions each parser handles by design, from its documentation and source.
 SUPPORT = {
-    'rust-office': TEXT + SLIDES + DRAWINGS,
+    'duke-office': TEXT + SLIDES + DRAWINGS,
     'anydoc': ('odt', 'ott', 'odp'),
     'docx-to-md': ('odt', 'ott'),
     'pptx-to-md': ('odp',),

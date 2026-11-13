@@ -1,7 +1,7 @@
 """Paired timing of on-demand node rendering through the retained parse handle.
 
 Selects the same even-quantile tuning inputs as `expanded_timing.py`. For each,
-the candidate runner's `rust-pptx-render-timing` engine collects the first
+the candidate runner's `duke-slides-render-timing` engine collects the first
 `--targets` nodes with eager artwork and times, interleaved within one process
 and alternating in order, N renders through `render_node_artwork` (one parse per
 render) against one `parse_presentation_retained` plus the same N renders through
@@ -38,7 +38,7 @@ def main():
         raise SystemExit('The deferred-artwork semantic gate, including the retained handle, must pass for this executable first.')
     reference = json.loads((OUT / args.cohort_phase / 'assessment.json').read_text())
     manifest = {r['id']: r for r in json.loads((OUT / args.cohort_phase / 'cohort.json').read_text())}
-    eligible = sorted([r for r in reference['rows'] if r['engine'] == 'rust-pptx' and r['id'] in reference['common_ids']], key=lambda r: r['median_ms'])
+    eligible = sorted([r for r in reference['rows'] if r['engine'] == 'duke-slides' and r['id'] in reference['common_ids']], key=lambda r: r['median_ms'])
     count = min(args.count, len(eligible))
     selected = [eligible[round(i * (len(eligible) - 1) / max(1, count - 1))]['id'] for i in range(count)]
     gated = {json.loads(line)['id'] for line in (run / 'artwork-deferral.jsonl').read_text().splitlines()}
@@ -56,7 +56,7 @@ def main():
     records = []
     with output.open('w', buffering=1) as stream:
         for ident in selected:
-            record = invoke(candidate, 'rust-pptx-render-timing', manifest[ident], '-', args.samples, args.targets)
+            record = invoke(candidate, 'duke-slides-render-timing', manifest[ident], '-', args.samples, args.targets)
             record.update(id=ident, load=os.getloadavg())
             records.append(record)
             stream.write(json.dumps(record) + '\n')

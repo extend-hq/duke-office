@@ -37,12 +37,12 @@ def main(phase):
     totals = collections.Counter()
     details = []
     for row in assessment['rows']:
-        if row['engine'] != 'rust-pptx' or row['status'] != 'ok':
+        if row['engine'] != 'duke-slides' or row['status'] != 'ok':
             continue
         ident = row['id']
         if row['metrics']['images']['recall'] == 1:
             continue
-        model = json.load(gzip.open(run / 'native' / (ident + '.rust-pptx.json.gz'), 'rt'))
+        model = json.load(gzip.open(run / 'native' / (ident + '.duke-slides.json.gz'), 'rt'))
         actual = core(model)
         reference = json.loads((OUT / 'oracle' / (ident + '.json')).read_text())
         with zipfile.ZipFile(manifest[ident]['path']) as package:

@@ -1,6 +1,10 @@
 # OpenDocument benchmarks
 
-November 12, 2026. This compares the OpenDocument import in this repository (`rust-docx` for text documents, `rust-pptx` for presentations and drawings, both reading through `rust-odf`) with every other Rust crate found on crates.io that reads these formats, and with six general-purpose parsers. The harness is in [scripts/odf-benchmark](../scripts/odf-benchmark); its work directory, including the corpus, references and every parser's output, is `output/odf-benchmark-20261112`.
+Latest follow-up: [OpenDocument parity and latency hill-climb](opendocument-hillclimb-20261113.md).
+
+For the November 13 chart fixes, matched before/after timings and two freshly rerun peers, see [OpenDocument chart fidelity and latency](opendocument-fidelity-20261113.md). The broader comparison below remains the November 12 snapshot.
+
+November 12, 2026. This compares the OpenDocument import in this repository (`duke-pages` for text documents, `duke-slides` for presentations and drawings, both reading through `duke-odf`) with every other Rust crate found on crates.io that reads these formats, and with six general-purpose parsers. The harness is in [scripts/odf-benchmark](../scripts/odf-benchmark); its work directory, including the corpus, references and every parser's output, is `output/odf-benchmark-20261112`.
 
 ## Result
 
@@ -23,8 +27,8 @@ The first complete run was followed by a round of accuracy and speed work, and t
 | `.odp` mean / median ms | 0.672 / 0.338 | 0.423 / 0.220 | 0.330 / 0.174 |
 
 - **Second round, accuracy:** embedded charts, text documents and spreadsheets on slides are read; a body with more than one content element is read in full; list and heading numbers are part of the scored text, as they are in LibreOffice's export.
-- **Second round, speed:** `rust-odf` builds its own XML tree with namespaces resolved to an enum, in place of a general-purpose tree; entries are inflated with `zlib-rs`; style lookups no longer allocate.
-- **Direct model:** until this round an OpenDocument text file was written out as Word markup and parsed again by the DOCX reader. `rust-docx` now builds its document model straight from what `rust-odf` read, with no Word package in between, and moves text and image bytes into the model instead of copying them. In `rust-odf`, the XML tree is built in one scan with no tokenizer in front, styles are stored boxed and by family so that a document with thousands of automatic styles no longer shifts kilobytes per insertion, and one property group can be resolved without the other three. The scored text is unchanged: the new path produced the same letters and digits as the old one on all 756 readable files, and identical output on every presentation and drawing.
+- **Second round, speed:** `duke-odf` builds its own XML tree with namespaces resolved to an enum, in place of a general-purpose tree; entries are inflated with `zlib-rs`; style lookups no longer allocate.
+- **Direct model:** until this round an OpenDocument text file was written out as Word markup and parsed again by the DOCX reader. `duke-pages` now builds its document model straight from what `duke-odf` read, with no Word package in between, and moves text and image bytes into the model instead of copying them. In `duke-odf`, the XML tree is built in one scan with no tokenizer in front, styles are stored boxed and by family so that a document with thousands of automatic styles no longer shifts kilobytes per insertion, and one property group can be resolved without the other three. The scored text is unchanged: the new path produced the same letters and digits as the old one on all 756 readable files, and identical output on every presentation and drawing.
 
 ## Corpus
 
@@ -52,7 +56,7 @@ Most public files are regression tests with little text. A reference needs at le
 
 | Parser | Kind | Read | Recall | Precision | F1 | Mean file F1 | Mean ms | Median ms |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **rust-office** | this repository | 418/426 | 0.9987 | 0.9990 | 0.9988 | 0.9761 | 0.380 | 0.085 |
+| **duke-office** | this repository | 418/426 | 0.9987 | 0.9990 | 0.9988 | 0.9761 | 0.380 | 0.085 |
 | odox-core | Rust | 418/426 | 0.9948 | 0.9953 | 0.9951 | 0.9580 | 0.606 | 0.181 |
 | textutil | macOS, command | 426/426 | 0.9924 | 0.9962 | 0.9943 | 0.9606 | 53.4 | 50.9 |
 | omniparse | Rust | 418/426 | 0.9951 | 0.9817 | 0.9883 | 0.9478 | 0.075 | 0.026 |
@@ -80,7 +84,7 @@ Most public files are regression tests with little text. A reference needs at le
 
 | Parser | Kind | Read | Recall | Precision | F1 | Mean file F1 | Mean ms | Median ms |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **rust-office** | this repository | 79/79 | 0.9997 | 0.9998 | 0.9997 | 0.9961 | 0.039 | 0.032 |
+| **duke-office** | this repository | 79/79 | 0.9997 | 0.9998 | 0.9997 | 0.9961 | 0.039 | 0.032 |
 | docling | Rust | 79/79 | 0.9983 | 0.9920 | 0.9952 | 0.9712 | 0.090 | 0.058 |
 | quarb-text-odt | Rust | 79/79 | 0.9952 | 0.9936 | 0.9944 | 0.9583 | 0.020 | 0.012 |
 | tika | Java | 79/79 | 0.9981 | 0.9885 | 0.9933 | 0.9615 | 8.675 | 0.275 |
@@ -93,7 +97,7 @@ Most public files are regression tests with little text. A reference needs at le
 
 | Parser | Kind | Read | Recall | Precision | F1 | Mean file F1 | Mean ms | Median ms |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **rust-office** | this repository | 217/217 | 0.9255 | 0.9469 | 0.9361 | 0.8907 | 0.330 | 0.174 |
+| **duke-office** | this repository | 217/217 | 0.9255 | 0.9469 | 0.9361 | 0.8907 | 0.330 | 0.174 |
 | odox-core | Rust | 217/217 | 0.8104 | 0.9696 | 0.8829 | 0.8279 | 1.037 | 0.549 |
 | odfpy | Python | 213/217 | 0.8116 | 0.9422 | 0.8720 | 0.7785 | 15.8 | 8.846 |
 | docling | Rust | 217/217 | 0.8254 | 0.8982 | 0.8603 | 0.7236 | 0.545 | 0.281 |
@@ -117,7 +121,7 @@ What is still missing is mostly not recoverable from the file or is a matter of 
 | Parser | Kind | Read | Recall | Precision | F1 | Mean file F1 | Mean ms | Median ms |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | tika | Java | 22/22 | 0.9633 | 0.9513 | 0.9573 | 0.9112 | 4.043 | 0.225 |
-| **rust-office** | this repository | 22/22 | 0.9633 | 0.9513 | 0.9573 | 0.9112 | 0.064 | 0.008 |
+| **duke-office** | this repository | 22/22 | 0.9633 | 0.9513 | 0.9573 | 0.9112 | 0.064 | 0.008 |
 | docling | Rust | 22/22 | 0.9553 | 0.9478 | 0.9515 | 0.7680 | 0.155 | 0.025 |
 
 ## Drawings and templates
@@ -126,7 +130,7 @@ What is still missing is mostly not recoverable from the file or is a matter of 
 
 | Parser | Kind | Read | Recall | Precision | F1 | Mean file F1 | Mean ms | Median ms |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **rust-office** | this repository | 10/10 | 0.9134 | 0.9090 | 0.9112 | 0.8163 | — | — |
+| **duke-office** | this repository | 10/10 | 0.9134 | 0.9090 | 0.9112 | 0.8163 | — | — |
 | odfpy | Python | 10/10 | 0.8855 | 0.9385 | 0.9112 | 0.7978 | — | — |
 | tika | Java | 10/10 | 0.9134 | 0.8844 | 0.8987 | 0.7497 | — | — |
 | odfdo | Python | 0/10 | 0.0000 | 0.0000 | 0.0000 | 0.0000 | — | — |
@@ -135,7 +139,7 @@ What is still missing is mostly not recoverable from the file or is a matter of 
 
 | Parser | Kind | Read | Recall | Precision | F1 | Mean file F1 | Mean ms | Median ms |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| **rust-office** | this repository | 2/2 | 0.9837 | 0.9837 | 0.9837 | 0.9837 | 0.324 | 0.324 |
+| **duke-office** | this repository | 2/2 | 0.9837 | 0.9837 | 0.9837 | 0.9837 | 0.324 | 0.324 |
 | markkit | Rust | 2/2 | 0.9837 | 0.9837 | 0.9837 | 0.9837 | 0.292 | 0.292 |
 | anydoc | Rust | 2/2 | 0.9837 | 0.8115 | 0.8894 | 0.8950 | 0.429 | 0.429 |
 | litchi | Rust | 2/2 | 0.9860 | 0.6878 | 0.8103 | 0.8103 | 0.186 | 0.186 |
@@ -157,14 +161,14 @@ Sum of the fastest repeat per phase over the 418 `.odt` files this import reads:
 
 | Phase | First run | Second round | Direct model | Share now |
 | --- | ---: | ---: | ---: | ---: |
-| `rust-odf`: inflate, parse XML, build styles and content | 176 ms | 113 ms | 84 ms | 51% |
+| `duke-odf`: inflate, parse XML, build styles and content | 176 ms | 113 ms | 84 ms | 51% |
 | Write the Word package | 94 ms | 60 ms | — | |
-| `rust-docx`: parse that package into the document model | 96 ms | 87 ms | — | |
-| `rust-docx`: build the document model directly | — | — | 39 ms | 24% |
-| `rust-docx`: extract blocks | 46 ms | 41 ms | 41 ms | 25% |
+| `duke-pages`: parse that package into the document model | 96 ms | 87 ms | — | |
+| `duke-pages`: build the document model directly | — | — | 39 ms | 24% |
+| `duke-pages`: extract blocks | 46 ms | 41 ms | 41 ms | 25% |
 | Total | 412 ms | 301 ms | 164 ms | |
 
-Building the model directly takes 39 ms where writing and re-parsing Word markup took 147 ms. That phase includes the identity hash of the file and the block identifiers. Block extraction is the code the DOCX path uses and was not changed. For the 217 `.odp` files the total went from 145 ms to 88 ms to 72 ms, of which `rust-odf` is 63 ms: a presentation's `styles.xml` is large and the slide adapter is thin.
+Building the model directly takes 39 ms where writing and re-parsing Word markup took 147 ms. That phase includes the identity hash of the file and the block identifiers. Block extraction is the code the DOCX path uses and was not changed. For the 217 `.odp` files the total went from 145 ms to 88 ms to 72 ms, of which `duke-odf` is 63 ms: a presentation's `styles.xml` is large and the slide adapter is thin.
 
 Two large files account for 54% of the `.odt` total, and every parser is slow on them: a 350-page specification that is almost entirely tables, and a malformed file with 20,000 automatic styles and links nested ten deep. Without them this import's mean is 0.178 ms and its median 0.085 ms, against 0.272 / 0.132 for `docling`, 0.319 / 0.148 for `anydoc`, 0.366 / 0.180 for `odox-core`, 0.199 / 0.116 for `markkit` and 0.121 / 0.063 for `litchi`.
 
@@ -204,3 +208,5 @@ For an ordinary document the time is now mostly reading: building the XML tree i
 | textutil | macOS built-in | odt |
 
 Build notes: `kreuzberg` needs `zip` pinned to 8.6.0, `transmutation` needs `quick-xml`'s `serialize` feature, `dotext` needs `zip`'s `deflate` feature, `litchi` does not compile with only its `odf` feature, and `quarb-text-odt` needs Rust 1.99. `okbase-convert` wraps `anydoc` and was not run separately. `shiva`, `office_oxide` and `undoc` do not read OpenDocument text or presentations.
+
+The [automatic-layout and direct-extraction follow-up](opendocument-layout-extraction-20261113.md) records the next frozen-candidate comparison and its limitations.

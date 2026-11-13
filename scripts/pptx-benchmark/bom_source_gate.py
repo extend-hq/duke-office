@@ -64,10 +64,10 @@ def main():
     with destination.open('w', buffering=1) as stream:
         for index, row in enumerate(rows):
             assert hashlib.sha256(Path(row['path']).read_bytes()).hexdigest() == row['sha256']
-            current = invoke(candidate, 'rust-pptx', row, run / (row['id'] + '.compact.json.gz'), 0)
+            current = invoke(candidate, 'duke-slides', row, run / (row['id'] + '.compact.json.gz'), 0)
             old = previous.get(row['id'])
             if old is None:
-                old = invoke(baseline, 'rust-pptx', row, run / 'baseline.compact.json.gz', 0)
+                old = invoke(baseline, 'duke-slides', row, run / 'baseline.compact.json.gz', 0)
             exact = fields(current) == fields(old)
             hashes = old.get('artwork_hashes', []) if exact else []
             issues, parts, prefixes = [], [], []

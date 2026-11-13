@@ -36,7 +36,7 @@ def main():
             assert number['field']['type'] == 'A\rB\tC'
         if name == 'foreign-run-attribute':
             assert number['fontSizePt'] == 17
-        result = compact(run / 'candidate', 'rust-pptx', row, target / (name + '.compact.json.gz'), 0); result.update(id=name, artwork_hashes=artwork_hashes(document)); records.append(result)
+        result = compact(run / 'candidate', 'duke-slides', row, target / (name + '.compact.json.gz'), 0); result.update(id=name, artwork_hashes=artwork_hashes(document)); records.append(result)
         receipts.append(dict(id=name, input_sha256=row['sha256'], counts=counts, passed=True)); print(name, 'passed', flush=True)
     (target / 'manifest.json').write_text(json.dumps(rows, indent=2)); destination = target / 'records.jsonl'; destination.write_text(''.join(json.dumps(r) + '\n' for r in records))
     summary = dict(total=len(receipts), passed=len(receipts), receipts=receipts, records_sha256=hashlib.sha256(destination.read_bytes()).hexdigest(), candidate_sha256=hashlib.sha256((run / 'candidate').read_bytes()).hexdigest(), baseline_sha256=hashlib.sha256((OUT / 'experiments/fields2/candidate').read_bytes()).hexdigest(), harness_sha256=hashlib.sha256(__import__('pathlib').Path(__file__).read_bytes()).hexdigest(), scope='Full-model equivalence plus namespace-aware source checks at borrowed-tree eligibility boundaries.')

@@ -95,10 +95,10 @@ def main():
         raise SystemExit('Input identity changed.')
 
     def check(row):
-        current = invoke(binary, 'rust-pptx', row, run / (row['id'] + '.compact.json.gz'), 0)
+        current = invoke(binary, 'duke-slides', row, run / (row['id'] + '.compact.json.gz'), 0)
         previous = old.get(row['id'])
         if previous is None:
-            previous = invoke(baseline, 'rust-pptx', row, run / (row['id'] + '.baseline.compact.json.gz'), 0)
+            previous = invoke(baseline, 'duke-slides', row, run / (row['id'] + '.baseline.compact.json.gz'), 0)
         fields = lambda record: (record['status'], record.get('full_sha256'), record.get('error'))
         exact = fields(current) == fields(previous)
         issues, changes = [], []
@@ -121,7 +121,7 @@ def main():
             stream.write(json.dumps(record) + '\n')
             if not record['passed']: print('MISMATCH', record['id'], record['issues'][:10], flush=True)
             if index % 50 == 0: print(index, len(rows), flush=True)
-    summary = dict(total=len(records), passed=sum(r['passed'] for r in records), exact=sum(r['exact'] for r in records), changed_charts=sum(len(r['changed_charts']) for r in records), baseline_label=args.baseline_label, baseline_sha256=proof['candidate_sha256'], candidate_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(), failures=[r['id'] for r in records if not r['passed']], scope='All non-SVG model fields remain exact; changed grouped-chart SVGs must use positive finite viewport dimensions derived from the unchanged group frames.', source_sha256={str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for folder in ['rust-pptx', 'rust-office-art', 'rust-office-charts'] for p in (ROOT / 'crates' / folder).rglob('*.rs')})
+    summary = dict(total=len(records), passed=sum(r['passed'] for r in records), exact=sum(r['exact'] for r in records), changed_charts=sum(len(r['changed_charts']) for r in records), baseline_label=args.baseline_label, baseline_sha256=proof['candidate_sha256'], candidate_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(), failures=[r['id'] for r in records if not r['passed']], scope='All non-SVG model fields remain exact; changed grouped-chart SVGs must use positive finite viewport dimensions derived from the unchanged group frames.', source_sha256={str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for folder in ['duke-slides', 'duke-office-art', 'duke-office-charts'] for p in (ROOT / 'crates' / folder).rglob('*.rs')})
     (run / 'semantic-summary.json').write_text(json.dumps(summary, indent=2))
     print(json.dumps({key: value for key, value in summary.items() if key != 'source_sha256'}))
     if summary['passed'] != summary['total']: raise SystemExit(1)

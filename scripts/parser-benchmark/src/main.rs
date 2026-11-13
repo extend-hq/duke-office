@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 mod compact;
 
 enum Parsed {
-    Core(rust_docx::DocModel, rust_docx::StructuredDocument),
+    Core(duke_pages::DocModel, duke_pages::StructuredDocument),
     Rs(docx_rs::Docx),
     Oxide(office_oxide::ir::DocumentIR),
     Undoc(undoc::Document),
@@ -15,12 +15,12 @@ enum Parsed {
 fn parse(engine: &str, bytes: &Arc<[u8]>, format: &str) -> Result<(Parsed, [f64; 2]), String> {
     let start = Instant::now();
     match engine {
-        "rust-docx" | "docx-core" => {
-            let package = rust_docx::parse_document_bytes(bytes)?;
-            let model = rust_docx::build_doc_model(&package);
+        "duke-pages" | "docx-core" => {
+            let package = duke_pages::parse_document_bytes(bytes)?;
+            let model = duke_pages::build_doc_model(&package);
             let parse_ms = start.elapsed().as_secs_f64() * 1000.0;
             let projection_start = Instant::now();
-            let blocks = rust_docx::extract_document_blocks(&model);
+            let blocks = duke_pages::extract_document_blocks(&model);
             let project_ms = projection_start.elapsed().as_secs_f64() * 1000.0;
             Ok((Parsed::Core(model, blocks), [parse_ms, project_ms]))
         }

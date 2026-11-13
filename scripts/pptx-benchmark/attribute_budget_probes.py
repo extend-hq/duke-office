@@ -42,8 +42,8 @@ def main():
                 info.compress_type = zipfile.ZIP_DEFLATED
                 archive.writestr(info, data, compresslevel=1)
         row = dict(path=str(path))
-        old = invoke(baseline, 'rust-pptx', row, destination / 'baseline.json.gz', 0)
-        new = invoke(candidate, 'rust-pptx', row, destination / 'candidate.json.gz', 0)
+        old = invoke(baseline, 'duke-slides', row, destination / 'baseline.json.gz', 0)
+        new = invoke(candidate, 'duke-slides', row, destination / 'candidate.json.gz', 0)
         assert fields(old) == fields(new), name
         assert old['status'] == 'ok' if expected == 'ok' else expected in old.get('error', ''), name
         records.append(dict(name=name, input_sha256=hashlib.sha256(path.read_bytes()).hexdigest(), expected=expected, baseline=old, candidate=new))

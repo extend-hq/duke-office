@@ -16,6 +16,23 @@ pdftocairo -png -r 96 output/odf-visual-run/reference/visual.pdf output/odf-visu
 
 The default matrix has 15 art probes and 11 chart probes, repeated across packaged and flat text, presentation, drawing, and spreadsheet containers. `--supplemental` generates a separate six-case matrix for transforms, opacity, logical coordinates and lazy equations. Normalize Poppler page suffixes to two digits for matrices with fewer than ten pages. Keep blank native pages in the report; they are flagged rather than silently discarded.
 
+For an additional automatic radar-layout matrix:
+
+```sh
+python3 scripts/odf-visual/generate_auto_layout.py output/odf-visual-run/visual.odp output/odf-auto-layout-run
+```
+
+This creates eight cases varying explicit axis/legend font sizes, category count, label length, legend placement and title presence. Export and capture both parser versions using the same procedure. These probes exercise automatic bounds; preserve corpus cases with explicit inner bounds as a separate regression set.
+
+Expand that presentation into separate font/canvas and title matrices:
+
+```sh
+python3 scripts/odf-visual/generate_font_layout.py output/odf-auto-layout-run/visual.odp output/odf-font-layout-run
+python3 scripts/odf-visual/generate_font_layout.py output/odf-auto-layout-run/visual.odp output/odf-title-layout-run --titles-only
+```
+
+The first matrix has 16 cases covering four font families, three sizes, bold and italic styles, and long labels on four canvas sizes. The second has four cases covering default title spacing at two heights and wrapping at two explicit font sizes. Generate a new reference directory for each matrix and seal it before comparing subsequent candidates. Font fallback remains part of the browser result; font metrics alone do not guarantee matching glyph shapes.
+
 To isolate real embedded charts from a corpus without using saved preview images:
 
 ```sh

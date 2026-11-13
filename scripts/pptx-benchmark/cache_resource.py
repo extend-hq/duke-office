@@ -41,7 +41,7 @@ def main():
             rng.shuffle(order)
             for label in order:
                 process = subprocess.run(['/usr/bin/time', '-l', str(binaries[label]),
-                                          'rust-pptx', row['path'], '-', '0'],
+                                          'duke-slides', row['path'], '-', '0'],
                                          capture_output=True, text=True, timeout=120)
                 stem = output / f"{row['id']}.{repeat}.{label}"
                 stem.with_suffix(stem.suffix + '.stderr').write_text(process.stderr)

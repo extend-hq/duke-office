@@ -47,7 +47,7 @@ def main():
             assert value['text'] == expected_text and value['field']['type'] == expected_type, value
             assert value['field']['hasCachedText'] == (variant != 'missing')
             assert value['field']['sourcePart'] == ('ppt/diagrams/drawing.xml' if materialized else 'ppt/diagrams/data.xml')
-            result = compact(run / 'candidate', 'rust-pptx', row, target / (name + '.compact.json.gz'), 0)
+            result = compact(run / 'candidate', 'duke-slides', row, target / (name + '.compact.json.gz'), 0)
             result.update(id=name, artwork_hashes=artwork_hashes(document)); records.append(result)
             receipts.append(dict(id=name, input_sha256=row['sha256'], field_location=location, expected_text=expected_text, expected_type=expected_type, counts=counts, passed=True)); print(name, 'passed', flush=True)
     (target / 'manifest.json').write_text(json.dumps(rows, indent=2))

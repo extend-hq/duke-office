@@ -1,10 +1,10 @@
 # Parser benchmark and optimization harness
 
-The standalone Cargo workspace pins docx-rs 0.4.22, office_oxide 0.1.15, and undoc 0.27.1. It pins the published rust-docx from [rust-office](https://github.com/extend-hq/rust-office). Release measurements use opt-level 3, thin LTO, and one codegen unit for every parser. The production WASM build uses opt-level 3 and wasm-opt -O3; record its compressed size alongside speed.
+The standalone Cargo workspace pins docx-rs 0.4.22, office_oxide 0.1.15, and undoc 0.27.1. It uses the version-pinned local duke-pages crate from this workspace. Release measurements use opt-level 3, thin LTO, and one codegen unit for every parser. The production WASM build uses opt-level 3 and wasm-opt -O3; record its compressed size alongside speed.
 
-The Rust package and import names are `rust-docx` and `rust_docx`. Historical benchmark records and the comparison scripts retain `docx-core` as the engine identifier so existing measurements remain comparable. The native runner accepts both `rust-docx` and `docx-core`; both select the same parser. Historical chart labels using `docx-core` refer to this parser before its rename.
+The Rust package and import names are `duke-pages` and `duke_pages`. Historical benchmark records and the comparison scripts retain `docx-core` as the engine identifier so existing measurements remain comparable. The native runner accepts both `duke-pages` and `docx-core`; both select the same parser. Historical chart labels using `docx-core` refer to this parser before its rename.
 
-Install Python dependencies from `requirements.txt` into `.python-deps`, then build with `cargo build --release --locked --manifest-path scripts/parser-benchmark/Cargo.toml`. Run commands from the Rust Office repository root. Generated results and binary snapshots belong under `output/`. The [published benchmark report](../../docs/docx-benchmarks.md) and [Word chart comparisons](../../docs/chart-comparisons.md) retain the original measurement dates, revisions, and limitations.
+Install Python dependencies from `requirements.txt` into `.python-deps`, then build with `cargo build --release --locked --manifest-path scripts/parser-benchmark/Cargo.toml`. Run commands from the Duke Office repository root. Generated results and binary snapshots belong under `output/`. The [published benchmark report](../../docs/docx-benchmarks.md) and [Word chart comparisons](../../docs/chart-comparisons.md) retain the original measurement dates, revisions, and limitations.
 
 Inventory an explicitly supplied input directory with `python3 scripts/parser-benchmark/corpus.py --roots /path/to/local/corpus`. Use only documents you are authorized to process and redistribute; input documents and generated reports are not included in the repository. Legacy DOC reference generation requires LibreOffice (`soffice`) on PATH.
 
@@ -40,7 +40,7 @@ For parser rewrites, use `strict_parity.py` with `--baseline`, `--binary`, `--ou
 Build the bindings in this repository before running the WASM helpers:
 
 ```sh
-wasm-pack build crates/rust-docx-wasm --target web --release --out-dir ../../output/parser-wasm --out-name docx_wasm
+wasm-pack build crates/duke-pages-wasm --target web --release --out-dir ../../output/parser-wasm --out-name docx_wasm
 ```
 
 Save the baseline WASM binary before rebuilding a candidate. `wasm_compare.py` accepts `--baseline`, `--candidate`, and `--glue`; the candidate and glue default to `output/parser-wasm/docx_wasm_bg.wasm` and `output/parser-wasm/docx_wasm.js`. `wasm_parity.py` accepts the same `--glue` option and reads the saved `baseline.wasm` and `final.wasm` in its run directory. Both binaries must be compatible with the selected glue. To compare viewer builds, pass explicit artifact paths from the React DOCX checkout. Native harnesses remain pinned to their declared published parser version; the WASM build uses the checked-out crate sources. Record both source identities when comparing them.

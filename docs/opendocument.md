@@ -1,19 +1,19 @@
 # OpenDocument input
 
-`rust-docx` and `rust-pptx` read OpenDocument files into the same models they build for Word and PowerPoint files. The bytes decide the format.
+`duke-pages` and `duke-slides` read OpenDocument files into the same models they build for Word and PowerPoint files. The bytes decide the format.
 
 ## How it is put together
 
 ```text
-            rust-odf  (package, styles, text, tables, drawing objects)
+            duke-odf  (package, styles, text, tables, drawing objects)
             /      \
-   rust-docx        rust-pptx
+   duke-pages        duke-slides
    DocModel         PresentationDocument
 ```
 
-- **`rust-odf`** opens the file (ZIP package or flat XML), resolves style inheritance and reads content into owned values, including the sub-documents of embedded charts, text documents and spreadsheets. It knows nothing about Word or PowerPoint. Its XML tree is its own: OpenDocument uses a fixed set of namespaces, so names are resolved to an enum while the tree is built.
-- **`rust-docx`** builds its document model (`DocModel`) directly from what `rust-odf` read. OpenDocument and Word are separate paths that meet at the model: no Word package or Word markup is produced on the way, and an OpenDocument file is never converted to DOCX in order to be parsed. Structured blocks, bundles and review run on the model unchanged.
-- **`rust-pptx`** builds the same `PresentationDocument` the PowerPoint readers produce. Blocks, bundles, export and the viewer model run unchanged.
+- **`duke-odf`** opens the file (ZIP package or flat XML), resolves style inheritance and reads content into owned values, including the sub-documents of embedded charts, text documents and spreadsheets. It knows nothing about Word or PowerPoint. Its XML tree is its own: OpenDocument uses a fixed set of namespaces, so names are resolved to an enum while the tree is built.
+- **`duke-pages`** builds its document model (`DocModel`) directly from what `duke-odf` read. OpenDocument and Word are separate paths that meet at the model: no Word package or Word markup is produced on the way, and an OpenDocument file is never converted to DOCX in order to be parsed. Structured blocks, bundles and review run on the model unchanged.
+- **`duke-slides`** builds the same `PresentationDocument` the PowerPoint readers produce. Blocks, bundles, export and the viewer model run unchanged.
 
 Because both target the existing models, a viewer or host that already consumes those models needs little new code. The exceptions for text documents are listed under [Text documents](#text-documents).
 
@@ -21,7 +21,7 @@ Because both target the existing models, a viewer or host that already consumes 
 
 | Function | OpenDocument text |
 | --- | --- |
-| `rust_docx::parse_odt(bytes)` | The model, built directly. |
+| `duke_pages::parse_odt(bytes)` | The model, built directly. |
 | `parse_document_model`, `parse_document_model_with_options` | The model, for every supported format: DOCX and `.doc` go through their Word package, OpenDocument does not. |
 | `parse_document_blocks`, `parse_document_blocks_with_options`, `parse_document_blocks_with_revisions`, `parse_document_bundle` | Blocks, as for Word files. |
 | WebAssembly `build_doc_model_from_bytes` | The model, with an empty package beside it. |
@@ -33,22 +33,22 @@ Detection reads the `mimetype` entry, or the `office:mimetype` attribute of a fl
 
 | Media type (`application/vnd.oasis.opendocument.` + ) | Extension | Parser |
 | --- | --- | --- |
-| `text` | `.odt` | `rust-docx` |
-| `text-template` | `.ott` | `rust-docx` |
-| `text-master` | `.odm` | `rust-docx` |
-| `text-master-template` | `.otm` | `rust-docx` |
-| `text-web` | `.oth` | `rust-docx` |
-| `text-flat-xml` | `.fodt` | `rust-docx` |
-| `presentation` | `.odp` | `rust-pptx`, format `odp` |
-| `presentation-template` | `.otp` | `rust-pptx`, format `odp` |
-| `presentation-flat-xml` | `.fodp` | `rust-pptx`, format `odp` |
-| `graphics` | `.odg` | `rust-pptx`, format `odg` |
-| `graphics-template` | `.otg` | `rust-pptx`, format `odg` |
-| `graphics-flat-xml` | `.fodg` | `rust-pptx`, format `odg` |
+| `text` | `.odt` | `duke-pages` |
+| `text-template` | `.ott` | `duke-pages` |
+| `text-master` | `.odm` | `duke-pages` |
+| `text-master-template` | `.otm` | `duke-pages` |
+| `text-web` | `.oth` | `duke-pages` |
+| `text-flat-xml` | `.fodt` | `duke-pages` |
+| `presentation` | `.odp` | `duke-slides`, format `odp` |
+| `presentation-template` | `.otp` | `duke-slides`, format `odp` |
+| `presentation-flat-xml` | `.fodp` | `duke-slides`, format `odp` |
+| `graphics` | `.odg` | `duke-slides`, format `odg` |
+| `graphics-template` | `.otg` | `duke-slides`, format `odg` |
+| `graphics-flat-xml` | `.fodg` | `duke-slides`, format `odg` |
 
-`rust-odf` also recognises spreadsheets (`.ods`, `.ots`, `.fods`) and reads their tables with repeat counts intact, and it reads chart documents (`.odc`, `.otc`) into a title, categories and series. No parser in this repository accepts either as a standalone file. Formula, image and database documents are identified by `sniff` and have no body model yet.
+`duke-odf` also recognises spreadsheets (`.ods`, `.ots`, `.fods`) and reads their tables with repeat counts intact, and it reads chart documents (`.odc`, `.otc`) into a title, categories and series. No parser in this repository accepts either as a standalone file. Formula, image and database documents are identified by `sniff` and have no body model yet.
 
-Every `rust-docx` entry point returns an error naming the type when given an OpenDocument file that is not a text document. `rust_pptx::detect_format` returns `UnsupportedFormat` for an OpenDocument file that is neither a presentation nor a drawing. Office Open XML and other ZIP formats are never mistaken for OpenDocument: a package whose first entry is `[Content_Types].xml` is rejected without reading the central directory.
+Every `duke-pages` entry point returns an error naming the type when given an OpenDocument file that is not a text document. `duke_slides::detect_format` returns `UnsupportedFormat` for an OpenDocument file that is neither a presentation nor a drawing. Office Open XML and other ZIP formats are never mistaken for OpenDocument: a package whose first entry is `[Content_Types].xml` is rejected without reading the central directory.
 
 Encrypted packages, ZIP64 packages and the pre-OpenDocument OpenOffice.org 1.x formats (`.sxw`, `.sxi`) are rejected.
 
@@ -95,7 +95,7 @@ Shapes carry typed geometry, fill and line, as legacy `.ppt` shapes do; `shapeSv
 
 ## Limits
 
-`rust-odf::Limits` bounds input size, ZIP entry count, per-entry and total inflated size, XML nodes per part, content nesting depth and content element count. `rust-pptx` maps its `ParseLimits` onto them. Table repeat counts are stored as counts by `rust-odf` and expanded by the adapters under their own caps, so a few bytes cannot declare millions of cells.
+`duke-odf::Limits` bounds input size, ZIP entry count, per-entry and total inflated size, XML nodes per part, content nesting depth and content element count. `duke-slides` maps its `ParseLimits` onto them. Table repeat counts are stored as counts by `duke-odf` and expanded by the adapters under their own caps, so a few bytes cannot declare millions of cells.
 
 ## Validation
 
@@ -105,7 +105,7 @@ November 12, 2026, LibreOffice 26.2 as the converter. These are import-parity ch
 - 30 PowerPoint decks converted to `.odp`: all parsed. Slide counts matched; text similarity was 98.1% to 100% (mean 99.9%). Shape, group, image and table node counts matched; 8 charts and 1 media object became `unknown` nodes.
 - A `.fodt` and a `.fodp` produced the same blocks as their packaged forms.
 - The text checks above were made on the first version of the text import, which went through a Word package. The direct-model import that replaced it produced the same letters and digits on all 500 readable text files of the benchmark corpus, which include these conversions; the only differences were line breaks at page breaks and after tables that end a cell.
-- 350 public test files from the LibreOffice, Apache Tika and ODF Toolkit repositories (173 text, 95 presentation, 16 drawing, 62 spreadsheet, 4 chart and formula): 346 were read by `rust-odf`, and every text, presentation and drawing file among them also converted through its adapter. The other 4 are three encrypted files and one deliberately invalid ZIP, all rejected with the expected error. This is a no-failure check; the content of these files was not compared against a reference.
+- 350 public test files from the LibreOffice, Apache Tika and ODF Toolkit repositories (173 text, 95 presentation, 16 drawing, 62 spreadsheet, 4 chart and formula): 346 were read by `duke-odf`, and every text, presentation and drawing file among them also converted through its adapter. The other 4 are three encrypted files and one deliberately invalid ZIP, all rejected with the expected error. This is a no-failure check; the content of these files was not compared against a reference.
 
 A comparison with other Rust crates and general-purpose parsers on 764 files, with accuracy and timings, is in [OpenDocument benchmarks](opendocument-benchmarks.md).
 

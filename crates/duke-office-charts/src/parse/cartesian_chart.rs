@@ -1,0 +1,2472 @@
+//! Two-dimensional plots with category or numeric axes.
+#[path = "cartesian_categories.rs"]
+mod categories;
+#[path = "cartesian_error_bars.rs"]
+mod error_bars;
+#[path = "cartesian_marks.rs"]
+mod marks;
+#[path = "cartesian_table.rs"]
+mod table;
+#[path = "cartesian_trendlines.rs"]
+mod trendlines;
+pub(super) use marks::DataLabels;
+
+use super::chart_colors::ChartColors;
+use super::chart_svg::{
+    font_family, font_size, line, number, text_props, text_width, text_width_for, title_lines,
+    title_position, val,
+};
+use super::util::escape_xml_text;
+use crate::chart::{chart_node, child, ChartData, ChartSeries};
+use roxmltree::Node;
+use std::borrow::Cow;
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fmt::Write;
+
+fn truth(value: &str) -> bool {
+    matches!(value, "true" | "1" | "on")
+}
+
+fn flag(node: Option<Node>, key: &str, default: bool) -> bool {
+    node.and_then(|n| child(n, key))
+        .map_or(default, |n| n.attribute("val").is_none_or(truth))
+}
+
+#[derive(Clone, Copy)]
+struct Extent {
+    lo: f64,
+    hi: f64,
+}
+impl Default for Extent {
+    fn default() -> Self {
+        Self {
+            lo: f64::INFINITY,
+            hi: f64::NEG_INFINITY,
+        }
+    }
+}
+impl Extent {
+    fn record(&mut self, n: f64) {
+        if n.is_finite() {
+            self.lo = self.lo.min(n);
+            self.hi = self.hi.max(n);
+        }
+    }
+    fn merge(&mut self, other: Self) {
+        self.record(other.lo);
+        self.record(other.hi);
+    }
+}
+
+#[derive(Clone, Copy)]
+struct Scale {
+    low: f64,
+    high: f64,
+    unit: f64,
+    multiplier: f64,
+    log: Option<f64>,
+    reversed: bool,
+    general_format: bool,
+}
+impl Scale {
+    fn new(
+        range: Extent,
+        axis: Option<Node>,
+        max_intervals: f64,
+        zero_baseline: bool,
+        percent: bool,
+        spreadsheet: bool,
+    ) -> Self {
+        Self::with_defaults(
+            range,
+            axis,
+            max_intervals,
+            zero_baseline,
+            percent,
+            spreadsheet,
+            false,
+        )
+    }
+    fn with_defaults(
+        range: Extent,
+        axis: Option<Node>,
+        max_intervals: f64,
+        zero_baseline: bool,
+        percent: bool,
+        spreadsheet: bool,
+        opendocument: bool,
+    ) -> Self {
+        let scale = axis.and_then(|n| child(n, "scaling"));
+        let min = number(val(scale, "min"));
+        let max = number(val(scale, "max"));
+        let log = number(val(scale, "logBase")).filter(|v| (2. ..=1000.).contains(v));
+        let reversed = val(scale, "orientation") == Some("maxMin");
+        let general_format = spreadsheet
+            && range.lo > range.hi
+            && axis
+                .and_then(|n| child(n, "numFmt"))
+                .and_then(|n| n.attribute("sourceLinked"))
+                .is_some_and(truth);
+        if let Some(base) = log {
+            let upper = max.filter(|v| *v > 0.).unwrap_or(range.hi.max(base));
+            let lower =
+                min.filter(|v| *v > 0.)
+                    .unwrap_or(if range.lo > 0. { range.lo } else { 1. });
+            let low = if min.is_some() {
+                lower.log(base)
+            } else {
+                lower.log(base).floor()
+            };
+            let high = if max.is_some() {
+                upper.log(base)
+            } else {
+                upper.log(base).ceil()
+            };
+            return Self {
+                low,
+                high: if high > low { high } else { low + 1. },
+                unit: 1.,
+                multiplier: 1.,
+                log,
+                reversed,
+                general_format,
+            };
+        }
+        let empty = range.lo > range.hi;
+        let (raw_low, raw_high) = if empty {
+            (0., 1.)
+        } else {
+            (range.lo, range.hi)
+        };
+        let mag = raw_low
+            .abs()
+            .max(raw_high.abs())
+            .max(min.unwrap_or(0.).abs())
+            .max(max.unwrap_or(0.).abs());
+        let multiplier = if mag > 0. {
+            10f64.powf(mag.log10().floor().clamp(-308., 308.))
+        } else {
+            1.
+        };
+        let (mut lo, mut hi) = (raw_low / multiplier, raw_high / multiplier);
+        if lo == 0. && hi == 0. {
+            hi = 1.;
+        }
+        let narrow_positive =
+            spreadsheet && !percent && lo > 0. && hi > lo && lo / hi > 5. / 6. + 1e-12;
+        if narrow_positive {
+            lo -= (hi - lo) * 0.5;
+        } else if zero_baseline || lo <= hi * 0.5 {
+            lo = lo.min(0.);
+        }
+        if zero_baseline || hi >= lo * 0.5 {
+            hi = hi.max(0.);
+        }
+        let span = (hi - lo).abs().max(hi.abs() * 0.1).max(1e-300);
+        if spreadsheet && !percent {
+            if lo != 0. {
+                lo -= span * 0.05;
+            }
+            if hi != 0. {
+                hi += span * 0.05;
+            }
+        }
+        let intervals = if spreadsheet || opendocument {
+            max_intervals.ceil().clamp(1., 10.)
+        } else {
+            (max_intervals * 1.01).floor().clamp(1., 9.)
+        };
+        let step = ((max.map_or(hi, |n| n / multiplier) - min.map_or(lo, |n| n / multiplier))
+            .abs()
+            / intervals)
+            .max(span / 1000.);
+        let decade = 10f64.powf(step.log10().floor());
+        let mut unit = number(val(axis, "majorUnit"))
+            .map(|v| v / multiplier)
+            .filter(|v| v.is_finite() && *v > 0.)
+            .unwrap_or_else(|| {
+                [1., 2., 5., 10.]
+                    .into_iter()
+                    .find(|v| *v * decade >= step * 0.995)
+                    .unwrap_or(10.)
+                    * decade
+            });
+        if !spreadsheet && !percent && !empty {
+            if lo != 0. {
+                lo -= span * 0.05;
+            }
+            if hi != 0. {
+                hi += span * 0.05;
+            }
+        }
+        if opendocument && number(val(axis, "majorUnit")).filter(|v| *v > 0.).is_none() {
+            let power = 10f64.powf(unit.log10().floor());
+            if let Some(step) = [1., 2., 5., 10., 20., 50.]
+                .into_iter()
+                .map(|n| n * power)
+                .filter(|n| *n >= unit * (1. - 1e-10))
+                .find(|step| {
+                    let a =
+                        min.map_or_else(|| (lo / step + 1e-10).floor() * step, |n| n / multiplier);
+                    let b =
+                        max.map_or_else(|| (hi / step - 1e-10).ceil() * step, |n| n / multiplier);
+                    (b - a) / step <= intervals + 1e-9
+                })
+            {
+                unit = step;
+            }
+        }
+        let low = min.map_or_else(|| (lo / unit + 1e-10).floor() * unit, |n| n / multiplier);
+        let high = max.map_or_else(|| (hi / unit - 1e-10).ceil() * unit, |n| n / multiplier);
+        let (low, high, unit) =
+            if low.is_finite() && high.is_finite() && unit.is_finite() && unit > 0. && high > low {
+                (low, high, unit)
+            } else {
+                (0., 1., 0.2)
+            };
+        Self {
+            low,
+            high,
+            unit,
+            multiplier,
+            log,
+            reversed,
+            general_format,
+        }
+    }
+    fn label(self, value: f64, axis: Option<Node>, percent: bool) -> String {
+        label_number(value, axis.filter(|_| !self.general_format), percent)
+    }
+    fn normalized(self, v: f64) -> f64 {
+        if let Some(b) = self.log {
+            if v <= 0. {
+                return self.low;
+            }
+            v.log(b)
+        } else {
+            v / self.multiplier
+        }
+    }
+    fn fraction(self, v: f64) -> f64 {
+        let f = ((self.normalized(v) - self.low) / (self.high - self.low)).clamp(-1e6, 1e6);
+        if self.reversed {
+            1. - f
+        } else {
+            f
+        }
+    }
+    fn original(self, v: f64) -> f64 {
+        self.log.map_or(v * self.multiplier, |b| b.powf(v))
+    }
+    fn clamp(self, v: f64) -> f64 {
+        self.original(self.normalized(v).clamp(self.low, self.high))
+    }
+    fn ticks(self) -> impl Iterator<Item = f64> {
+        let offset = (self.low / self.unit - 1e-9).ceil() * self.unit;
+        (0..=150)
+            .map(move |i| offset + f64::from(i) * self.unit)
+            .take_while(move |v| *v <= self.high + self.unit * 1e-8)
+            .map(move |v| self.original(v))
+    }
+}
+
+struct Group<'a> {
+    node: Node<'a, 'a>,
+    start: usize,
+    end: usize,
+    category: Option<Node<'a, 'a>>,
+    value: Option<Node<'a, 'a>>,
+    scatter: bool,
+    horizontal: bool,
+    percent: bool,
+}
+impl<'a> Group<'a> {
+    fn ranges(&self, series: &[ChartSeries], spreadsheet: bool) -> (Extent, Extent) {
+        let mut values = Extent::default();
+        let mut cats = Extent::default();
+        let stacked = matches!(
+            val(Some(self.node), "grouping"),
+            Some("stacked" | "percentStacked")
+        );
+        let mut sums: BTreeMap<u32, (f64, f64)> = BTreeMap::new();
+        for s in series {
+            for p in &s.points {
+                if let Some(n) = number(p.x.as_deref()) {
+                    cats.record(n);
+                }
+                if let Some(n) = number(if self.scatter {
+                    p.y.as_deref()
+                } else {
+                    p.value.as_deref()
+                }) {
+                    if stacked {
+                        let v = sums.entry(p.index).or_default();
+                        if n < 0. {
+                            v.0 += n;
+                        } else {
+                            v.1 += n;
+                        }
+                    } else {
+                        values.record(n);
+                    }
+                }
+            }
+        }
+        if self.scatter && spreadsheet {
+            for (node, series) in self
+                .node
+                .children()
+                .filter(|n| chart_node(*n, "ser"))
+                .zip(series)
+            {
+                let (x, y) = error_bars::ranges(node, series);
+                cats.merge(x);
+                values.merge(y);
+            }
+        }
+        for (lo, hi) in sums.into_values() {
+            if self.percent && spreadsheet {
+                let total = hi - lo;
+                if total > 0. {
+                    values.record(lo / total);
+                    values.record(hi / total);
+                }
+            } else if self.percent {
+                values.record(if lo < 0. { -1. } else { 0. });
+                values.record(if hi > 0. { 1. } else { 0. });
+            } else {
+                values.record(lo);
+                values.record(hi);
+            }
+        }
+        (cats, values)
+    }
+}
+
+fn cached_point_count(series: Node) -> u32 {
+    series
+        .children()
+        .filter(|n| ["cat", "val", "yVal"].iter().any(|key| chart_node(*n, key)))
+        .flat_map(|channel| channel.descendants())
+        .filter(|n| chart_node(*n, "ptCount"))
+        .filter_map(|n| n.attribute("val")?.parse().ok())
+        .max()
+        .unwrap_or(0)
+}
+
+fn groups<'a>(plot: Node<'a, 'a>, data: &ChartData) -> Option<Vec<Group<'a>>> {
+    let mut out = Vec::new();
+    let axes_by_id: HashMap<_, _> = plot
+        .children()
+        .filter(|n| n.tag_name().name().ends_with("Ax"))
+        .filter_map(|n| Some((val(Some(n), "axId")?, n)))
+        .collect();
+    let mut start = 0;
+    for node in plot
+        .children()
+        .filter(|n| n.is_element() && n.tag_name().name().ends_with("Chart"))
+    {
+        let scatter = chart_node(node, "scatterChart");
+        if !scatter
+            && !["barChart", "lineChart", "areaChart"]
+                .iter()
+                .any(|name| chart_node(node, name))
+        {
+            return None;
+        }
+        let end = start + node.children().filter(|n| chart_node(*n, "ser")).count();
+        let axes: Vec<_> = node
+            .children()
+            .filter(|n| chart_node(*n, "axId"))
+            .filter_map(|n| n.attribute("val"))
+            .filter_map(|id| axes_by_id.get(id).copied())
+            .collect();
+        let category = axes
+            .iter()
+            .find(|a| {
+                if scatter {
+                    matches!(val(Some(**a), "axPos"), Some("b" | "t"))
+                } else {
+                    !chart_node(**a, "valAx")
+                }
+            })
+            .copied()
+            .or_else(|| axes.first().copied());
+        let value = axes
+            .iter()
+            .find(|a| chart_node(**a, "valAx") && Some(**a) != category)
+            .copied();
+        if start < end {
+            out.push(Group {
+                node,
+                start,
+                end,
+                category,
+                value,
+                scatter,
+                horizontal: val(Some(node), "barDir") == Some("bar"),
+                percent: val(Some(node), "grouping") == Some("percentStacked"),
+            });
+        }
+        start = end;
+    }
+    if start != data.series.len() || out.is_empty() {
+        None
+    } else {
+        Some(out)
+    }
+}
+
+fn spreadsheet_scatter_data<'a>(plot: Node, data: &'a ChartData) -> Cow<'a, ChartData> {
+    let mut resolved = Cow::Borrowed(data);
+    for (ordinal, node) in plot
+        .children()
+        .filter(|n| n.tag_name().name().ends_with("Chart"))
+        .flat_map(|n| n.children().filter(|n| chart_node(*n, "ser")))
+        .enumerate()
+    {
+        let Some(series) = data.series.get(ordinal) else {
+            continue;
+        };
+        if node.parent().is_none_or(|n| !chart_node(n, "scatterChart")) {
+            continue;
+        }
+        let x_values = child(node, "xVal");
+        let categorical = x_values.is_none()
+            || x_values.is_some_and(|n| {
+                n.children().any(|n| {
+                    ["strRef", "strLit", "multiLvlStrRef"]
+                        .iter()
+                        .any(|kind| chart_node(n, kind))
+                })
+            });
+        if categorical
+            && series
+                .points
+                .iter()
+                .all(|p| number(p.x.as_deref()).is_none())
+        {
+            for point in &mut resolved.to_mut().series[ordinal].points {
+                point.x = Some((u64::from(point.index) + 1).to_string());
+            }
+        }
+    }
+    resolved
+}
+
+#[derive(Clone, Copy)]
+struct Box2 {
+    left: f64,
+    top: f64,
+    right: f64,
+    bottom: f64,
+}
+impl Box2 {
+    fn width(self) -> f64 {
+        (self.right - self.left).max(1e-6)
+    }
+    fn height(self) -> f64 {
+        (self.bottom - self.top).max(1e-6)
+    }
+}
+
+struct Coords {
+    canvas: (f64, f64),
+    rect: Box2,
+    horizontal: bool,
+    count: f64,
+    between: bool,
+    reversed: bool,
+    values: Scale,
+    x: Option<Scale>,
+}
+impl Coords {
+    fn point(&self, category: f64, value: f64) -> (f64, f64) {
+        let category = if let Some(x) = self.x {
+            x.fraction(category)
+        } else {
+            let p = if self.between {
+                (category + 0.5) / self.count
+            } else if self.count > 1. {
+                category / (self.count - 1.)
+            } else {
+                0.5
+            };
+            if self.reversed {
+                1. - p
+            } else {
+                p
+            }
+        };
+        let v = self.values.fraction(value);
+        let (x, y) = if self.horizontal {
+            (v, category)
+        } else {
+            (category, v)
+        };
+        (
+            self.rect.left + x * self.rect.width(),
+            self.rect.bottom - y * self.rect.height(),
+        )
+    }
+    fn slot_width(&self) -> f64 {
+        (if self.horizontal {
+            self.rect.height()
+        } else {
+            self.rect.width()
+        }) / self.count
+    }
+    fn is_horizontal(&self) -> bool {
+        self.horizontal
+    }
+    fn clamp_value(&self, v: f64) -> f64 {
+        self.values.clamp(v)
+    }
+}
+
+#[cfg(feature = "extended-charts")]
+pub(super) fn scatter_overlay(
+    svg: &mut String,
+    labels: &mut String,
+    scatter: Node,
+    series: &[ChartSeries],
+    first: usize,
+    colors: &ChartColors,
+    bounds: [f64; 4],
+    canvas: (f64, f64),
+    default_face: &str,
+) -> Option<()> {
+    let plot = scatter.parent()?;
+    let chart = plot.parent()?;
+    let axis_ids: Vec<_> = scatter
+        .children()
+        .filter(|n| chart_node(*n, "axId"))
+        .filter_map(|n| n.attribute("val"))
+        .collect();
+    let axes: Vec<_> = plot
+        .children()
+        .filter(|n| {
+            chart_node(*n, "valAx")
+                && val(Some(*n), "axId").is_some_and(|id| axis_ids.contains(&id))
+        })
+        .collect();
+    if axes.len() != 2 || axes.iter().any(|axis| axis_visible(Some(*axis), true)) {
+        return None;
+    }
+    let axis_scale = |positions: [&str; 2]| {
+        let axis = axes
+            .iter()
+            .copied()
+            .find(|axis| val(Some(*axis), "axPos").is_some_and(|p| positions.contains(&p)))?;
+        let scaling = child(axis, "scaling");
+        let min = number(val(scaling, "min"))?;
+        let max = number(val(scaling, "max"))?;
+        (min < max).then(|| {
+            Scale::new(
+                Extent { lo: min, hi: max },
+                Some(axis),
+                5.,
+                false,
+                false,
+                false,
+            )
+        })
+    };
+    let [left, top, width, height] = bounds;
+    let coords = Coords {
+        canvas,
+        rect: Box2 {
+            left,
+            top,
+            right: left + width,
+            bottom: top + height,
+        },
+        values: axis_scale(["l", "r"])?,
+        x: Some(axis_scale(["b", "t"])?),
+        horizontal: false,
+        between: false,
+        reversed: false,
+        count: 1.,
+    };
+    write!(svg, r#"<defs><clipPath id="scatter-plot"><rect x="{left:.2}" y="{top:.2}" width="{width:.2}" height="{height:.2}"/></clipPath></defs><g clip-path="url(#scatter-plot)">"#).unwrap();
+    marks::draw(
+        svg,
+        labels,
+        scatter,
+        series,
+        first,
+        colors,
+        &coords,
+        val(Some(chart), "dispBlanksAs").unwrap_or("gap"),
+        default_face,
+    );
+    svg.push_str("</g>");
+    Some(())
+}
+
+fn axis_visible(n: Option<Node>, visible_by_default: bool) -> bool {
+    n.is_some() && !flag(n, "delete", !visible_by_default)
+}
+fn has_labels(n: Option<Node>, visible_by_default: bool) -> bool {
+    axis_visible(n, visible_by_default) && val(n, "tickLblPos") != Some("none")
+}
+fn label_number(n: f64, axis: Option<Node>, percent: bool) -> String {
+    let format = axis
+        .and_then(|n| child(n, "numFmt"))
+        .and_then(|n| n.attribute("formatCode"))
+        .unwrap_or("");
+    if !format.is_empty() && format != "General" {
+        return super::chart_svg::format_value(n, Some(format));
+    }
+    let percent = percent || format.contains('%');
+    let n = if percent { n * 100. } else { n };
+    if n.abs() > 1e12 || (n != 0. && n.abs() < 1e-6) {
+        return format!("{n:.2e}");
+    }
+    let n = if n.abs() < 1e-12 { 0. } else { n };
+    let s = format!("{n:.8}");
+    let s = s.trim_end_matches('0').trim_end_matches('.');
+    if percent {
+        format!("{s}%")
+    } else {
+        s.to_owned()
+    }
+}
+
+fn text(
+    svg: &mut String,
+    x: f64,
+    y: f64,
+    anchor: &str,
+    size: f64,
+    face: &str,
+    label: &str,
+    bold: bool,
+) {
+    write!(svg,r#"<text x="{x:.2}" y="{y:.2}" text-anchor="{anchor}" font-size="{size:.2}" font-family="{face}"{}>{}</text>"#,if bold {r#" font-weight="bold""#} else {""},escape_xml_text(label)).unwrap();
+}
+
+struct CanvasPaint {
+    background: String,
+    border: String,
+    plot: String,
+    text: String,
+    axis: String,
+    title_size: Option<f64>,
+}
+
+impl CanvasPaint {
+    fn new(root: Node, colors: &ChartColors) -> Self {
+        let style = colors
+            .spreadsheet_defaults
+            .then(|| super::chart_colors::classic_style_id(root))
+            .flatten();
+        let Some(style) = style else {
+            return Self {
+                background: "white".into(),
+                border: "#868686".into(),
+                plot: "white".into(),
+                text: "black".into(),
+                axis: if colors.legacy_defaults() {
+                    "#868686"
+                } else {
+                    "black"
+                }
+                .into(),
+                title_size: None,
+            };
+        };
+        let classic = style % 100;
+        let ink = if classic <= 32 { "dk1" } else { "tx1" };
+        let paper = if classic <= 32 { "lt1" } else { "bg1" };
+        let plot = match classic {
+            33 | 34 => colors.theme_paint("tx1", Some(0.2)),
+            35..=40 => colors.theme_paint(
+                &format!("accent{}", classic - 34),
+                (style >= 101).then_some(0.2),
+            ),
+            41..=48 => colors.theme_paint("tx1", Some(0.95)),
+            _ => colors.theme_paint(paper, None),
+        };
+        let dark = classic >= 41;
+        Self {
+            background: colors.theme_paint(if dark { ink } else { paper }, None),
+            border: if dark {
+                "none".into()
+            } else {
+                colors.theme_paint(ink, Some(0.75))
+            },
+            plot,
+            text: colors.theme_paint(if dark { paper } else { ink }, None),
+            axis: colors.theme_paint(ink, (style >= 101).then_some(0.75)),
+            title_size: Some(24.),
+        }
+    }
+}
+
+fn value_side<'a>(group: &Group<'a>, spreadsheet: bool) -> &'a str {
+    if spreadsheet && !group.scatter && val(group.value, "crosses") == Some("max") {
+        let reversed = val(
+            group.category.and_then(|n| child(n, "scaling")),
+            "orientation",
+        ) == Some("maxMin");
+        return match (group.horizontal, reversed) {
+            (true, false) => "t",
+            (true, true) => "b",
+            (false, false) => "r",
+            (false, true) => "l",
+        };
+    }
+    val(group.value, "axPos").unwrap_or(if group.horizontal { "b" } else { "l" })
+}
+
+fn axis_crossing(axis: Option<Node>, other: Option<Node>, scale: Scale) -> f64 {
+    if let Some(n) = number(val(axis, "crossesAt")) {
+        return scale.clamp(n);
+    }
+    match val(axis, "crosses") {
+        Some("max") => scale.original(scale.high),
+        Some("min") => scale.original(scale.low),
+        Some("autoZero") => scale.clamp(0.),
+        _ if val(other, "axPos") == Some("t") => scale.original(scale.high),
+        _ => scale.clamp(0.),
+    }
+}
+
+fn stroke(node: Option<Node>, colors: &ChartColors, default: &str) -> String {
+    node.and_then(|n| child(n, "spPr"))
+        .and_then(|n| colors.shape_stroke(n))
+        .unwrap_or_else(|| default.into())
+}
+
+fn axis_tick(
+    svg: &mut String,
+    along_x: bool,
+    pos: f64,
+    at: f64,
+    outside: f64,
+    style: &str,
+    length: f64,
+    stroke: &str,
+) {
+    let (a, b) = match style {
+        "in" => (0., -length * outside),
+        "out" => (0., length * outside),
+        "cross" => (-length, length),
+        _ => return,
+    };
+    if along_x {
+        line(svg, pos, at + a, pos, at + b, stroke);
+    } else {
+        line(svg, at + a, pos, at + b, pos, stroke);
+    }
+}
+
+fn axis_title(axis: Option<Node>, legacy: bool) -> Option<String> {
+    let title = child(axis?, "title")?;
+    let Some(tx) = child(title, "tx") else {
+        return legacy.then(|| "Axis Title".to_owned());
+    };
+    let label: String = tx
+        .descendants()
+        .filter(|n| n.is_element() && matches!(n.tag_name().name(), "t" | "v"))
+        .filter_map(|n| n.text())
+        .collect();
+    (!label.is_empty()).then_some(label)
+}
+
+fn category_rotation(
+    group: &Group,
+    labels: &BTreeMap<u32, String>,
+    count: f64,
+    width: f64,
+    size: f64,
+    spreadsheet: bool,
+    opendocument: bool,
+    face: &str,
+) -> f64 {
+    if !spreadsheet || group.horizontal || group.scatter {
+        return 0.;
+    }
+    let body = group
+        .category
+        .and_then(|n| child(n, "txPr"))
+        .and_then(|n| n.children().find(|n| n.tag_name().name() == "bodyPr"));
+    if let Some(angle) = number(body.and_then(|n| n.attribute("rot")))
+        .filter(|n| (-5400000. ..=5400000.).contains(n))
+    {
+        return angle / 60000.;
+    }
+    let label_slot = width / count.max(1.);
+    if opendocument
+        && body.is_some_and(|n| n.attribute("wrap") != Some("none"))
+        && labels.values().any(|s| {
+            s.split_whitespace()
+                .any(|word| text_width_for(word, size, face) > label_slot - size * 0.5)
+        })
+    {
+        return -45.;
+    }
+    if group.category.is_some_and(|n| chart_node(n, "dateAx"))
+        && labels
+            .values()
+            .any(|s| text_width_for(s, size, face) > width / count.max(1.))
+    {
+        -45.
+    } else {
+        0.
+    }
+}
+
+fn category_label_lines(
+    group: &Group,
+    label: &str,
+    size: f64,
+    slot_width: f64,
+    spreadsheet: bool,
+    face: &str,
+) -> Vec<String> {
+    let body = group
+        .category
+        .and_then(|n| child(n, "txPr"))
+        .and_then(|n| n.children().find(|n| n.tag_name().name() == "bodyPr"));
+    if !spreadsheet
+        || group.horizontal
+        || group.scatter
+        || group.category.is_some_and(|n| chart_node(n, "dateAx"))
+        || body.is_some_and(|n| n.attribute("wrap") == Some("none"))
+    {
+        return vec![label.to_owned()];
+    }
+    let skip = number(val(group.category, "tickLblSkip"))
+        .unwrap_or(1.)
+        .max(1.);
+    let width = (slot_width * skip - size * 0.5).max(size);
+    label
+        .split('\n')
+        .flat_map(|line| title_lines(line, size, width, face))
+        .collect()
+}
+
+fn draw_axes(
+    svg: &mut String,
+    labels: &mut String,
+    g: &Group,
+    c: &Coords,
+    cats: &BTreeMap<u32, String>,
+    hierarchy: Option<&categories::Hierarchy>,
+    colors: &ChartColors,
+    axis_color: &str,
+    size: f64,
+    face: &str,
+    draw_category: bool,
+    draw_value: bool,
+) {
+    let r = c.rect;
+    let legacy = colors.legacy_defaults();
+    let visible_by_default = legacy && !colors.spreadsheet_defaults;
+    let major_tick = if colors.spreadsheet_defaults {
+        "none"
+    } else if legacy {
+        "out"
+    } else {
+        "cross"
+    };
+    let minor_tick = if legacy || colors.spreadsheet_defaults {
+        "none"
+    } else {
+        "cross"
+    };
+    let axis_line = |svg: &mut String, horizontal: bool, physical: f64, stroke: &str| {
+        if horizontal {
+            line(svg, r.left, physical, r.right, physical, stroke);
+        } else {
+            line(svg, physical, r.top, physical, r.bottom, stroke);
+        }
+    };
+    let side = value_side(g, colors.spreadsheet_defaults);
+    let v_pos = if let Some(x) = c.x {
+        c.point(axis_crossing(g.value, g.category, x), 0.).0
+    } else if g.horizontal {
+        if side == "t" {
+            r.top
+        } else {
+            r.bottom
+        }
+    } else if side == "r"
+        || (!colors.spreadsheet_defaults && val(g.value, "crosses") == Some("max"))
+    {
+        r.right
+    } else {
+        r.left
+    };
+    let cp = c.point(0., axis_crossing(g.category, g.value, c.values));
+    let c_pos = if g.horizontal { cp.0 } else { cp.1 };
+    if draw_value {
+        let props = (colors.spreadsheet_defaults || colors.opendocument_defaults)
+            .then(|| text_props(g.value, false))
+            .flatten();
+        let size = font_size(props, size);
+        let gap = if colors.opendocument_defaults {
+            super::chart_svg::odf_label_gap(g.value)
+        } else {
+            size * 0.9
+        };
+        let axis_face =
+            props.map(|p| font_family(Some(p), face.split(',').next().unwrap_or("Calibri")));
+        let face = axis_face.as_deref().unwrap_or(face);
+        let label_paint = props.and_then(|p| colors.shape_fill(p));
+        if let Some(paint) = &label_paint {
+            write!(labels, r#"<g fill="{paint}">"#).unwrap();
+        }
+        let grid = g.value.and_then(|n| child(n, "majorGridlines"));
+        let grid_color = stroke(grid, colors, axis_color);
+        let axis_stroke = stroke(g.value, colors, axis_color);
+        let outside = if matches!(side, "t" | "l") { -1. } else { 1. };
+        if axis_visible(g.value, visible_by_default) {
+            let unit = number(val(g.value, "minorUnit"))
+                .filter(|n| *n > 0.)
+                .map(|v| v / c.values.multiplier)
+                .unwrap_or(c.values.unit / 5.);
+            let minor = val(g.value, "minorTickMark").unwrap_or(minor_tick);
+            if minor != "none" && unit.is_finite() && unit > 0. && c.values.log.is_none() {
+                for t in 0..512 {
+                    let v = c.values.low + f64::from(t) * unit;
+                    if v > c.values.high + unit * 1e-8 {
+                        break;
+                    }
+                    let (x, y) = c.point(0., c.values.original(v));
+                    axis_tick(
+                        svg,
+                        g.horizontal,
+                        if g.horizontal { x } else { y },
+                        v_pos,
+                        outside,
+                        minor,
+                        3.2,
+                        &axis_stroke,
+                    );
+                }
+            }
+        }
+        let label_stride = if colors.opendocument_defaults {
+            let mut previous: Option<f64> = None;
+            let mut spacing = f64::INFINITY;
+            let mut extent = size * 1.2;
+            for v in c.values.ticks() {
+                let (x, y) = c.point(0., v);
+                let position = if g.horizontal { x } else { y };
+                if let Some(previous) = previous {
+                    spacing = spacing.min((position - previous).abs());
+                }
+                previous = Some(position);
+                if g.horizontal {
+                    extent = extent.max(
+                        text_width_for(&c.values.label(v, g.value, g.percent), size, face)
+                            + size * 0.5,
+                    );
+                }
+            }
+            if spacing.is_finite() && spacing > 0. {
+                (extent / spacing).ceil().clamp(1., 512.) as usize
+            } else {
+                1
+            }
+        } else {
+            1
+        };
+        for (index, v) in c.values.ticks().enumerate() {
+            let (x, y) = c.point(0., v);
+            if grid.is_some() {
+                axis_line(
+                    svg,
+                    !g.horizontal,
+                    if g.horizontal { x } else { y },
+                    &grid_color,
+                );
+            }
+            if axis_visible(g.value, visible_by_default) {
+                axis_tick(
+                    svg,
+                    g.horizontal,
+                    if g.horizontal { x } else { y },
+                    v_pos,
+                    outside,
+                    val(g.value, "majorTickMark").unwrap_or(major_tick),
+                    if colors.opendocument_defaults {
+                        1.5 * 96. / 25.4
+                    } else {
+                        4.2
+                    },
+                    &axis_stroke,
+                );
+            }
+            if index % label_stride == 0 && has_labels(g.value, visible_by_default) {
+                let s = c.values.label(v, g.value, g.percent);
+                if g.horizontal {
+                    text(
+                        labels,
+                        x,
+                        v_pos + if side == "t" { -5. } else { size * 1.60 },
+                        "middle",
+                        size,
+                        face,
+                        &s,
+                        false,
+                    );
+                } else {
+                    let right = side == "r";
+                    text(
+                        labels,
+                        v_pos + if right { gap } else { -gap },
+                        y + size * 0.31,
+                        if right { "start" } else { "end" },
+                        size,
+                        face,
+                        &s,
+                        false,
+                    );
+                }
+            }
+        }
+        if axis_visible(g.value, visible_by_default) {
+            axis_line(
+                svg,
+                g.horizontal,
+                v_pos,
+                &stroke(g.value, colors, axis_color),
+            );
+        }
+        if label_paint.is_some() {
+            labels.push_str("</g>");
+        }
+    }
+    if draw_category {
+        let props = (colors.spreadsheet_defaults || colors.opendocument_defaults)
+            .then(|| text_props(g.category, false))
+            .flatten();
+        let size = font_size(props, size);
+        let gap = if colors.opendocument_defaults {
+            super::chart_svg::odf_label_gap(g.category)
+        } else {
+            size * 0.9
+        };
+        let axis_face =
+            props.map(|p| font_family(Some(p), face.split(',').next().unwrap_or("Calibri")));
+        let face = axis_face.as_deref().unwrap_or(face);
+        let label_paint = props.and_then(|p| colors.shape_fill(p));
+        if let Some(paint) = &label_paint {
+            write!(labels, r#"<g fill="{paint}">"#).unwrap();
+        }
+        let grid = g.category.and_then(|n| child(n, "majorGridlines"));
+        let grid_paint = stroke(grid, colors, axis_color);
+        let label_slot = c.slot_width();
+        let rotation = category_rotation(
+            g,
+            cats,
+            c.count,
+            r.width(),
+            size,
+            colors.spreadsheet_defaults || colors.opendocument_defaults,
+            colors.opendocument_defaults,
+            face,
+        );
+        let paint = |svg: &mut String, labels: &mut String, n: f64, s: &str| {
+            let (x, y) = c.point(n, 0.);
+            if grid.is_some() {
+                axis_line(
+                    svg,
+                    g.horizontal,
+                    if g.horizontal { y } else { x },
+                    &grid_paint,
+                );
+            }
+            if has_labels(g.category, visible_by_default) {
+                if g.horizontal {
+                    let right = val(g.category, "axPos") == Some("r");
+                    text(
+                        labels,
+                        c_pos + if right { gap } else { -gap },
+                        y + size * 0.31,
+                        if right { "start" } else { "end" },
+                        size,
+                        face,
+                        s,
+                        false,
+                    );
+                } else if rotation != 0. {
+                    let angle = rotation.to_radians();
+                    let x = x - if colors.opendocument_defaults {
+                        size * 0.35 * angle.sin()
+                    } else {
+                        0.
+                    };
+                    let y = c_pos
+                        + size
+                            * if colors.opendocument_defaults {
+                                0.3 + 0.75 * angle.cos().abs()
+                            } else {
+                                1.05
+                            };
+                    write!(
+                        labels,
+                        r#"<g transform="rotate({rotation:.2} {x:.2} {y:.2})">"#
+                    )
+                    .unwrap();
+                    text(
+                        labels,
+                        x,
+                        y,
+                        if rotation < 0. { "end" } else { "start" },
+                        size,
+                        face,
+                        s,
+                        false,
+                    );
+                    labels.push_str("</g>");
+                } else {
+                    for (i, label) in category_label_lines(
+                        g,
+                        s,
+                        size,
+                        label_slot,
+                        colors.spreadsheet_defaults || colors.opendocument_defaults,
+                        face,
+                    )
+                    .iter()
+                    .enumerate()
+                    {
+                        text(
+                            labels,
+                            x,
+                            c_pos
+                                + if colors.opendocument_defaults {
+                                    gap + size * (0.8 + i as f64 * 1.22)
+                                } else {
+                                    size * (1.60 + i as f64 * 1.22)
+                                },
+                            "middle",
+                            size,
+                            face,
+                            label,
+                            false,
+                        );
+                    }
+                }
+            }
+        };
+        if let Some(scale) = c.x {
+            for x in scale.ticks() {
+                paint(svg, labels, x, &scale.label(x, g.category, false));
+            }
+        } else if grid.is_some() || has_labels(g.category, visible_by_default) {
+            let skip = number(val(g.category, "tickLblSkip"))
+                .unwrap_or_else(|| {
+                    if colors.opendocument_defaults {
+                        return 1.;
+                    }
+                    (c.count
+                        / ((if g.horizontal { r.height() } else { r.width() }) / (size * 2.5))
+                            .max(1.))
+                    .ceil()
+                })
+                .max(1.) as usize;
+            for i in (0..c.count as u64).step_by(skip).take(512) {
+                let s = cats
+                    .get(&(i as u32))
+                    .cloned()
+                    .unwrap_or_else(|| (i + 1).to_string());
+                paint(svg, labels, i as f64, &s);
+            }
+        }
+        if c.x.is_none() && has_labels(g.category, visible_by_default) {
+            if let Some(hierarchy) = hierarchy {
+                let extra_lines = if !g.horizontal && rotation == 0. {
+                    cats.values()
+                        .map(|label| {
+                            category_label_lines(
+                                g,
+                                label,
+                                size,
+                                label_slot,
+                                colors.spreadsheet_defaults || colors.opendocument_defaults,
+                                face,
+                            )
+                            .len()
+                            .saturating_sub(1)
+                        })
+                        .max()
+                        .unwrap_or(0)
+                } else {
+                    0
+                };
+                categories::draw(
+                    labels,
+                    hierarchy,
+                    c,
+                    c_pos,
+                    categories::leaf_extent(cats, size, rotation, !g.horizontal)
+                        + extra_lines as f64 * size * 1.22,
+                    size,
+                    face,
+                    &stroke(g.category, colors, axis_color),
+                    val(g.category, "axPos").unwrap_or(if g.horizontal { "l" } else { "b" }),
+                );
+            }
+        }
+        if axis_visible(g.category, visible_by_default) {
+            let axis_paint = stroke(g.category, colors, axis_color);
+            let major = val(g.category, "majorTickMark").unwrap_or(major_tick);
+            let minor = val(g.category, "minorTickMark").unwrap_or(minor_tick);
+            let side = val(g.category, "axPos").unwrap_or(if g.horizontal { "l" } else { "b" });
+            let outside = if side == "l" || side == "t" { -1. } else { 1. };
+            let mut tick = |cat: f64, style: &str, len: f64| {
+                let (x, y) = c.point(cat, 0.);
+                axis_tick(
+                    svg,
+                    !g.horizontal,
+                    if g.horizontal { y } else { x },
+                    c_pos,
+                    outside,
+                    style,
+                    len,
+                    &axis_paint,
+                );
+            };
+            if let Some(scale) = c.x {
+                for x in scale.ticks() {
+                    tick(x, major, 4.2);
+                }
+            } else {
+                let skip = number(val(g.category, "tickMarkSkip"))
+                    .unwrap_or(1.)
+                    .max((c.count / 512.).ceil())
+                    .max(1.) as usize;
+                for i in (0..c.count as u64).step_by(skip) {
+                    let i = i as f64;
+                    tick(i, minor, 3.2);
+                    tick(if c.between { i - 0.5 } else { i }, major, 4.2);
+                }
+                if c.between {
+                    tick(c.count - 0.5, major, 4.2);
+                }
+            }
+        }
+        if axis_visible(g.category, visible_by_default) {
+            axis_line(
+                svg,
+                !g.horizontal,
+                c_pos,
+                &stroke(g.category, colors, axis_color),
+            );
+        }
+        if label_paint.is_some() {
+            labels.push_str("</g>");
+        }
+    }
+    for (axis, draw) in [(g.category, draw_category), (g.value, draw_value)] {
+        if !draw || !axis_visible(axis, visible_by_default) {
+            continue;
+        }
+        let Some(label) = axis_title(axis, legacy) else {
+            continue;
+        };
+        let side = val(axis, "axPos").unwrap_or("b");
+        let title = axis.and_then(|n| child(n, "title"));
+        let props = text_props(title, true).or(text_props(title, false));
+        let ts = font_size(props, size);
+        let family = props
+            .map(|p| font_family(Some(p), face.split(',').next().unwrap_or("Calibri")))
+            .unwrap_or_else(|| face.to_owned());
+        let offset = if colors.spreadsheet_defaults && matches!(side, "l" | "r") {
+            let label_size = font_size(text_props(axis, false), size);
+            let label_face = font_family(
+                text_props(axis, false),
+                face.split(',').next().unwrap_or(face),
+            );
+            let label_width = if axis == g.value || g.scatter {
+                let scale = if axis == g.value {
+                    c.values
+                } else {
+                    c.x.unwrap_or(c.values)
+                };
+                scale
+                    .ticks()
+                    .map(|n| {
+                        text_width_for(&scale.label(n, axis, g.percent), label_size, &label_face)
+                    })
+                    .fold(0., f64::max)
+            } else {
+                cats.values()
+                    .map(|s| text_width_for(s, label_size, &label_face))
+                    .fold(0., f64::max)
+            };
+            label_width + label_size * 0.90 + ts * 0.8
+        } else {
+            size * 2.5
+        };
+        let hierarchy_extent = if axis == g.category {
+            hierarchy.map_or(0., |hierarchy| {
+                categories::extent(
+                    hierarchy,
+                    font_size(text_props(axis, false), size),
+                    matches!(side, "b" | "t"),
+                )
+            })
+        } else {
+            0.
+        };
+        let (x, y, rotate) = match side {
+            "l" => (
+                r.left - offset - hierarchy_extent,
+                (r.top + r.bottom) / 2.,
+                -90,
+            ),
+            "r" => (
+                r.right + offset + hierarchy_extent,
+                (r.top + r.bottom) / 2.,
+                90,
+            ),
+            "t" => (
+                (r.left + r.right) / 2.,
+                r.top - size * 1.65 - hierarchy_extent,
+                0,
+            ),
+            _ => (
+                (r.left + r.right) / 2.,
+                r.bottom + size * 2.65 + hierarchy_extent,
+                0,
+            ),
+        };
+        write!(labels, r#"<g transform="rotate({rotate} {x:.2} {y:.2})">"#).unwrap();
+        let bold =
+            !colors.spreadsheet_defaults || props.and_then(|n| n.attribute("b")).is_none_or(truth);
+        text(labels, x, y, "middle", ts, &family, &label, bold);
+        labels.push_str("</g>");
+    }
+}
+
+#[derive(Clone)]
+struct LegendEntry<'a> {
+    group: Node<'a, 'a>,
+    ser: Node<'a, 'a>,
+    index: usize,
+    point: Option<u32>,
+    value: Option<f64>,
+    label: String,
+    trendline: Option<Node<'a, 'a>>,
+}
+fn legend_entries<'a>(
+    groups: &[Group<'a>],
+    data: &ChartData,
+    legend: Node,
+    colors: &ChartColors,
+) -> Vec<LegendEntry<'a>> {
+    let mut entries = Vec::new();
+    for g in groups {
+        let nodes = g.node.children().filter(|n| chart_node(*n, "ser"));
+        for (i, node) in (g.start..g.end).zip(nodes) {
+            let s = &data.series[i];
+            let entry = LegendEntry {
+                group: g.node,
+                ser: node,
+                index: i,
+                point: None,
+                value: None,
+                label: s.name.clone().unwrap_or_else(|| {
+                    if colors.spreadsheet_defaults {
+                        format!("Series{}", i + 1)
+                    } else {
+                        format!("Series {}", i + 1)
+                    }
+                }),
+                trendline: None,
+            };
+            if data.series.len() == 1 && colors.vary_by_point(i) && !s.points.is_empty() {
+                for p in s.points.iter().take(512) {
+                    let label = p
+                        .categories
+                        .first()
+                        .map(|v| v.label.clone())
+                        .or_else(|| p.x.clone())
+                        .unwrap_or_else(|| (u64::from(p.index) + 1).to_string());
+                    entries.push(LegendEntry {
+                        point: Some(p.index),
+                        value: number(p.value.as_deref()),
+                        label,
+                        ..entry.clone()
+                    });
+                }
+            } else {
+                entries.push(entry);
+            }
+        }
+    }
+    if colors.spreadsheet_defaults {
+        let trends: Vec<_> = entries
+            .iter()
+            .filter(|e| e.point.is_none())
+            .flat_map(|entry| {
+                entry
+                    .ser
+                    .children()
+                    .filter(|n| chart_node(*n, "trendline"))
+                    .map(|trendline| {
+                        let label = child(trendline, "name")
+                            .and_then(|n| n.text())
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| {
+                                let kind = match val(Some(trendline), "trendlineType") {
+                                    Some("exp") => "Expon.".to_owned(),
+                                    Some("log") => "Log.".to_owned(),
+                                    Some("poly") => "Poly.".to_owned(),
+                                    Some("power") => "Power".to_owned(),
+                                    Some("movingAvg") => format!(
+                                        "{} per. Mov. Avg.",
+                                        val(Some(trendline), "period").unwrap_or("2")
+                                    ),
+                                    _ => "Linear".to_owned(),
+                                };
+                                format!("{kind} ({})", entry.label)
+                            });
+                        LegendEntry {
+                            trendline: Some(trendline),
+                            label,
+                            ..entry.clone()
+                        }
+                    })
+            })
+            .collect();
+        entries.extend(trends);
+    }
+    let reverse = if colors.spreadsheet_defaults {
+        matches!(
+            val(Some(legend), "legendPos").unwrap_or("r"),
+            "r" | "l" | "tr"
+        ) && groups.iter().all(|g| {
+            !g.horizontal
+                && matches!(
+                    val(Some(g.node), "grouping"),
+                    Some("stacked" | "percentStacked")
+                )
+        })
+    } else {
+        groups.iter().all(|g| {
+            g.horizontal
+                || (chart_node(g.node, "lineChart")
+                    && matches!(
+                        val(Some(g.node), "grouping"),
+                        Some("stacked" | "percentStacked")
+                    ))
+        })
+    };
+    if reverse {
+        entries.reverse();
+    }
+    let hidden: std::collections::BTreeSet<_> = legend
+        .children()
+        .filter(|n| chart_node(*n, "legendEntry") && flag(Some(*n), "delete", false))
+        .filter_map(|n| val(Some(n), "idx")?.parse::<usize>().ok())
+        .collect();
+    entries
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, e)| (!hidden.contains(&i)).then_some(e))
+        .collect()
+}
+
+fn legend_key_width(entries: &[LegendEntry], size: f64, spreadsheet: bool) -> f64 {
+    if entries.iter().any(|e| {
+        e.trendline.is_some()
+            || chart_node(e.group, "lineChart")
+            || chart_node(e.group, "scatterChart")
+    }) {
+        size * if spreadsheet { 2.5 } else { 1.92 }
+    } else {
+        size * 0.528
+    }
+}
+
+fn legend_columns(entries: &[LegendEntry], size: f64, available: f64, face: &str) -> usize {
+    let key = legend_key_width(entries, size, true);
+    let extent = entries
+        .iter()
+        .map(|e| key + size * 0.22 + text_width_for(&e.label, size, face))
+        .fold(0., f64::max);
+    ((available / (extent + size * 0.44)).floor() as usize).clamp(1, entries.len().max(1))
+}
+
+fn trendline_path(
+    svg: &mut String,
+    node: Node,
+    colors: &ChartColors,
+    index: usize,
+    a: (f64, f64),
+    b: (f64, f64),
+    effects: bool,
+) {
+    let fallback = if colors.spreadsheet_defaults {
+        "#000000".to_owned()
+    } else {
+        colors.line_at(index, None)
+    };
+    #[cfg(feature = "extended-charts")]
+    let fallback = colors
+        .style_stroke("trendline", &fallback)
+        .unwrap_or(fallback);
+    let paint = stroke(Some(node), colors, &fallback);
+    let ln = child(node, "spPr").and_then(|n| n.children().find(|n| n.tag_name().name() == "ln"));
+    let width =
+        number(ln.and_then(|n| n.attribute("w"))).map_or(2., |n| (n / 9525.).clamp(0., 256.));
+    let pattern = colors.line_dash(ln, width);
+    let cap = match ln.and_then(|n| n.attribute("cap")) {
+        Some("rnd") => "round",
+        Some("sq") => "square",
+        _ => "butt",
+    };
+    let mut body = format!(
+        r#"<path d="M{:.2} {:.2}L{:.2} {:.2}" fill="none" stroke="{paint}" stroke-width="{width:.2}" stroke-dasharray="{pattern}" stroke-linecap="{cap}"/>"#,
+        a.0, a.1, b.0, b.1
+    );
+    colors.line_ends(&mut body, ln, a, b, width, &paint);
+    colors.begin_hit(svg, "trendline", index, None);
+    colors.paint_shape(
+        svg,
+        effects
+            .then(|| ChartColors::effect_properties(node))
+            .flatten(),
+        [
+            a.0.min(b.0),
+            a.1.min(b.1),
+            (b.0 - a.0).abs(),
+            (b.1 - a.1).abs(),
+        ],
+        &body,
+    );
+    colors.end_hit(svg);
+}
+
+fn wrap_label(label: &str, size: f64, limit: f64, face: &str) -> Vec<String> {
+    if text_width_for(label, size, face) <= limit {
+        return vec![label.to_owned()];
+    }
+    let mut lines = Vec::new();
+    let mut current = String::new();
+    for token in label.split_inclusive([' ', '-']) {
+        let mut used = text_width_for(&current, size, face);
+        if !current.is_empty() && used + text_width_for(token.trim_end(), size, face) > limit {
+            lines.push(current.trim_end().to_owned());
+            current.clear();
+            used = 0.;
+        }
+        for c in token.chars() {
+            let advance = text_width_for(c.encode_utf8(&mut [0; 4]), size, face);
+            if used + advance > limit && !current.is_empty() {
+                lines.push(current.trim_end().to_owned());
+                current.clear();
+                used = 0.;
+                if lines.len() >= 32 {
+                    return lines;
+                }
+            }
+            current.push(c);
+            used += advance;
+        }
+    }
+    if !current.trim().is_empty() {
+        lines.push(current.trim_end().to_owned());
+    }
+    if lines.is_empty() {
+        lines.push(String::new());
+    }
+    lines
+}
+
+fn draw_legend(
+    svg: &mut String,
+    entries: &[LegendEntry],
+    colors: &ChartColors,
+    width: f64,
+    height: f64,
+    pos: &str,
+    size: f64,
+    face: &str,
+    title_center_offset: f64,
+    columns: usize,
+    legend: Option<Node>,
+) {
+    let side = matches!(pos, "r" | "l" | "tr");
+    let rows = (height / (size * 1.65)).floor().max(1.) as usize;
+    let entries = &entries[..entries.len().min(if side { rows } else { 512 })];
+    if entries.is_empty() {
+        return;
+    }
+    let key_width = legend_key_width(entries, size, colors.spreadsheet_defaults);
+    let extents = entries
+        .iter()
+        .map(|e| key_width + size * 0.22 + text_width_for(&e.label, size, face))
+        .collect::<Vec<_>>();
+    let space = size * 0.88;
+    let total = extents.iter().sum::<f64>() + space * entries.len().saturating_sub(1) as f64;
+    let mut cur = ((width - total) / 2.).max(5.);
+    let columns = if colors.spreadsheet_defaults && !side {
+        columns.clamp(1, entries.len())
+    } else {
+        entries.len()
+    };
+    let row_count = entries.len().div_ceil(columns);
+    let column_width = extents.iter().copied().fold(0., f64::max) + space * 0.5;
+    let table_width = column_width * columns as f64;
+    let max_width = extents.iter().copied().fold(0., f64::max).min(width * 0.31);
+    let text_space = (max_width - key_width - size * 0.04).max(size);
+    let lines: Vec<_> = entries
+        .iter()
+        .map(|e| {
+            if side {
+                wrap_label(&e.label, size, text_space, face)
+            } else {
+                vec![e.label.clone()]
+            }
+        })
+        .collect();
+    let entry_height = |n: usize| size * (1.65 + 1.22 * (n as f64 - 1.));
+    let total_height: f64 = lines.iter().map(|ls| entry_height(ls.len())).sum();
+    let mut top = if pos == "tr" {
+        12.
+    } else {
+        (height + title_center_offset - total_height) * 0.5 + size * 0.8
+    };
+    let manual = colors
+        .opendocument_defaults
+        .then(|| {
+            legend
+                .and_then(|n| child(n, "layout"))
+                .and_then(|n| child(n, "manualLayout"))
+        })
+        .flatten();
+    let origin = number(val(manual, "x"))
+        .zip(number(val(manual, "y")))
+        .map(|(x, y)| (x * width, y * height));
+    if let Some((x, y)) = origin {
+        let padding = size * 0.25;
+        let w = if side { max_width } else { total } + 2. * padding;
+        let h = if side { total_height } else { size * 1.2 } + 2. * padding;
+        let props = legend.and_then(|n| child(n, "spPr"));
+        let fill = props
+            .and_then(|n| colors.shape_fill(n))
+            .unwrap_or_else(|| "none".into());
+        let stroke = props
+            .and_then(|n| colors.shape_stroke(n))
+            .unwrap_or_else(|| "none".into());
+        write!(svg, r#"<rect x="{x:.2}" y="{y:.2}" width="{w:.2}" height="{h:.2}" fill="{fill}" stroke="{stroke}"/>"#).unwrap();
+    }
+    for (j, e) in entries.iter().enumerate() {
+        write!(svg, r#"<g data-docx-series="{}""#, e.index).unwrap();
+        if colors.interactive {
+            write!(
+                svg,
+                r#" data-chart-kind="legendEntry" data-chart-series="{}""#,
+                e.index
+            )
+            .unwrap();
+        }
+        svg.push('>');
+        let (mut x, mut y) = if side {
+            let x = if pos == "l" {
+                12.
+            } else {
+                width - 12. - max_width
+            };
+            let y = top;
+            top += entry_height(lines[j].len());
+            (x, y)
+        } else if row_count > 1 {
+            let column = j % columns;
+            let row = j / columns;
+            let x =
+                ((width - table_width) / 2.).max(5.) + space * 0.5 + column_width * column as f64;
+            let y = if pos == "t" {
+                19.7 + row as f64 * size * 1.65
+            } else {
+                height - 19.7 - (row_count - row - 1) as f64 * size * 1.65
+            };
+            (x, y)
+        } else {
+            (cur, if pos == "t" { 19.7 } else { height - 19.7 })
+        };
+        if let Some((ox, oy)) = origin {
+            x = ox
+                + size * 0.25
+                + if side {
+                    0.
+                } else {
+                    extents[..j].iter().sum::<f64>() + space * j as f64
+                };
+            y = oy
+                + size * 0.85
+                + if side {
+                    lines[..j]
+                        .iter()
+                        .map(|ls| entry_height(ls.len()))
+                        .sum::<f64>()
+                } else {
+                    0.
+                };
+        }
+        let is_line = chart_node(e.group, "lineChart") || chart_node(e.group, "scatterChart");
+        let paint = marks::legend_color(e.group, e.ser, e.index, e.point, e.value, colors, is_line);
+        if let Some(trendline) = e.trendline {
+            trendline_path(
+                svg,
+                trendline,
+                colors,
+                e.index,
+                (x, y),
+                (x + key_width, y),
+                false,
+            );
+        } else if is_line {
+            write!(svg,r#"<path d="M{x:.2} {y:.2}h{key_width:.2}" fill="none" stroke="{paint}" stroke-width="3"/>"#).unwrap();
+            let style = val(Some(e.group), "scatterStyle").unwrap_or("");
+            let glyph_index = e.point.map_or_else(
+                || {
+                    val(Some(e.ser), "idx")
+                        .and_then(|n| n.parse().ok())
+                        .unwrap_or(e.index)
+                },
+                |p| p as usize,
+            );
+            let default_marker = glyph_kind(e, glyph_index);
+            if default_marker != "none"
+                && (!chart_node(e.group, "scatterChart")
+                    || matches!(style, "marker" | "lineMarker" | "smoothMarker"))
+            {
+                let fill = colors.marker(e.index, e.point);
+                let mid = x + key_width / 2.;
+                let r = size * 0.28;
+                let outline = colors.marker_outline(e.index, e.point);
+                super::chart_svg::marker(svg, (mid, y), &default_marker, r, &fill, &outline, 1.);
+            }
+        } else {
+            let h = size * 0.528;
+            let border = colors.outline(e.index, e.point).unwrap_or_else(|| {
+                if chart_node(e.group, "barChart")
+                    && e.value.is_some_and(|v| v < 0.)
+                    && marks::invert_negative(e.ser, e.point, colors)
+                {
+                    "black"
+                } else {
+                    "none"
+                }
+            });
+            write!(svg,r#"<rect x="{x:.2}" y="{:.2}" width="{key_width:.2}" height="{h:.2}" fill="{paint}" stroke="{border}"/>"#,y-h/2.).unwrap();
+        }
+        for (k, label) in lines[j].iter().enumerate() {
+            text(
+                svg,
+                x + key_width + size * 0.22,
+                y + size * (0.3 + 1.22 * k as f64),
+                "start",
+                size,
+                face,
+                label,
+                false,
+            );
+        }
+        svg.push_str("</g>");
+        cur += extents[j] + space;
+    }
+}
+
+fn glyph_kind(entry: &LegendEntry, ordinal: usize) -> String {
+    let marker = child(entry.ser, "marker");
+    match val(marker, "symbol") {
+        Some(s) if s != "auto" => s.into(),
+        _ if chart_node(entry.group, "scatterChart") || flag(Some(entry.group), "marker", true) => {
+            [
+                "diamond", "square", "triangle", "x", "star", "circle", "plus",
+            ][ordinal % 7]
+                .into()
+        }
+        _ => "none".into(),
+    }
+}
+
+pub(super) fn render(
+    root: Node,
+    data: &ChartData,
+    width: f64,
+    height: f64,
+    colors: &ChartColors,
+    minor_latin: Option<&str>,
+) -> Option<String> {
+    let chart = child(root, "chart")?;
+    let plot = child(chart, "plotArea")?;
+    let resolved = if colors.spreadsheet_defaults {
+        spreadsheet_scatter_data(plot, data)
+    } else {
+        Cow::Borrowed(data)
+    };
+    let data = resolved.as_ref();
+    let groups = groups(plot, data)?;
+    let legacy = colors.legacy_defaults();
+    let visible_by_default = legacy && !colors.spreadsheet_defaults;
+    let default_face = minor_latin.unwrap_or("Calibri");
+    let base = text_props(Some(root), false);
+    let size = font_size(base, 40. / 3.);
+    let axis_face = font_family(base, default_face);
+    let title = child(chart, "title");
+    let legend = child(chart, "legend");
+    let chart_title = data.title.as_deref().or_else(|| {
+        ((legacy || colors.spreadsheet_defaults)
+            && title.is_some()
+            && !flag(Some(chart), "autoTitleDeleted", false))
+        .then(|| {
+            if data.series.len() == 1 {
+                data.series[0].name.as_deref().unwrap_or("Chart Title")
+            } else {
+                "Chart Title"
+            }
+        })
+    });
+    let title_props = text_props(title, true)
+        .or(text_props(title, false))
+        .or(base);
+    let unstyled_title =
+        colors.spreadsheet_defaults && super::chart_svg::title_uses_automatic_font(root);
+    let canvas = CanvasPaint::new(root, colors);
+    let title_size = font_size(
+        title_props,
+        super::chart_svg::title_size_default(
+            colors,
+            root,
+            size,
+            canvas
+                .title_size
+                .unwrap_or(if legacy || colors.spreadsheet_defaults {
+                    24.
+                } else {
+                    size
+                }),
+        ),
+    );
+    let title_face = font_family(
+        title_props,
+        if unstyled_title {
+            "Arial"
+        } else {
+            default_face
+        },
+    );
+    let title_lines = chart_title
+        .map(|label| {
+            if colors.spreadsheet_defaults
+                && title
+                    .and_then(|n| child(n, "layout"))
+                    .and_then(|n| child(n, "manualLayout"))
+                    .is_none()
+            {
+                super::chart_svg::title_lines_styled(
+                    label,
+                    title_size,
+                    width * 0.8,
+                    &title_face,
+                    title_props
+                        .and_then(|n| n.attribute("b"))
+                        .map_or(!unstyled_title, truth),
+                )
+            } else {
+                vec![label.to_owned()]
+            }
+        })
+        .unwrap_or_default();
+    let legend_props = text_props(legend, false).or(base);
+    let lf = font_size(legend_props, size);
+    let legend_face = font_family(legend_props, default_face);
+    let entries = legend.map_or_else(Vec::new, |n| legend_entries(&groups, data, n, colors));
+    let legend_pos = val(legend, "legendPos").unwrap_or("r");
+    let legend_available = if colors.spreadsheet_defaults && matches!(legend_pos, "b" | "t") {
+        width * 0.8
+    } else {
+        width - 24.
+    };
+    let legend_column_count = legend_columns(&entries, lf, legend_available, &legend_face);
+    let legend_rows = if colors.spreadsheet_defaults {
+        entries.len().div_ceil(legend_column_count)
+    } else {
+        1
+    };
+    let inset: f64 = 44. / 3.;
+    let mut rect = Box2 {
+        left: inset.min(width * 0.18),
+        right: width - inset.min(width * 0.18),
+        top: inset.min(height * 0.18),
+        bottom: height - inset.min(height * 0.18),
+    };
+    if chart_title.is_some() && !flag(title, "overlay", !(legacy || colors.spreadsheet_defaults)) {
+        rect.top += title_size * (1.17 + title_lines.len().saturating_sub(1) as f64 * 1.22)
+            + 12.
+            + if legacy { 4. / 3. } else { 0. };
+    }
+    if !entries.is_empty() && !flag(legend, "overlay", !(legacy || colors.spreadsheet_defaults)) {
+        let text_extent = entries
+            .iter()
+            .map(|e| text_width_for(&e.label, lf, &legend_face))
+            .fold(0., f64::max);
+        let lw = if legacy || colors.spreadsheet_defaults {
+            let long_key = entries
+                .iter()
+                .any(|e| chart_node(e.group, "lineChart") || chart_node(e.group, "scatterChart"));
+            let key = if colors.spreadsheet_defaults {
+                legend_key_width(&entries, lf, true)
+            } else {
+                lf * if long_key { 1.92 } else { 0.528 }
+            };
+            (text_extent * 0.94 + key).min(width * 0.31) + lf * 1.5
+        } else {
+            text_extent + lf * 1.5 + 12.
+        };
+        let lh = lf * 1.16 + 16. + legend_rows.saturating_sub(1) as f64 * lf * 1.65;
+        match legend_pos {
+            "b" => rect.bottom -= lh,
+            "t" => rect.top += lh,
+            "l" => rect.left += lw,
+            _ => rect.right -= lw,
+        }
+    }
+
+    let title_center_offset = if legacy || colors.spreadsheet_defaults {
+        rect.top - inset
+    } else {
+        0.
+    };
+    let mut count = 1u64;
+    let mut categories = BTreeMap::new();
+    let mut hierarchies: HashMap<_, categories::Hierarchy> = HashMap::new();
+    // When every value axis is deleted, Word uses the first value scale for
+    // the combined plot. Explicitly visible secondary axes keep their own domain.
+    let primary = groups[0].value;
+    let value_axis = |g: &Group| {
+        if !colors.spreadsheet_defaults
+            && g.value != primary
+            && !axis_visible(g.value, visible_by_default)
+            && !axis_visible(primary, visible_by_default)
+        {
+            primary.map(|n| n.id())
+        } else {
+            g.value.map(|n| n.id())
+        }
+    };
+    let mut x_ranges: HashMap<_, Extent> = HashMap::new();
+    let mut y_ranges: HashMap<_, Extent> = HashMap::new();
+    let mut zero_axes = HashSet::new();
+    for g in &groups {
+        let series = &data.series[g.start..g.end];
+        for s in series {
+            for p in &s.points {
+                count = count.max(u64::from(p.index) + 1);
+                if !g.scatter && !flag(g.category, "noMultiLvlLbl", false) {
+                    let hierarchy = hierarchies.entry(g.category.map(|n| n.id())).or_default();
+                    for label in p.categories.iter().filter(|label| label.level > 0) {
+                        hierarchy
+                            .entry(label.level)
+                            .or_default()
+                            .entry(p.index)
+                            .or_insert_with(|| label.label.clone());
+                    }
+                }
+                if !p.categories.is_empty() {
+                    categories.entry(p.index).or_insert_with(String::new);
+                }
+                if let Some(label) = p.categories.iter().find(|label| label.level == 0) {
+                    let formatted = if colors.spreadsheet_defaults || colors.opendocument_defaults {
+                        g.category
+                            .filter(|n| colors.opendocument_defaults || chart_node(*n, "dateAx"))
+                            .and_then(|axis| {
+                                let code = child(axis, "numFmt")?.attribute("formatCode")?;
+                                let serial = number(Some(&label.label))?;
+                                if colors.opendocument_defaults {
+                                    super::chart_svg::odf_date_label(serial, code)
+                                } else {
+                                    super::chart_svg::date_label(
+                                        serial,
+                                        flag(Some(root), "date1904", false),
+                                        code,
+                                    )
+                                }
+                            })
+                    } else {
+                        None
+                    };
+                    let entry = categories.entry(p.index).or_insert_with(String::new);
+                    if entry.is_empty() {
+                        *entry = formatted.unwrap_or_else(|| label.label.clone());
+                    }
+                }
+            }
+        }
+        if colors.use_cached_point_count {
+            for ser in g.node.children().filter(|n| chart_node(*n, "ser")) {
+                count = count.max(u64::from(cached_point_count(ser)));
+            }
+        }
+        let (mut x, mut y) = g.ranges(series, colors.spreadsheet_defaults);
+        if colors.spreadsheet_defaults {
+            let dates = trendlines::date_categories(g, data);
+            for (series, node) in series
+                .iter()
+                .zip(g.node.children().filter(|n| chart_node(*n, "ser")))
+            {
+                for trend in node.children().filter(|n| {
+                    chart_node(*n, "trendline") && val(Some(*n), "trendlineType") == Some("linear")
+                }) {
+                    if let Some(fit) = trendlines::linear_fit(series, trend, g.scatter, &dates) {
+                        for (tx, ty) in fit.ends {
+                            if g.scatter {
+                                x.record(tx);
+                            }
+                            y.record(ty);
+                        }
+                    }
+                }
+            }
+        }
+        x_ranges
+            .entry(g.category.map(|n| n.id()))
+            .or_default()
+            .merge(x);
+        y_ranges.entry(value_axis(g)).or_default().merge(y);
+        if !g.scatter {
+            zero_axes.insert(value_axis(g));
+        }
+    }
+    let x_scale = |g: &Group, rect: Box2| {
+        Scale::with_defaults(
+            x_ranges[&g.category.map(|n| n.id())],
+            g.category,
+            rect.width()
+                / (font_size(
+                    text_props(g.category, false).filter(|_| colors.opendocument_defaults),
+                    size,
+                ) * 3.5),
+            false,
+            false,
+            colors.spreadsheet_defaults,
+            colors.opendocument_defaults,
+        )
+    };
+    let value_scale = |g: &Group, rect: Box2| {
+        let size = font_size(
+            text_props(g.value, false).filter(|_| colors.opendocument_defaults),
+            size,
+        );
+        Scale::with_defaults(
+            y_ranges[&value_axis(g)],
+            g.value,
+            if g.horizontal {
+                rect.width() / (size * 3.5)
+            } else {
+                rect.height()
+                    / (size
+                        * if colors.opendocument_defaults {
+                            0.8
+                        } else {
+                            1.4
+                        })
+            },
+            zero_axes.contains(&value_axis(g)),
+            g.percent,
+            colors.spreadsheet_defaults,
+            colors.opendocument_defaults,
+        )
+    };
+    let outer_odf = colors.opendocument_defaults
+        && val(
+            child(plot, "layout").and_then(|n| child(n, "manualLayout")),
+            "layoutTarget",
+        ) == Some("outer");
+    let mut gutters = [0f64; 4];
+    let label_slot = rect.width() / (count as f64).max(1.);
+    for g in &groups {
+        for (axis, is_value) in [(g.value, true), (g.category, false)] {
+            if !has_labels(axis, visible_by_default) {
+                continue;
+            }
+            let pos = if is_value && colors.spreadsheet_defaults {
+                value_side(g, true)
+            } else {
+                val(axis, "axPos").unwrap_or(if is_value { "l" } else { "b" })
+            };
+            let horizontal = matches!(pos, "b" | "t");
+            let props = (colors.spreadsheet_defaults || colors.opendocument_defaults)
+                .then(|| text_props(axis, false))
+                .flatten();
+            let size = font_size(props, size);
+            let measure_face =
+                font_family(props, axis_face.split(',').next().unwrap_or(&axis_face));
+            let extent = if horizontal {
+                let rotation = if is_value {
+                    0.
+                } else {
+                    category_rotation(
+                        g,
+                        &categories,
+                        count as f64,
+                        rect.width(),
+                        size,
+                        colors.spreadsheet_defaults || colors.opendocument_defaults,
+                        colors.opendocument_defaults,
+                        &measure_face,
+                    )
+                };
+                if rotation == 0. {
+                    let lines = if is_value {
+                        1
+                    } else {
+                        categories
+                            .values()
+                            .map(|label| {
+                                category_label_lines(
+                                    g,
+                                    label,
+                                    size,
+                                    label_slot,
+                                    colors.spreadsheet_defaults || colors.opendocument_defaults,
+                                    &measure_face,
+                                )
+                                .len()
+                            })
+                            .max()
+                            .unwrap_or(1)
+                    };
+                    size * (if outer_odf { 1.95 } else { 1.355 }
+                        + lines.saturating_sub(1) as f64 * 1.22)
+                } else {
+                    let angle = rotation.to_radians().abs();
+                    categories
+                        .values()
+                        .map(|s| text_width_for(s, size, &measure_face))
+                        .fold(0., f64::max)
+                        * angle.sin()
+                        + size * 1.15
+                }
+            } else if is_value || g.scatter {
+                let scale = if is_value {
+                    value_scale(g, rect)
+                } else {
+                    x_scale(g, rect)
+                };
+                scale
+                    .ticks()
+                    .map(|v| {
+                        text_width_for(
+                            &scale.label(v, axis, is_value && g.percent),
+                            size,
+                            &measure_face,
+                        )
+                    })
+                    .fold(0., f64::max)
+                    + size * if outer_odf { 0.9 } else { 0.45 }
+            } else {
+                categories
+                    .values()
+                    .map(|s| text_width_for(s, size, &measure_face))
+                    .fold(0., f64::max)
+                    + size * if outer_odf { 0.9 } else { 0.45 }
+            };
+            let extent =
+                if colors.spreadsheet_defaults && (g.scatter || (g.horizontal && !is_value)) {
+                    let (other, scale) = if is_value {
+                        (g.category, x_scale(g, rect))
+                    } else {
+                        (g.value, value_scale(g, rect))
+                    };
+                    let crossing = scale.fraction(axis_crossing(axis, other, scale));
+                    if crossing > 0. && crossing < 1. {
+                        0.
+                    } else {
+                        extent
+                    }
+                } else {
+                    extent
+                };
+            if colors.spreadsheet_defaults
+                && ((g.scatter && !is_value) || (g.horizontal && is_value))
+            {
+                let scale = if is_value {
+                    value_scale(g, rect)
+                } else {
+                    x_scale(g, rect)
+                };
+                for bound in [scale.low, scale.high] {
+                    let value = scale.original(bound);
+                    let i = if scale.fraction(value) < 0.5 { 0 } else { 2 };
+                    gutters[i] = gutters[i].max(
+                        text_width_for(&scale.label(value, axis, false), size, &measure_face) * 0.5,
+                    );
+                }
+            }
+            let extent = extent
+                + if is_value || g.scatter {
+                    0.
+                } else {
+                    hierarchies
+                        .get(&g.category.map(|n| n.id()))
+                        .map_or(0., |hierarchy| {
+                            categories::extent(hierarchy, size, horizontal)
+                        })
+                };
+            let i = match pos {
+                "l" => 0,
+                "t" => 1,
+                "r" => 2,
+                _ => 3,
+            };
+            let title_space = if axis_title(axis, legacy).is_some() {
+                if colors.spreadsheet_defaults {
+                    let title = axis.and_then(|n| child(n, "title"));
+                    font_size(text_props(title, true).or(text_props(title, false)), size) * 2.05
+                } else {
+                    size * if legacy { 2.05 } else { 1.45 }
+                }
+            } else {
+                0.
+            };
+            gutters[i] = gutters[i].max(extent + title_space);
+            if outer_odf && !horizontal {
+                gutters[1] = gutters[1].max(size * 0.5);
+            }
+        }
+    }
+    rect.left += gutters[0];
+    rect.top += gutters[1];
+    rect.right -= gutters[2];
+    rect.bottom -= gutters[3];
+    let label_left = rect.left;
+    if let Some(layout) = child(plot, "layout").and_then(|n| child(n, "manualLayout")) {
+        if let Some(v) = number(val(Some(layout), "x")) {
+            rect.left = v.clamp(0., 1.) * width;
+        }
+        if let Some(v) = number(val(Some(layout), "y")) {
+            rect.top = v.clamp(0., 1.) * height;
+        }
+        if let Some(v) = number(val(Some(layout), "w")) {
+            rect.right = if val(Some(layout), "wMode") == Some("edge") {
+                0.
+            } else {
+                rect.left
+            } + v.clamp(0., 1.) * width;
+        }
+        if let Some(v) = number(val(Some(layout), "h")) {
+            rect.bottom = if val(Some(layout), "hMode") == Some("edge") {
+                0.
+            } else {
+                rect.top
+            } + v.clamp(0., 1.) * height;
+        }
+        if colors.opendocument_defaults && val(Some(layout), "layoutTarget") == Some("outer") {
+            rect.left += gutters[0];
+            rect.top += gutters[1];
+            rect.right -= gutters[2];
+            rect.bottom -= gutters[3];
+        }
+        if colors.spreadsheet_defaults && gutters[0] > 0. {
+            rect.left = rect.left.max(label_left);
+        }
+    }
+    rect.left = rect.left.clamp(0., width * 0.92);
+    rect.top = rect.top.clamp(0., height * 0.92);
+    rect.right = rect.right.clamp(rect.left + width * 0.01, width);
+    rect.bottom = rect.bottom.clamp(rect.top + height * 0.01, height);
+
+    let shape = |node: Node, default_fill: &str, default_stroke: &str| {
+        let pr = child(node, "spPr");
+        (
+            pr.and_then(|n| colors.shape_fill(n))
+                .unwrap_or_else(|| default_fill.into()),
+            pr.and_then(|n| colors.shape_stroke(n))
+                .unwrap_or_else(|| default_stroke.into()),
+        )
+    };
+    let (bg, border) = shape(root, &canvas.background, &canvas.border);
+    let corner = if flag(
+        Some(root),
+        "roundedCorners",
+        !(legacy || colors.spreadsheet_defaults),
+    ) {
+        40. / 3.
+    } else {
+        0.
+    };
+    let mut svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}"><rect width="{width}" height="{height}" rx="{corner:.2}" fill="{bg}" stroke="{border}"/>"#
+    );
+    let (plot_fill, plot_stroke) = shape(plot, &canvas.plot, "none");
+    let frame = format!(
+        r#"x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}""#,
+        rect.left,
+        rect.top,
+        rect.width(),
+        rect.height()
+    );
+    write!(svg,r#"<rect {frame} fill="{plot_fill}" stroke="{plot_stroke}"/><defs><clipPath id="plot"><rect {frame}/></clipPath></defs>"#).unwrap();
+    let label_fill = base
+        .and_then(|p| colors.shape_fill(p))
+        .unwrap_or(canvas.text);
+    let mut labels = format!(r#"<g fill="{label_fill}">"#);
+    let mut geometry = String::new();
+    let mut seen_c = HashSet::new();
+    let mut seen_v = HashSet::new();
+    for g in &groups {
+        let between = val(g.value, "crossBetween")
+            .map_or(!chart_node(g.node, "areaChart"), |v| v == "between");
+        let c = Coords {
+            canvas: (width, height),
+            rect,
+            horizontal: g.horizontal,
+            count: count as f64,
+            between,
+            reversed: val(g.category.and_then(|n| child(n, "scaling")), "orientation")
+                == Some("maxMin"),
+            values: value_scale(g, rect),
+            x: g.scatter.then(|| x_scale(g, rect)),
+        };
+        let draw_c = seen_c.insert(g.category.map(|n| n.id()))
+            && !(colors.opendocument_defaults && child(plot, "dTable").is_some());
+        let draw_v = seen_v.insert(value_axis(g));
+        draw_axes(
+            &mut svg,
+            &mut labels,
+            g,
+            &c,
+            &categories,
+            hierarchies.get(&g.category.map(|n| n.id())),
+            colors,
+            &canvas.axis,
+            size,
+            &axis_face,
+            draw_c,
+            draw_v,
+        );
+        marks::draw(
+            &mut geometry,
+            &mut labels,
+            g.node,
+            &data.series[g.start..g.end],
+            g.start,
+            colors,
+            &c,
+            val(Some(chart), "dispBlanksAs").unwrap_or(if legacy || colors.spreadsheet_defaults {
+                "gap"
+            } else {
+                "zero"
+            }),
+            default_face,
+        );
+        trendlines::draw(
+            &mut geometry,
+            &mut labels,
+            g,
+            data,
+            &c,
+            colors,
+            default_face,
+        );
+    }
+    table::draw(
+        &mut labels,
+        plot,
+        data,
+        colors,
+        rect,
+        (width, height),
+        size,
+        &axis_face,
+    );
+    labels.push_str("</g>");
+    write!(svg, r#"<g clip-path="url(#plot)">{geometry}</g>{labels}"#).unwrap();
+    if chart_title.is_some() {
+        let paint = title_props
+            .and_then(|p| colors.shape_fill(p))
+            .unwrap_or_else(|| label_fill.clone());
+        write!(svg, r#"<g fill="{paint}">"#).unwrap();
+        let (x, y, anchor) = title_position(
+            title.filter(|_| colors.spreadsheet_defaults || colors.opendocument_defaults),
+            width,
+            height,
+            title_size,
+            10.66 + title_size * 0.915,
+        );
+        for (index, label) in title_lines.iter().enumerate() {
+            text(
+                &mut svg,
+                x,
+                y + index as f64 * title_size * 1.22,
+                anchor,
+                title_size,
+                &title_face,
+                label,
+                title_props
+                    .and_then(|n| n.attribute("b"))
+                    .map_or(!unstyled_title, truth),
+            );
+        }
+        svg.push_str("</g>");
+    }
+    let paint = legend_props
+        .and_then(|p| colors.shape_fill(p))
+        .unwrap_or(label_fill);
+    write!(svg, r#"<g fill="{paint}">"#).unwrap();
+    draw_legend(
+        &mut svg,
+        &entries,
+        colors,
+        width,
+        height,
+        legend_pos,
+        lf,
+        &legend_face,
+        title_center_offset,
+        legend_column_count,
+        legend,
+    );
+    svg.push_str("</g></svg>");
+    Some(svg)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn signed_columns_share_a_zero_crossing_and_keep_their_extremes() {
+        let scale = Scale::new(Extent { lo: -4., hi: 7. }, None, 9., true, false, false);
+        assert_eq!(scale.original(scale.low), -6.);
+        assert_eq!(scale.original(scale.high), 8.);
+        let coords = Coords {
+            canvas: (300., 140.),
+            rect: Box2 {
+                left: 0.,
+                top: 0.,
+                right: 300.,
+                bottom: 140.,
+            },
+            horizontal: false,
+            count: 3.,
+            between: true,
+            reversed: false,
+            values: scale,
+            x: None,
+        };
+        assert_eq!(coords.point(0., -4.), (50., 120.));
+        assert_eq!(coords.point(1., 0.), (150., 80.));
+        assert_eq!(coords.point(2., 7.), (250., 10.));
+    }
+
+    #[test]
+    fn an_empty_cache_uses_a_finite_unit_interval() {
+        let axis = Scale::new(Extent::default(), None, 9., true, false, false);
+        assert_eq!((axis.low, axis.high), (0., 1.));
+        assert!(axis.ticks().all(f64::is_finite));
+    }
+}

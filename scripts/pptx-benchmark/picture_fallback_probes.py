@@ -75,7 +75,7 @@ def main():
             assert any(w['message'] == NEW_WARNING for w in model['slides'][0]['warnings']), ident
         else:
             assert 'pictureSvg' in node, ident
-        current = compact(run / 'candidate', 'rust-pptx', row, target / (ident + '.compact.json.gz'), 0)
+        current = compact(run / 'candidate', 'duke-slides', row, target / (ident + '.compact.json.gz'), 0)
         current.update(id=ident, artwork_hashes=artwork_hashes(model)); records.append(current)
         receipts.append(dict(id=ident, case=case, strict=strict, owner=owner, passed=True, primary_artwork='pictureSvg' in node, fallback_bytes=len(node['fallbackPicture']['svg'].encode()), control_sha256=control_record['full_sha256'], primary_expected=case in {'primary','nested-good','utf16-le','utf16-be','declared-encoding'}, error_expected=case=='both-bad'))
         print(ident, receipts[-1]['primary_artwork'], flush=True)

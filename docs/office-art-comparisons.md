@@ -1,8 +1,8 @@
 # Office Art comparisons
 
-The main README's expanded gallery compares 30 drawing objects with Microsoft Word for Mac 16.106.1. The November 6, 2026 candidate uses the current native `rust-docx` adapter and shared `rust-office-art` renderer; Chromium displays the emitted SVGs and saved image assets. This is a renderer comparison, not a fresh React DOCX pagination benchmark or a claim of complete Office fidelity.
+The main README's expanded gallery compares 30 drawing objects with Microsoft Word for Mac 16.106.1. The November 6, 2026 candidate uses the current native `duke-pages` adapter and shared `duke-office-art` renderer; Chromium displays the emitted SVGs and saved image assets. This is a renderer comparison, not a fresh React DOCX pagination benchmark or a claim of complete Office fidelity.
 
-![Word and Rust Office Art](readme-assets/word-officeart-expanded-overview.png)
+![Word and Duke Office Art](readme-assets/word-officeart-expanded-overview.png)
 
 | Family | Cases | Rendering path |
 | --- | ---: | --- |
@@ -19,13 +19,13 @@ The [picture/effect and shape matrices](picture-coverage.md) add 61 retained com
 
 ## 3D models and SmartArt
 
-![Native Word and Rust Office Art models and SmartArt](readme-assets/word-officeart-expanded-models-and-smartart.png)
+![Native Word and Duke Office Art models and SmartArt](readme-assets/word-officeart-expanded-models-and-smartart.png)
 
 The five embedded models include four face emoji and a ring. The candidate displays the document's saved Office-rendered raster. Word can rerender the original GLB during export, so edge sampling and lighting may differ from the stored preview. Neither matching a preview nor preserving the GLB proves mesh-rendering or animation support. The two SmartArt diagrams use their saved drawing trees, including intentionally empty labels and edited geometry; no cached label is invented.
 
 ## WordArt and 3D shapes
 
-![Native Word and Rust Office Art WordArt and 3D shape comparisons](readme-assets/word-officeart-expanded-wordart-and-3d.png)
+![Native Word and Duke Office Art WordArt and 3D shape comparisons](readme-assets/word-officeart-expanded-wordart-and-3d.png)
 
 The renderer now shapes portable fonts into glyph outlines, preserving kerning, ligatures, fractional sizes and measured advance widths. WordArt fitting uses these measurements instead of character-count estimates. Standard DrawingML text-warp guides produce either paired deformation envelopes or a baseline path; the renderer maps glyph geometry through those guides. Text fill, outline and shadow remain separate paint operations.
 
@@ -37,7 +37,7 @@ Portable font substitution remains explicit: the renderer includes licensed Arim
 
 ## Icons, shapes, ink and artistic effects
 
-![Native Word and Rust Office Art icons, shapes and ink comparisons](readme-assets/word-officeart-expanded-icons-shapes-and-ink.png)
+![Native Word and Duke Office Art icons, shapes and ink comparisons](readme-assets/word-officeart-expanded-icons-shapes-and-ink.png)
 
 SVG icon and ordinary shape rendering are separate from the 3D model path. Ink is reconstructed from the saved InkML, including declared coordinate resolution, differential trace encoding, brush dimensions, pressure and rectangular highlighter tips. It retains the original coordinate frame instead of fitting the trace to its bounds. Pencil grain is generated at 300 dpi and embedded in the SVG; its texture and soft edges remain an approximation of native rendering. The artistic picture contains an unchanged saved bitmap and effect metadata. Matching that bitmap demonstrates preservation only; it does not demonstrate applying the artistic effect to an original image.
 
@@ -53,7 +53,7 @@ Generate the fixed pages from a local source containing the retained drawing obj
 
 ```sh
 python3 scripts/image-fidelity/art-gallery.py --source INPUT.docx --output OUTPUT
-cargo run -p rust-docx --example image_fidelity -- OUTPUT/office-art-gallery.docx OUTPUT/model.json
+cargo run -p duke-pages --example image_fidelity -- OUTPUT/office-art-gallery.docx OUTPUT/model.json
 python3 scripts/image-fidelity/prepare-pages.py --directory OUTPUT --model OUTPUT/model.json
 ```
 

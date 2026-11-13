@@ -259,7 +259,7 @@ def main():
     harness_sha256 = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     reference = json.loads((OUT / args.cohort_phase / 'assessment.json').read_text())
     manifest = {r['id']: r for r in json.loads((OUT / args.cohort_phase / 'cohort.json').read_text())}
-    eligible = sorted([r for r in reference['rows'] if r['engine'] == 'rust-pptx' and r['id'] in reference['common_ids']], key=lambda r: r['median_ms'])
+    eligible = sorted([r for r in reference['rows'] if r['engine'] == 'duke-slides' and r['id'] in reference['common_ids']], key=lambda r: r['median_ms'])
     count = min(args.count, len(eligible))
     selected = [eligible[round(i * (len(eligible) - 1) / max(1, count - 1))]['id'] for i in range(count)]
     if (args.exact_gate or args.object_editing_gate) and not set(selected).issubset({record['id'] for record in records}):
@@ -279,7 +279,7 @@ def main():
         raise SystemExit('Timing output already exists; preserve the original run.')
     with output.open('w', buffering=1) as stream:
         for ident in selected:
-            engines = [('baseline', baseline, 'rust-pptx'), ('candidate', candidate, 'rust-pptx'), ('office_oxide', peer_binary, 'office_oxide'), ('undoc', peer_binary, 'undoc')]
+            engines = [('baseline', baseline, 'duke-slides'), ('candidate', candidate, 'duke-slides'), ('office_oxide', peer_binary, 'office_oxide'), ('undoc', peer_binary, 'undoc')]
             rng.shuffle(engines)
             for label, binary, engine in engines:
                 record = invoke(binary, engine, manifest[ident], '-', 7)

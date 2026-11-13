@@ -67,7 +67,7 @@ def main():
     with zipfile.ZipFile(path, 'w', zipfile.ZIP_DEFLATED) as package:
         for name, data in parts.items(): package.writestr(name, data)
     target = OUT / 'structured-content.json.gz'
-    result = subprocess.run([sys.argv[1] if len(sys.argv) > 1 else str(ROOT / 'scripts/pptx-benchmark/target/release/pptx-benchmark'), 'rust-pptx', str(path), str(target), '0', 'full'], capture_output=True, text=True, check=True)
+    result = subprocess.run([sys.argv[1] if len(sys.argv) > 1 else str(ROOT / 'scripts/pptx-benchmark/target/release/pptx-benchmark'), 'duke-slides', str(path), str(target), '0', 'full'], capture_output=True, text=True, check=True)
     record = json.loads(result.stdout.splitlines()[-1]); assert record['status'] == 'ok', record
     model = json.load(gzip.open(target, 'rt')); nodes = {n['id']: n for n in model['slides'][0]['nodes']}
     equations = {k: next(n['math'] for n in walk_objects(nodes[str(k)]) if n.get('math')) for k in range(1, 8)}

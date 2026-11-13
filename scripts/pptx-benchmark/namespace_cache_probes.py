@@ -59,12 +59,12 @@ def main():
             name = ('strict-' if strict else 'transitional-') + case
             path = (target / (name + '.pptx')).resolve(); make_package(path, case, strict)
             row = dict(id=name, path=str(path), sha256=hashlib.sha256(path.read_bytes()).hexdigest()); manifest.append(row)
-            before = compact(baseline, 'rust-pptx', row, target / (name + '.baseline.json.gz'), 0)
+            before = compact(baseline, 'duke-slides', row, target / (name + '.baseline.json.gz'), 0)
             record, document = invoke(run / 'candidate', row, target / (name + '.full.json.gz'))
             assert before['status'] == record['status'] == 'ok', (name, before, record)
             assert record['full_sha256'] == before['full_sha256'], name
             counts = dict(verify_sources(path, document))
-            result = compact(run / 'candidate', 'rust-pptx', row, target / (name + '.compact.json.gz'), 0)
+            result = compact(run / 'candidate', 'duke-slides', row, target / (name + '.compact.json.gz'), 0)
             result.update(id=name, artwork_hashes=artwork_hashes(document)); records.append(result)
             receipts.append(dict(id=name, passed=True, fields=counts, full_sha256=record['full_sha256']))
             print(name, counts['fields'], flush=True)

@@ -1,8 +1,12 @@
 # OpenDocument charts and artwork — 2026-11-12
 
+Latest follow-up: [OpenDocument parity and latency hill-climb](opendocument-hillclimb-20261113.md).
+
+The [November 13 follow-up](opendocument-fidelity-20261113.md) fixes additional corpus-derived chart gaps and reports fresh latency, extraction and visual measurements against this checkpoint.
+
 The ODF work adds shared Rust geometry evaluation, SVG artwork and chart data extraction. It does not establish complete visual parity with LibreOffice. The existing OpenDocument text benchmark measures a different property and is not evidence of graphic fidelity.
 
-Implementation lives in `rust-odf`, `rust-office-art::odf` and `rust-office-charts::odf`, with thin ODT and ODP/ODG adapters. Enhanced paths retain equations, modifiers, arcs, independent paint flags, mirrors and affine transforms. Chart parsing retains styles, cached values, repeated cells, sparse positions, series orientation and scatter/bubble domains. Named chart gradients, font properties, saved plot coordinates and circular-chart direction feed the shared chart renderer.
+Implementation lives in `duke-odf`, `duke-office-art::odf` and `duke-office-charts::odf`, with thin ODT and ODP/ODG adapters. Enhanced paths retain equations, modifiers, arcs, independent paint flags, mirrors and affine transforms. Chart parsing retains styles, cached values, repeated cells, sparse positions, series orientation and scatter/bubble domains. Named chart gradients, font properties, saved plot coordinates and circular-chart direction feed the shared chart renderer.
 
 ## Native comparison
 
@@ -22,7 +26,7 @@ The corpus-derived charts preserve chart content and styles in uniformly fitted 
 
 ## Downstream chart extraction
 
-`rust-office-charts::odf::extract_chart_data` returns the same `ChartData` structure as the Microsoft chart parsers: title, series type/name, zero-based point indices, categories, value, X, Y and bubble size. Original numeric spellings are retained instead of round-tripping through floating point. This path is independent of native SVG support, including unsupported 3D or secondary-axis artwork. Stored cache values are read; external workbooks and formulas are not recalculated.
+`duke-office-charts::odf::extract_chart_data` returns the same `ChartData` structure as the Microsoft chart parsers: title, series type/name, zero-based point indices, categories, value, X, Y and bubble size. Original numeric spellings are retained instead of round-tripping through floating point. This path is independent of native SVG support, including unsupported 3D or secondary-axis artwork. Stored cache values are read; external workbooks and formulas are not recalculated.
 
 ODT figures carry `chartPartName` and `chart_data`; document bundles collect model-owned chart data before looking for OOXML parts. ODP/ODG chart nodes supply the shared chart description, so existing presentation extraction bundles and `extract_chart_data` work. Existing saved previews remain usable while chart data is retained separately. With `includeCharts: true`, the public ODT, FODT, ODP, FODP, ODG and FODG bundles each return all 11 probe charts with identical data. ODS and FODS retain identical data through the shared ODF API.
 
@@ -35,3 +39,5 @@ Extend's native Word chart-table consumer already reads this `charts` map and it
 Radar layout, automatic label placement/rotation, chart labels and number formats, some gradients, advanced chart layouts and typography still differ. Native 3D and secondary-axis chart artwork is rejected while cached data remains available. Drawing extrusions, text warps, hatch/bitmap fills and extended geometry commands are not complete. Full Writer pagination, full Calc rendering, external chart-data resolution and every OpenDocument subtype were not visually validated. A saved preview can preserve appearance for features the native renderer does not yet reproduce.
 
 Validation includes workspace compilation, existing ODF import tests, shared chart tests, existing Word shape tests and the public-bundle evaluation probes. No new unit tests were added.
+
+The [automatic-layout and direct-extraction follow-up](opendocument-layout-extraction-20261113.md) records the next frozen-candidate comparison and its limitations.

@@ -41,7 +41,7 @@ def prepare_timing(out, baseline, binary):
         'binary_sha256': sha(target), 'source_sha256': source_identity(),
         'git_revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
         'rustc': subprocess.check_output(['rustc', '--version'], text=True).strip(),
-        'created_at': time.time(), 'engine_names': {'docx-core': 'rust-docx'},
+        'created_at': time.time(), 'engine_names': {'docx-core': 'duke-pages'},
     })
 
 

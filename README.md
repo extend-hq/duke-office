@@ -1,28 +1,30 @@
-# Rust Office
+# Duke Office
 
-[![CI](https://github.com/extend-hq/rust-office/actions/workflows/check.yml/badge.svg)](https://github.com/extend-hq/rust-office/actions/workflows/check.yml) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![CI](https://github.com/extend-hq/duke-office/actions/workflows/check.yml/badge.svg)](https://github.com/extend-hq/duke-office/actions/workflows/check.yml) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Rust parsers for Word, PowerPoint and [OpenDocument](docs/opendocument.md) text and presentations, shared Office chart and artwork rendering, and browser WASM bindings. Powers [React DOCX](https://github.com/extend-hq/react-docx), [React XLSX](https://github.com/extend-hq/react-xlsx), and [React PPTX](https://github.com/extend-hq/react-pptx). XLSX workbook parsing and calculation use DukeSheets in React XLSX.
+
+The crates and Rust imports use the `duke-` and `duke_` prefixes. Existing consumers must update their dependency names and imports to migrate. The first releases under these names retain the preceding version numbers. Historical benchmark images retain the labels captured at measurement time.
 
 ## Packages
 
 | Crate | Purpose | Version | Downloads | API docs |
 | --- | --- | --- | --- | --- |
-| [rust-office-charts](crates/rust-office-charts) | Render Office chart definitions to SVG | [![rust-office-charts version](https://img.shields.io/crates/v/rust-office-charts.svg)](https://crates.io/crates/rust-office-charts) | [![rust-office-charts downloads](https://img.shields.io/crates/d/rust-office-charts.svg)](https://crates.io/crates/rust-office-charts) | [![rust-office-charts documentation](https://docs.rs/rust-office-charts/badge.svg)](https://docs.rs/rust-office-charts) |
-| [rust-office-art](crates/rust-office-art) | Render Office pictures, shapes and connectors | [![rust-office-art version](https://img.shields.io/crates/v/rust-office-art.svg)](https://crates.io/crates/rust-office-art) | [![rust-office-art downloads](https://img.shields.io/crates/d/rust-office-art.svg)](https://crates.io/crates/rust-office-art) | [![rust-office-art documentation](https://docs.rs/rust-office-art/badge.svg)](https://docs.rs/rust-office-art) |
-| [rust-odf](crates/rust-odf) | Read OpenDocument packages, styles, text and drawings for the parsers | [![rust-odf version](https://img.shields.io/crates/v/rust-odf.svg)](https://crates.io/crates/rust-odf) | [![rust-odf downloads](https://img.shields.io/crates/d/rust-odf.svg)](https://crates.io/crates/rust-odf) | [![rust-odf documentation](https://docs.rs/rust-odf/badge.svg)](https://docs.rs/rust-odf) |
-| [rust-office-charts-wasm](crates/rust-office-charts-wasm) | WebAssembly bindings for Office chart rendering | [![rust-office-charts-wasm version](https://img.shields.io/crates/v/rust-office-charts-wasm.svg)](https://crates.io/crates/rust-office-charts-wasm) | [![rust-office-charts-wasm downloads](https://img.shields.io/crates/d/rust-office-charts-wasm.svg)](https://crates.io/crates/rust-office-charts-wasm) | [![rust-office-charts-wasm documentation](https://docs.rs/rust-office-charts-wasm/badge.svg)](https://docs.rs/rust-office-charts-wasm) |
-| [rust-docx](crates/rust-docx) | Parse Word documents into a structured document model | [![rust-docx version](https://img.shields.io/crates/v/rust-docx.svg)](https://crates.io/crates/rust-docx) | [![rust-docx downloads](https://img.shields.io/crates/d/rust-docx.svg)](https://crates.io/crates/rust-docx) | [![rust-docx documentation](https://docs.rs/rust-docx/badge.svg)](https://docs.rs/rust-docx) |
-| [rust-docx-wasm](crates/rust-docx-wasm) | WebAssembly bindings for the Word parser | [![rust-docx-wasm version](https://img.shields.io/crates/v/rust-docx-wasm.svg)](https://crates.io/crates/rust-docx-wasm) | [![rust-docx-wasm downloads](https://img.shields.io/crates/d/rust-docx-wasm.svg)](https://crates.io/crates/rust-docx-wasm) | [![rust-docx-wasm documentation](https://docs.rs/rust-docx-wasm/badge.svg)](https://docs.rs/rust-docx-wasm) |
-| [rust-pptx](crates/rust-pptx) | Parse PowerPoint presentations into a structured slide model | [![rust-pptx version](https://img.shields.io/crates/v/rust-pptx.svg)](https://crates.io/crates/rust-pptx) | [![rust-pptx downloads](https://img.shields.io/crates/d/rust-pptx.svg)](https://crates.io/crates/rust-pptx) | [![rust-pptx documentation](https://docs.rs/rust-pptx/badge.svg)](https://docs.rs/rust-pptx) |
-| [rust-pptx-wasm](crates/rust-pptx-wasm) | WebAssembly bindings for the PowerPoint parser | [![rust-pptx-wasm version](https://img.shields.io/crates/v/rust-pptx-wasm.svg)](https://crates.io/crates/rust-pptx-wasm) | [![rust-pptx-wasm downloads](https://img.shields.io/crates/d/rust-pptx-wasm.svg)](https://crates.io/crates/rust-pptx-wasm) | [![rust-pptx-wasm documentation](https://docs.rs/rust-pptx-wasm/badge.svg)](https://docs.rs/rust-pptx-wasm) |
+| [duke-office-charts](crates/duke-office-charts) | Render Office chart definitions to SVG | [![duke-office-charts version](https://img.shields.io/crates/v/duke-office-charts.svg)](https://crates.io/crates/duke-office-charts) | [![duke-office-charts downloads](https://img.shields.io/crates/d/duke-office-charts.svg)](https://crates.io/crates/duke-office-charts) | [![duke-office-charts documentation](https://docs.rs/duke-office-charts/badge.svg)](https://docs.rs/duke-office-charts) |
+| [duke-office-art](crates/duke-office-art) | Render Office pictures, shapes and connectors | [![duke-office-art version](https://img.shields.io/crates/v/duke-office-art.svg)](https://crates.io/crates/duke-office-art) | [![duke-office-art downloads](https://img.shields.io/crates/d/duke-office-art.svg)](https://crates.io/crates/duke-office-art) | [![duke-office-art documentation](https://docs.rs/duke-office-art/badge.svg)](https://docs.rs/duke-office-art) |
+| [duke-odf](crates/duke-odf) | Read OpenDocument packages, styles, text and drawings for the parsers | [![duke-odf version](https://img.shields.io/crates/v/duke-odf.svg)](https://crates.io/crates/duke-odf) | [![duke-odf downloads](https://img.shields.io/crates/d/duke-odf.svg)](https://crates.io/crates/duke-odf) | [![duke-odf documentation](https://docs.rs/duke-odf/badge.svg)](https://docs.rs/duke-odf) |
+| [duke-office-charts-wasm](crates/duke-office-charts-wasm) | WebAssembly bindings for Office chart rendering | [![duke-office-charts-wasm version](https://img.shields.io/crates/v/duke-office-charts-wasm.svg)](https://crates.io/crates/duke-office-charts-wasm) | [![duke-office-charts-wasm downloads](https://img.shields.io/crates/d/duke-office-charts-wasm.svg)](https://crates.io/crates/duke-office-charts-wasm) | [![duke-office-charts-wasm documentation](https://docs.rs/duke-office-charts-wasm/badge.svg)](https://docs.rs/duke-office-charts-wasm) |
+| [duke-pages](crates/duke-pages) | Parse Word documents into a structured document model | [![duke-pages version](https://img.shields.io/crates/v/duke-pages.svg)](https://crates.io/crates/duke-pages) | [![duke-pages downloads](https://img.shields.io/crates/d/duke-pages.svg)](https://crates.io/crates/duke-pages) | [![duke-pages documentation](https://docs.rs/duke-pages/badge.svg)](https://docs.rs/duke-pages) |
+| [duke-pages-wasm](crates/duke-pages-wasm) | WebAssembly bindings for the Word parser | [![duke-pages-wasm version](https://img.shields.io/crates/v/duke-pages-wasm.svg)](https://crates.io/crates/duke-pages-wasm) | [![duke-pages-wasm downloads](https://img.shields.io/crates/d/duke-pages-wasm.svg)](https://crates.io/crates/duke-pages-wasm) | [![duke-pages-wasm documentation](https://docs.rs/duke-pages-wasm/badge.svg)](https://docs.rs/duke-pages-wasm) |
+| [duke-slides](crates/duke-slides) | Parse PowerPoint presentations into a structured slide model | [![duke-slides version](https://img.shields.io/crates/v/duke-slides.svg)](https://crates.io/crates/duke-slides) | [![duke-slides downloads](https://img.shields.io/crates/d/duke-slides.svg)](https://crates.io/crates/duke-slides) | [![duke-slides documentation](https://docs.rs/duke-slides/badge.svg)](https://docs.rs/duke-slides) |
+| [duke-slides-wasm](crates/duke-slides-wasm) | WebAssembly bindings for the PowerPoint parser | [![duke-slides-wasm version](https://img.shields.io/crates/v/duke-slides-wasm.svg)](https://crates.io/crates/duke-slides-wasm) | [![duke-slides-wasm downloads](https://img.shields.io/crates/d/duke-slides-wasm.svg)](https://crates.io/crates/duke-slides-wasm) | [![duke-slides-wasm documentation](https://docs.rs/duke-slides-wasm/badge.svg)](https://docs.rs/duke-slides-wasm) |
 
-Install native parsers with `cargo add rust-docx` or `cargo add rust-pptx`; their Rust imports are `rust_docx` and `rust_pptx`. Each crate's README contains usage and API details.
+Install native parsers with `cargo add duke-pages` or `cargo add duke-slides`; their Rust imports are `duke_pages` and `duke_slides`. Each crate's README contains usage and API details.
 
-For browser charts, install `@extend-ai/rust-office-charts`:
+For browser charts, install `@extend-ai/duke-office-charts`:
 
 ```js
-import { loadOfficeCharts } from "@extend-ai/rust-office-charts/full";
+import { loadOfficeCharts } from "@extend-ai/duke-office-charts/full";
 
 const renderer = await loadOfficeCharts();
 const svg = renderer.renderChart(chartXml, options);
@@ -43,10 +45,10 @@ CI uses Rust 1.93.1 and Node.js 24. Install `wasm-pack` and run `npm run build:b
 
 | Work | Start here |
 | --- | --- |
-| Word parsing, source references and serialization | [rust-docx](crates/rust-docx), [structured export](docs/structured-export.md) |
-| PowerPoint parsing and slide models | [rust-pptx](crates/rust-pptx) |
-| Shared chart and artwork rendering | [rust-office-charts](crates/rust-office-charts), [rust-office-art](crates/rust-office-art), [art architecture](docs/office-art-architecture.md) |
-| Browser loaders and generated chart WASM | [browser](browser), [chart WASM bindings](crates/rust-office-charts-wasm) |
+| Word parsing, source references and serialization | [duke-pages](crates/duke-pages), [structured export](docs/structured-export.md) |
+| PowerPoint parsing and slide models | [duke-slides](crates/duke-slides) |
+| Shared chart and artwork rendering | [duke-office-charts](crates/duke-office-charts), [duke-office-art](crates/duke-office-art), [art architecture](docs/office-art-architecture.md) |
+| Browser loaders and generated chart WASM | [browser](browser), [chart WASM bindings](crates/duke-office-charts-wasm) |
 | Benchmarks and visual comparisons | [DOCX parser tools](scripts/parser-benchmark/README.md), [PPTX parser tools](scripts/pptx-benchmark/README.md), [chart tools](scripts/chart-fidelity/README.md), [art tools](scripts/image-fidelity/README.md) |
 | Versions and publication from main | [Release guide](RELEASING.md) |
 
@@ -96,7 +98,7 @@ November 4, 2026, React DOCX 0.14.0: **155/157 charts rendered**; two volume-sto
 
 ### Office Art
 
-[![Microsoft Word versus Rust Office Art: SmartArt, WordArt, 3D emoji models, icons, ink and 3D shapes](docs/readme-assets/word-officeart-expanded-overview.png)](docs/office-art-comparisons.md)
+[![Microsoft Word versus Duke Office Art: SmartArt, WordArt, 3D emoji models, icons, ink and 3D shapes](docs/readme-assets/word-officeart-expanded-overview.png)](docs/office-art-comparisons.md)
 
 November 6, 2026: **30 cases** through the native DOCX adapter. 3D models use saved Office previews; SmartArt uses saved drawing trees. WordArt, projected 3D shapes and ink are rendered, with remaining font, warp, shading and texture differences. Artistic-effect controls measure cache preservation.
 
@@ -134,23 +136,23 @@ November 2, 2026: **1,000 documents**, with latency measured on the **999 inputs
 
 Text and feature scores use independent source-XML references; they measure extraction, not rendering fidelity. A separate 25-document Word reference sample is included in the full report.
 
-[![DOCX feature recall heatmap: rust-docx, docx-rs, office_oxide and undoc across 23 source-XML checks](docs/readme-assets/docx-optimized-20261102-feature-recall.png)](docs/readme-assets/docx-optimized-20261102-feature-recall.png)
+[![DOCX feature recall heatmap: duke-pages, docx-rs, office_oxide and undoc across 23 source-XML checks](docs/readme-assets/docx-optimized-20261102-feature-recall.png)](docs/readme-assets/docx-optimized-20261102-feature-recall.png)
 
-Each cell is recall against the independent source-XML reference on all 1,000 inputs, on a fixed 0–100% scale. Gray cells are checks a parser's output model cannot express. rust-docx (November 2 build) leads or ties on 18 of 23 checks and matches all 1,069 source image occurrences to retained payload bytes. Its largest gap is exact horizontal-span anchors (96.492%); literal span text reaches 99.946%. The superseded image node-count proxy remains in the [original scoring details](docs/docx-benchmarks.md).
+Each cell is recall against the independent source-XML reference on all 1,000 inputs, on a fixed 0–100% scale. Gray cells are checks a parser's output model cannot express. duke-pages (November 2 build) leads or ties on 18 of 23 checks and matches all 1,069 source image occurrences to retained payload bytes. Its largest gap is exact horizontal-span anchors (96.492%); literal span text reaches 99.946%. The superseded image node-count proxy remains in the [original scoring details](docs/docx-benchmarks.md).
 
-[Results, feature recall and methodology](docs/docx-benchmarks.md) · [Benchmark tools](scripts/parser-benchmark/README.md) · [Source-reference data](crates/rust-docx/benchmarks/optimized-20261102/accuracy.json) · [Word-reference data](crates/rust-docx/benchmarks/word-reference-20261103/summary.json)
+[Results, feature recall and methodology](docs/docx-benchmarks.md) · [Benchmark tools](scripts/parser-benchmark/README.md) · [Source-reference data](crates/duke-pages/benchmarks/optimized-20261102/accuracy.json) · [Word-reference data](crates/duke-pages/benchmarks/word-reference-20261103/summary.json)
 
 ### PPTX parser benchmarks
 
-[![PPTX feature recall heatmap: rust-pptx and seven other PowerPoint parsers across 19 source-XML checks](docs/readme-assets/pptx-current-20261109-feature-recall.png)](docs/readme-assets/pptx-current-20261109-feature-recall.png)
+[![PPTX feature recall heatmap: duke-slides and seven other PowerPoint parsers across 19 source-XML checks](docs/readme-assets/pptx-current-20261109-feature-recall.png)](docs/readme-assets/pptx-current-20261109-feature-recall.png)
 
-November 9, 2026, rust-pptx 0.1.7 in its eager default (commit `d665c48`, phase `current-20261109`): **eight parsers on 630 OOXML inputs**, scored against **628 independent source-XML references**. Each cell is recall on a fixed 0–100% scale; failed parses count as zero, and gray cells are checks a parser's output model cannot express. These measure extraction, not rendering fidelity.
+November 9, 2026, duke-slides 0.1.7 in its eager default (commit `d665c48`, phase `current-20261109`): **eight parsers on 630 OOXML inputs**, scored against **628 independent source-XML references**. Each cell is recall on a fixed 0–100% scale; failed parses count as zero, and gray cells are checks a parser's output model cannot express. These measure extraction, not rendering fidelity.
 
-On the 610 common nonempty inputs, default parsing measures **1.112 ms median and 13.288 ms p95**, versus Office Oxide’s 0.323 ms and 3.884 ms. These are shared-machine native timings; rust-pptx includes model construction and generated artwork.
+On the 610 common nonempty inputs, default parsing measures **1.112 ms median and 13.288 ms p95**, versus Office Oxide’s 0.323 ms and 3.884 ms. These are shared-machine native timings; duke-slides includes model construction and generated artwork.
 
 The **retained follow-up implementation for 0.2.2** measures **0.982 ms median / 14.999 ms p95** on the same 610 inputs, versus the 0.2.1 implementation at **1.099 / 15.720 ms**, Office Oxide **0.338 / 3.701 ms** and undoc **0.337 / 10.207 ms** in that run: a median paired speedup of 1.106× over 0.2.1 with unchanged output. That run shared the machine with heavy unrelated load, so its absolute times are not comparable with the figures above. This preserves the full eager model and source-feature coverage, including the 0.2.1 fix for foreign-qualified text-style attributes. The revised target is a sub-1 ms median with verified feature advantages; this first result below 1 ms stays unconfirmed until a quiet-machine run reproduces it. The matrix above retains its original build and scoring provenance. [Latest audit and receipts](docs/pptx-parser-audit.md).
 
-rust-pptx leads or ties on 18 of 19 checks. Image payload occurrences reach 93.791%: all 113 misses are pictures with a preferred SVG alternative, where rust-pptx selects the SVG and retains the fallback bitmap separately, while the reference counts only the primary blip.
+duke-slides leads or ties on 18 of 19 checks. Image payload occurrences reach 93.791%: all 113 misses are pictures with a preferred SVG alternative, where duke-slides selects the SVG and retains the fallback bitmap separately, while the reference counts only the primary blip.
 
 [Specification audit, timing and methodology](docs/pptx-parser-audit.md) · [Benchmark tools](scripts/pptx-benchmark/README.md) · [Measurements](docs/readme-assets/pptx-current-20261109-feature-recall.csv) · [Provenance](docs/readme-assets/pptx-current-20261109-feature-recall.json)
 
