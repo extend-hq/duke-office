@@ -343,6 +343,7 @@ fn enrich_node(
         SlideNode::Chart {
             chart_part_name,
             chart_xml,
+            chart_data,
             chart_svg,
             ..
         } => {
@@ -352,10 +353,11 @@ fn enrich_node(
                 block.details["chartPartName"] = json!(part);
             }
             if assets.options.include_charts && !charts.contains_key(key) {
-                if let Some(data) = chart_xml
-                    .as_deref()
-                    .and_then(rust_office_charts::parse_chart_xml)
-                {
+                if let Some(data) = chart_data.as_deref().cloned().or_else(|| {
+                    chart_xml
+                        .as_deref()
+                        .and_then(rust_office_charts::parse_chart_xml)
+                }) {
                     assets.record(&data)?;
                     charts.insert(key.into(), data);
                 } else {

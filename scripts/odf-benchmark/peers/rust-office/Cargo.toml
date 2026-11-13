@@ -7,9 +7,20 @@ publish = false
 [workspace]
 
 [dependencies]
+serde_json = "1"
 rust-odf = { path = "../../../../crates/rust-odf" }
 rust-docx = { path = "../../../../crates/rust-docx" }
 rust-pptx = { path = "../../../../crates/rust-pptx" }
+
+rust-office-charts = { path = "../../../../crates/rust-office-charts" }
+
+[[bin]]
+name = "chart-data"
+path = "../../chart_data.rs"
+
+[[bin]]
+name = "chart-extraction"
+path = "../../extraction.rs"
 
 [profile.release]
 opt-level = 3

@@ -122,7 +122,7 @@ pub fn parse_presentation_with_options(
         PresentationFormat::Pptx => pptx::parse(bytes, limits, options)?,
         PresentationFormat::Ppt => legacy::parse(bytes, limits)?,
         format @ (PresentationFormat::Odp | PresentationFormat::Odg) => {
-            odp::parse(bytes, limits, format)?
+            odp::parse(bytes, limits, format, options)?
         }
     };
     document.document_id = Some(presentation_identity(bytes));
@@ -260,7 +260,7 @@ pub fn parse_presentation_retained(
             retained: None,
         },
         format @ (PresentationFormat::Odp | PresentationFormat::Odg) => ParsedPresentation {
-            document: odp::parse(bytes, limits, format)?,
+            document: odp::parse(bytes, limits, format, options)?,
             retained: None,
         },
     };

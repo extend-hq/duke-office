@@ -228,6 +228,9 @@ pub enum SlideNode {
         /// viewers can render with full PowerPoint fidelity.
         #[serde(skip_serializing_if = "Option::is_none")]
         chart_xml: Option<String>,
+        /// Native chart data when the source format does not use DrawingML.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chart_data: Option<Box<crate::ChartData>>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         chart_part_name: Option<String>,
         /// Chart artwork at the dimensions of the slide frame.

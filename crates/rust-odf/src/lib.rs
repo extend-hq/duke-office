@@ -7,6 +7,7 @@
 
 pub mod chart;
 mod document;
+mod display;
 mod dom;
 pub mod draw;
 pub mod enhanced_geometry;

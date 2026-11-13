@@ -4,7 +4,8 @@ use crate::style::{Family, Gradient, Props, Scope, StyleSheet};
 use crate::text::Ctx;
 use crate::units::{parse_length, parse_number, Length};
 use crate::xml::{
-    attr, child, elements, is, owned, text_content, Node, CHART, OFFICE, SVG, TABLE, TEXT,
+    attr, child, elements, is, owned, text_content, Node, CHART, CHART_EXT, LO_EXT, OFFICE, STYLE,
+    SVG, TABLE, TEXT,
 };
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -12,10 +13,14 @@ pub struct Chart {
     pub class: String,
     pub title: Option<String>,
     pub title_style: Props,
+    pub title_position: Option<[Length; 2]>,
     pub subtitle: Option<String>,
     pub has_legend: bool,
     pub legend_position: Option<String>,
+    pub legend_expansion: Option<String>,
+    pub legend_size: Option<[Length; 2]>,
     pub legend_style: Props,
+    pub legend_coordinates: Option<[Length; 2]>,
     pub width: Option<Length>,
     pub height: Option<Length>,
     pub style: Props,
@@ -24,6 +29,8 @@ pub struct Chart {
     pub wall_style: Option<Props>,
     /// Saved coordinate region, in chart-local units.
     pub plot_bounds: Option<[Length; 4]>,
+    pub plot_bounds_include_labels: bool,
+    pub data_table_style: Option<Props>,
     pub axes: Vec<ChartAxis>,
     pub categories: Vec<String>,
     pub series: Vec<ChartSeries>,
@@ -36,6 +43,8 @@ pub struct ChartAxis {
     pub title: Option<String>,
     pub style: Props,
     pub major_grid: bool,
+    pub major_grid_style: Option<Props>,
+    pub number_format: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -195,6 +204,12 @@ pub(crate) fn parse_chart(body: Node<'_, '_>, ctx: &mut Ctx<'_>, styles: &StyleS
             attr(node, CHART, "style-name"),
         )
     };
+    let position = |node: Node<'_, '_>| {
+        Some([
+            attr(node, SVG, "x").and_then(parse_length)?,
+            attr(node, SVG, "y").and_then(parse_length)?,
+        ])
+    };
     let grid = child(chart, TABLE, "table")
         .map(|table| local_table(table, ctx))
         .unwrap_or_default();
@@ -203,7 +218,18 @@ pub(crate) fn parse_chart(body: Node<'_, '_>, ctx: &mut Ctx<'_>, styles: &StyleS
         title: heading(chart, "title"),
         subtitle: heading(chart, "subtitle"),
         title_style: child(chart, CHART, "title").map(props).unwrap_or_default(),
+        title_position: child(chart, CHART, "title").and_then(position),
         legend_style: child(chart, CHART, "legend").map(props).unwrap_or_default(),
+        legend_coordinates: child(chart, CHART, "legend").and_then(position),
+        data_table_style: child(chart, LO_EXT, "data-table").map(props),
+        legend_expansion: child(chart, CHART, "legend")
+            .and_then(|n| owned(n, STYLE, "legend-expansion")),
+        legend_size: child(chart, CHART, "legend").and_then(|n| {
+            Some([
+                attr(n, CHART_EXT, "width").and_then(parse_length)?,
+                attr(n, CHART_EXT, "height").and_then(parse_length)?,
+            ])
+        }),
         gradients: styles.gradients.clone(),
         has_legend: child(chart, CHART, "legend").is_some(),
         legend_position: child(chart, CHART, "legend")
@@ -230,7 +256,10 @@ pub(crate) fn parse_chart(body: Node<'_, '_>, ctx: &mut Ctx<'_>, styles: &StyleS
     };
     result.plot_style = props(plot);
     result.wall_style = child(plot, CHART, "wall").map(props);
-    result.plot_bounds = child(plot, CHART, "coordinate-region").and_then(|region| {
+    let region = child(plot, CHART, "coordinate-region")
+        .or_else(|| child(plot, CHART_EXT, "coordinate-region"));
+    result.plot_bounds_include_labels = region.is_none();
+    result.plot_bounds = Some(region.unwrap_or(plot)).and_then(|region| {
         Some([
             attr(region, SVG, "x").and_then(parse_length)?,
             attr(region, SVG, "y").and_then(parse_length)?,
@@ -238,6 +267,17 @@ pub(crate) fn parse_chart(body: Node<'_, '_>, ctx: &mut Ctx<'_>, styles: &StyleS
             attr(region, SVG, "height").and_then(parse_length)?,
         ])
     });
+    if region.is_some_and(|n| is(n, CHART_EXT, "coordinate-region"))
+        && ["auto-position", "auto-size"].iter().any(|key| {
+            result
+                .plot_style
+                .chart
+                .get(*key)
+                .is_some_and(|v| v == "true")
+        })
+    {
+        result.plot_bounds = None;
+    }
     let by_rows = result
         .plot_style
         .chart
@@ -259,27 +299,39 @@ pub(crate) fn parse_chart(body: Node<'_, '_>, ctx: &mut Ctx<'_>, styles: &StyleS
                     .map(|c| c.map_or_else(String::new, |c| c.text.clone()))
                     .collect();
             }
+            let style = props(node);
+            let number_format = style
+                .chart
+                .get("number-style-name")
+                .and_then(|name| styles.number_formats.get(name))
+                .cloned();
             result.axes.push(ChartAxis {
                 dimension: owned(node, CHART, "dimension").unwrap_or_default(),
                 name: owned(node, CHART, "name"),
                 title: heading(node, "title"),
-                style: props(node),
+                style,
                 major_grid: elements(node)
                     .any(|n| is(n, CHART, "grid") && attr(n, CHART, "class") == Some("major")),
+                major_grid_style: elements(node)
+                    .find(|n| is(*n, CHART, "grid") && attr(*n, CHART, "class") == Some("major"))
+                    .map(props),
+                number_format,
             });
         } else if is(node, CHART, "series") {
             let index = result.series.len() + 1;
-            let fallback: Vec<Option<&Cell>> = if by_rows {
-                grid.get(index)
-                    .into_iter()
-                    .flat_map(|row| row.iter().skip(1).map(Some))
-                    .collect()
-            } else {
-                grid.iter().skip(1).map(|row| row.get(index)).collect()
+            let fallback = || -> Vec<Option<&Cell>> {
+                if by_rows {
+                    grid.get(index)
+                        .into_iter()
+                        .flat_map(|row| row.iter().skip(1).map(Some))
+                        .collect()
+                } else {
+                    grid.iter().skip(1).map(|row| row.get(index)).collect()
+                }
             };
             let cells = attr(node, CHART, "values-cell-range-address")
                 .map(|address| range(&grid, address))
-                .unwrap_or(fallback);
+                .unwrap_or_else(fallback);
             let values = cells.iter().map(|c| c.and_then(|c| c.value)).collect();
             let raw_values = cells
                 .iter()
@@ -296,32 +348,22 @@ pub(crate) fn parse_chart(body: Node<'_, '_>, ctx: &mut Ctx<'_>, styles: &StyleS
                 }
                 .map(|c| c.text.clone()),
             };
-            let mut domains: Vec<Vec<Option<f64>>> = elements(node)
+            let (mut domains, mut raw_domains): (
+                Vec<Vec<Option<f64>>>,
+                Vec<Vec<Option<String>>>,
+            ) = elements(node)
                 .filter(|n| is(*n, CHART, "domain"))
                 .map(|n| {
                     attr(n, TABLE, "cell-range-address")
-                        .map(|a| {
-                            range(&grid, a)
+                        .map(|address| {
+                            range(&grid, address)
                                 .into_iter()
-                                .map(|c| c.and_then(|c| c.value))
-                                .collect()
+                                .map(|c| (c.and_then(|c| c.value), c.and_then(|c| c.raw_value.clone())))
+                                .unzip()
                         })
                         .unwrap_or_default()
                 })
-                .collect();
-            let mut raw_domains: Vec<Vec<Option<String>>> = elements(node)
-                .filter(|n| is(*n, CHART, "domain"))
-                .map(|n| {
-                    attr(n, TABLE, "cell-range-address")
-                        .map(|a| {
-                            range(&grid, a)
-                                .into_iter()
-                                .map(|c| c.and_then(|c| c.raw_value.clone()))
-                                .collect()
-                        })
-                        .unwrap_or_default()
-                })
-                .collect();
+                .unzip();
             for (i, domain) in domains.iter().enumerate() {
                 if shared_domains.len() <= i {
                     shared_domains.push(domain.clone());
@@ -338,11 +380,12 @@ pub(crate) fn parse_chart(body: Node<'_, '_>, ctx: &mut Ctx<'_>, styles: &StyleS
                     .and_then(|v| v.parse::<usize>().ok())
                     .unwrap_or(1)
                     .min(ctx.limits.max_repeat);
+                let style = props(point);
                 for _ in 0..repeat {
                     if !ctx.count() {
                         break;
                     }
-                    points.push(props(point));
+                    points.push(style.clone());
                 }
             }
             result.series.push(ChartSeries {

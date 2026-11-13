@@ -175,6 +175,7 @@ impl OdfDocument {
         styles.read_automatic(styles_root, Scope::Styles, &mut ctx);
         styles.read_automatic(content_root, Scope::Content, &mut ctx);
         styles.read_master_pages(styles_root, &mut ctx);
+        ctx.styles = Some(&styles);
 
         // A body normally holds one element; LibreOffice also reads repeated ones.
         let bodies: Vec<Node<'_, '_>> = child(content_root, OFFICE, "body")
@@ -261,6 +262,7 @@ impl OdfDocument {
                 }
             }
         }
+        let warnings = ctx.warnings.into_iter().collect();
         Ok(Self {
             kind: kind.unwrap_or(OdfKind {
                 family,
@@ -274,7 +276,7 @@ impl OdfDocument {
             objects,
             footers,
             date_times,
-            warnings: ctx.warnings.into_iter().collect(),
+            warnings,
         })
     }
 }

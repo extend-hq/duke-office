@@ -34,3 +34,28 @@ Everything the harness produces lives in a work directory outside version contro
 ## Limits
 
 LibreOffice is an application reference, not ground truth: its text export leaves out headers and footers, and its PDF export of slides includes master-page text and omits speaker notes. A parser that outputs those stories loses precision here even when the text is correct. The corpus is dominated by small regression-test files, so pooled scores follow the larger documents and per-file means follow the many small ones; both are reported.
+
+## Chart-data extraction cost
+
+The `chart-data` binary in `peers/rust-office` compares the direct shared ODF
+extraction API with serialization followed by the shared chart XML parser. Pass
+a file containing one input path per line. It visits embedded charts, requires
+identical `ChartData` values, and reports the fastest of 100 warm calls per chart
+in microseconds. Document parsing and rendering are outside this measurement;
+it is not an end-to-end document latency result.
+
+```sh
+cargo build --release --locked --manifest-path scripts/odf-benchmark/peers/rust-office/Cargo.toml --bin chart-data
+scripts/odf-benchmark/peers/rust-office/target/release/chart-data INPUT_LIST
+```
+
+### Direct presentation chart extraction
+
+The `chart-extraction` binary measures `parse_presentation_bundle` with `include_charts: true` and `include_artwork: false`, including JSON serialization of the complete bundle. Supply only supported presentation/drawing inputs. Its output files contain JSON, so compare them structurally; do not feed them to the text-fidelity scorer.
+
+```sh
+cargo build --release --manifest-path scripts/odf-benchmark/peers/rust-office/Cargo.toml --bin chart-extraction
+scripts/odf-benchmark/peers/rust-office/target/release/chart-extraction PRESENTATION_LIST JSON_OUTPUT_DIRECTORY > records.jsonl
+```
+
+Freeze both executables, use the same input list, run AB/BA passes after builds finish, and preserve output equality alongside timings. Report the whole corpus and chart-bearing subset separately. Deferred generation retains native chart data and saved assets; it is not a ZIP/XML-only benchmark.

@@ -231,6 +231,15 @@ pub(super) fn format_value(value: f64, code: Option<&str>) -> String {
     number_format::format(value, code).unwrap_or_else(|| value.to_string())
 }
 
+pub(super) fn odf_label_gap(axis: Option<Node>) -> f64 {
+    let outside = matches!(val(axis, "majorTickMark"), Some("out" | "cross"));
+    (1. + if outside { 1.5 } else { 0. }) * 96. / 25.4
+}
+
+pub(super) fn odf_date_label(serial: f64, code: &str) -> Option<String> {
+    date_label(if serial < 61. { serial - 1. } else { serial }, false, code)
+}
+
 pub(super) fn date_label(serial: f64, epoch_1904: bool, code: &str) -> Option<String> {
     if !(-657434. ..=2958465.).contains(&serial) || code.len() > 64 {
         return None;

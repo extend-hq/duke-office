@@ -84,7 +84,12 @@ fn paint(out: &mut String, props: &Props, default: Option<&str>, chart: &Chart) 
     } else if let Some(color) = p.fill_color.as_deref().or(default) {
         let _ = write!(out, "<a:solidFill><a:srgbClr val=\"{color}\"><a:alpha val=\"{}\"/></a:srgbClr></a:solidFill>", (p.opacity.unwrap_or(1.0).clamp(0.0, 1.0)*100000.0).round());
     }
-    let _ = write!(out, "<a:ln w=\"{}\">", p.stroke_width.map_or(0, |w| w.0));
+    let _ = write!(
+        out,
+        "<a:ln w=\"{}\">",
+        p.stroke_width
+            .map_or(9525, |w| if w.0 <= 0 { 9525 } else { w.0 })
+    );
     if p.stroke == Some(Stroke::None) || (p.stroke.is_none() && p.stroke_color.is_none()) {
         out.push_str("<a:noFill/>");
     } else {
@@ -122,9 +127,18 @@ fn numbers(out: &mut String, role: &str, values: &[Option<f64>], raw: &[Option<S
 
 fn text_properties(out: &mut String, props: &Props, default_size: f64) {
     let size = props.text.points().unwrap_or(default_size) * 100.0;
+    let rotation = property(props, "rotation-angle")
+        .and_then(rust_odf::units::parse_number)
+        .map(|v| format!(" rot=\"{}\"", -v.clamp(-90.0, 90.0) * 60000.0))
+        .unwrap_or_default();
+    let wrap = if property(props, "line-break") == Some("true") {
+        "square"
+    } else {
+        "none"
+    };
     let _ = write!(
         out,
-        "<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz=\"{size}\" b=\"{}\" i=\"{}\">",
+        "<c:txPr><a:bodyPr{rotation} wrap=\"{wrap}\"/><a:lstStyle/><a:p><a:pPr><a:defRPr sz=\"{size}\" b=\"{}\" i=\"{}\">",
         u8::from(props.text.bold.unwrap_or(false)),
         u8::from(props.text.italic.unwrap_or(false))
     );
@@ -141,8 +155,27 @@ fn text_properties(out: &mut String, props: &Props, default_size: f64) {
     );
 }
 
-fn title(out: &mut String, text: &str, props: &Props) {
+fn position_layout(
+    out: &mut String,
+    position: Option<[rust_odf::units::Length; 2]>,
+    chart: &Chart,
+) {
+    if let (Some([x, y]), Some(width), Some(height)) = (position, chart.width, chart.height) {
+        if width.0 > 0 && height.0 > 0 {
+            let _ = write!(out, "<c:layout><c:manualLayout><c:xMode val=\"factor\"/><c:yMode val=\"factor\"/><c:x val=\"{}\"/><c:y val=\"{}\"/></c:manualLayout></c:layout>", x.0 as f64 / width.0 as f64, y.0 as f64 / height.0 as f64);
+        }
+    }
+}
+
+fn title(
+    out: &mut String,
+    text: &str,
+    props: &Props,
+    position: Option<[rust_odf::units::Length; 2]>,
+    chart: &Chart,
+) {
     let _ = write!(out, "<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>{}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val=\"0\"/>", escaped(text));
+    position_layout(out, position, chart);
     text_properties(out, props, 14.0);
     out.push_str("</c:title>");
 }
@@ -160,7 +193,13 @@ pub fn chart_xml(chart: &Chart) -> Option<String> {
     text_properties(&mut out, &chart.style, 10.0);
     out.push_str("<c:chart>");
     if let Some(text) = &chart.title {
-        title(&mut out, text, &chart.title_style);
+        title(
+            &mut out,
+            text,
+            &chart.title_style,
+            chart.title_position,
+            chart,
+        );
     } else {
         out.push_str("<c:autoTitleDeleted val=\"1\"/>");
     }
@@ -169,7 +208,12 @@ pub fn chart_xml(chart: &Chart) -> Option<String> {
         (chart.plot_bounds, chart.width, chart.height)
     {
         if width.0 > 0 && height.0 > 0 && w.0 > 0 && h.0 > 0 {
-            let _ = write!(out, "<c:layout><c:manualLayout><c:layoutTarget val=\"inner\"/><c:xMode val=\"factor\"/><c:yMode val=\"factor\"/><c:wMode val=\"factor\"/><c:hMode val=\"factor\"/><c:x val=\"{}\"/><c:y val=\"{}\"/><c:w val=\"{}\"/><c:h val=\"{}\"/></c:manualLayout></c:layout>", x.0 as f64/width.0 as f64, y.0 as f64/height.0 as f64, w.0 as f64/width.0 as f64, h.0 as f64/height.0 as f64);
+            let target = if chart.plot_bounds_include_labels {
+                "outer"
+            } else {
+                "inner"
+            };
+            let _ = write!(out, "<c:layout><c:manualLayout><c:layoutTarget val=\"{target}\"/><c:xMode val=\"factor\"/><c:yMode val=\"factor\"/><c:wMode val=\"factor\"/><c:hMode val=\"factor\"/><c:x val=\"{}\"/><c:y val=\"{}\"/><c:w val=\"{}\"/><c:h val=\"{}\"/></c:manualLayout></c:layout>", x.0 as f64/width.0 as f64, y.0 as f64/height.0 as f64, w.0 as f64/width.0 as f64, h.0 as f64/height.0 as f64);
         }
     }
     let horizontal = property(&chart.plot_style, "vertical") == Some("true");
@@ -253,7 +297,17 @@ pub fn chart_xml(chart: &Chart) -> Option<String> {
             }
             if matches!(k, "line" | "scatter" | "radar") && style.graphic.stroke.is_none() {
                 style.graphic.stroke = Some(Stroke::Solid);
-                style.graphic.stroke_width = Some(rust_odf::units::Length(12700));
+                style
+                    .graphic
+                    .stroke_width
+                    .get_or_insert(rust_odf::units::Length(12700));
+            }
+            if style.graphic.stroke.is_none() {
+                style.graphic.stroke = Some(Stroke::Solid);
+                style
+                    .graphic
+                    .stroke_color
+                    .get_or_insert_with(|| "000000".into());
             }
             paint(
                 &mut out,
@@ -348,7 +402,12 @@ pub fn chart_xml(chart: &Chart) -> Option<String> {
             );
         }
         if k == "bar" {
-            let gap = property(&chart.plot_style, "gap-width")
+            let gap = chart
+                .axes
+                .iter()
+                .find(|axis| axis.dimension == "y")
+                .and_then(|axis| property(&axis.style, "gap-width"))
+                .or_else(|| property(&chart.plot_style, "gap-width"))
                 .and_then(|v| v.parse::<u32>().ok())
                 .unwrap_or(100);
             let _ = write!(
@@ -396,17 +455,25 @@ pub fn chart_xml(chart: &Chart) -> Option<String> {
             let reversed = axis
                 .is_some_and(|a| property(&a.style, "reverse-direction") == Some("true"))
                 ^ (main_kind == "radar" && dimension == "x");
-            let _ = write!(out, "<c:orientation val=\"{}\"/></c:scaling><c:delete val=\"{}\"/><c:axPos val=\"{}\"/>", if reversed { "maxMin" } else { "minMax" }, u8::from(axis.is_some_and(|a| property(&a.style, "display-label") == Some("false"))), if (dimension == "x") != horizontal { "b" } else { "l" });
+            let _ = write!(out, "<c:orientation val=\"{}\"/></c:scaling><c:delete val=\"{}\"/><c:axPos val=\"{}\"/>", if reversed { "maxMin" } else { "minMax" }, u8::from(axis.is_some_and(|a| property(&a.style, "visible") == Some("false"))), if (dimension == "x") != horizontal { "b" } else { "l" });
             if let Some(axis) = axis {
                 if axis.major_grid {
-                    out.push_str("<c:majorGridlines/>");
+                    out.push_str("<c:majorGridlines>");
+                    if let Some(style) = &axis.major_grid_style {
+                        let mut style = style.clone();
+                        style.graphic.stroke.get_or_insert(Stroke::Solid);
+                        paint(&mut out, &style, None, chart);
+                    }
+                    out.push_str("</c:majorGridlines>");
                 }
                 if let Some(text) = &axis.title {
-                    title(&mut out, text, &axis.style);
+                    title(&mut out, text, &axis.style, None, chart);
                 }
                 let mut style = axis.style.clone();
                 style.text.inherit(&chart.style.text);
+                style.graphic.stroke.get_or_insert(Stroke::Solid);
                 text_properties(&mut out, &style, 10.0);
+                paint(&mut out, &style, None, chart);
                 if let Some(v) = property(&axis.style, "interval-major")
                     .and_then(rust_odf::units::parse_number)
                     .filter(|v| *v > 0.0)
@@ -414,7 +481,26 @@ pub fn chart_xml(chart: &Chart) -> Option<String> {
                     let _ = write!(out, "<c:majorUnit val=\"{v}\"/>");
                 }
             }
-            let _ = write!(out, "<c:numFmt formatCode=\"General\" sourceLinked=\"0\"/><c:tickLblPos val=\"nextTo\"/><c:majorTickMark val=\"out\"/><c:minorTickMark val=\"none\"/><c:crossAx val=\"{cross}\"/><c:crosses val=\"autoZero\"/><c:crossBetween val=\"{}\"/></c:{tag}>", if main_kind == "bar" { "between" } else { "midCat" });
+            let format = axis
+                .and_then(|a| a.number_format.as_deref())
+                .unwrap_or("General");
+            let labels =
+                if axis.is_some_and(|a| property(&a.style, "display-label") == Some("false")) {
+                    "none"
+                } else {
+                    "nextTo"
+                };
+            let inner =
+                axis.is_some_and(|a| property(&a.style, "tick-marks-major-inner") == Some("true"));
+            let outer =
+                axis.is_none_or(|a| property(&a.style, "tick-marks-major-outer") != Some("false"));
+            let tick = match (inner, outer) {
+                (true, true) => "cross",
+                (true, false) => "in",
+                (false, true) => "out",
+                _ => "none",
+            };
+            let _ = write!(out, "<c:numFmt formatCode=\"{}\" sourceLinked=\"0\"/><c:tickLblPos val=\"{labels}\"/><c:majorTickMark val=\"{tick}\"/><c:minorTickMark val=\"none\"/><c:crossAx val=\"{cross}\"/><c:crosses val=\"autoZero\"/><c:crossBetween val=\"{}\"/></c:{tag}>", escaped(format), if main_kind == "bar" || chart.data_table_style.is_some() { "between" } else { "midCat" });
         }
     }
     if matches!(main_kind, "bar" | "line" | "area" | "scatter" | "bubble") {
@@ -425,12 +511,35 @@ pub fn chart_xml(chart: &Chart) -> Option<String> {
             chart,
         );
     }
+    if let Some(style) = &chart.data_table_style {
+        out.push_str("<c:dTable>");
+        for (source, target) in [
+            ("show-horizontal-border", "showHorzBorder"),
+            ("show-vertical-border", "showVertBorder"),
+            ("show-outline", "showOutline"),
+            ("show-keys", "showKeys"),
+        ] {
+            let _ = write!(
+                out,
+                "<c:{target} val=\"{}\"/>",
+                u8::from(property(style, source) == Some("true"))
+            );
+        }
+        text_properties(&mut out, style, 10.0);
+        paint(&mut out, style, None, chart);
+        out.push_str("</c:dTable>");
+    }
     out.push_str("</c:plotArea>");
     if chart.has_legend {
         let position = match chart.legend_position.as_deref() {
             Some("start") => "l",
-            Some("top") => "t",
-            Some("bottom") => "b",
+            Some("top" | "top-start" | "top-end") => "t",
+            Some("bottom" | "bottom-start" | "bottom-end") => "b",
+            None if chart.legend_expansion.as_deref() == Some("wide")
+                || chart.legend_size.is_some_and(|[w, h]| w.0 > h.0) =>
+            {
+                "t"
+            }
             _ => "r",
         };
         let _ = write!(
@@ -439,6 +548,8 @@ pub fn chart_xml(chart: &Chart) -> Option<String> {
         );
         let mut style = chart.legend_style.clone();
         style.text.inherit(&chart.style.text);
+        style.graphic.stroke.get_or_insert(Stroke::Solid);
+        position_layout(&mut out, chart.legend_coordinates, chart);
         text_properties(&mut out, &style, 10.0);
         paint(&mut out, &style, None, chart);
         out.push_str("</c:legend>");
@@ -451,7 +562,117 @@ pub fn chart_xml(chart: &Chart) -> Option<String> {
 
 /// Extracts stored series independently of native artwork support.
 pub fn extract_chart_data(chart: &Chart) -> Option<crate::ChartData> {
-    crate::parse_chart_xml(&chart_xml(chart)?)
+    use crate::chart::{ChartCategory, ChartData, ChartPoint, ChartSeries};
+    use std::collections::BTreeMap;
+    kind(&chart.class)?;
+    if chart.series.is_empty() {
+        return None;
+    }
+    let mut groups = Vec::new();
+    for series in &chart.series {
+        let k = series_kind(chart, series)?;
+        if !groups.contains(&k) {
+            groups.push(k);
+        }
+    }
+    let numeric = |values: &[Option<f64>], raw: &[Option<String>]| {
+        values
+            .iter()
+            .enumerate()
+            .filter_map(|(i, n)| {
+                let n = n.filter(|n| n.is_finite())?;
+                Some((
+                    i as u32,
+                    raw.get(i)
+                        .and_then(Clone::clone)
+                        .unwrap_or_else(|| n.to_string()),
+                ))
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut series = Vec::with_capacity(chart.series.len());
+    for k in groups {
+        for stored in chart
+            .series
+            .iter()
+            .filter(|s| series_kind(chart, s) == Some(k))
+        {
+            let mut points = BTreeMap::new();
+            let mut channel = |values: Vec<(u32, String)>, role: u8| {
+                for (index, value) in values {
+                    let p = points.entry(index).or_insert_with(|| ChartPoint {
+                        index,
+                        ..Default::default()
+                    });
+                    match role {
+                        0 => p.value = Some(value),
+                        1 => p.x = Some(value),
+                        2 => p.y = Some(value),
+                        3 => p.bubble_size = Some(value),
+                        _ => p.categories.push(ChartCategory {
+                            level: 0,
+                            label: value,
+                        }),
+                    }
+                }
+            };
+            if matches!(k, "scatter" | "bubble") {
+                let domain = usize::from(k == "bubble");
+                channel(
+                    stored.domains.get(domain).map_or_else(
+                        || {
+                            (1..=stored.values.len())
+                                .map(|n| ((n - 1) as u32, n.to_string()))
+                                .collect()
+                        },
+                        |v| {
+                            numeric(
+                                v,
+                                stored
+                                    .raw_domains
+                                    .get(domain)
+                                    .map(Vec::as_slice)
+                                    .unwrap_or(&[]),
+                            )
+                        },
+                    ),
+                    1,
+                );
+                if k == "bubble" {
+                    channel(
+                        numeric(
+                            stored.domains.first().unwrap_or(&stored.values),
+                            stored.raw_domains.first().unwrap_or(&stored.raw_values),
+                        ),
+                        2,
+                    );
+                    channel(numeric(&stored.values, &stored.raw_values), 3);
+                } else {
+                    channel(numeric(&stored.values, &stored.raw_values), 2);
+                }
+            } else {
+                channel(
+                    chart
+                        .categories
+                        .iter()
+                        .enumerate()
+                        .map(|(i, s)| (i as u32, s.clone()))
+                        .collect(),
+                    4,
+                );
+                channel(numeric(&stored.values, &stored.raw_values), 0);
+            }
+            series.push(ChartSeries {
+                chart_type: k.into(),
+                name: stored.name.clone(),
+                points: points.into_values().collect(),
+            });
+        }
+    }
+    Some(ChartData {
+        title: chart.title.clone().filter(|t| !t.is_empty()),
+        series,
+    })
 }
 
 pub fn render_chart(chart: &Chart, width: f64, height: f64) -> Option<RenderedChart> {

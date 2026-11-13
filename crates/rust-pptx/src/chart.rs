@@ -13,9 +13,16 @@ pub fn extract_chart_data(document: &PresentationDocument, part_name: &str) -> O
         match node {
             SlideNode::Chart {
                 chart_part_name: Some(part),
-                chart_xml: Some(xml),
+                chart_data,
+                chart_xml,
                 ..
-            } if part == part_name => return rust_office_charts::parse_chart_xml(xml),
+            } if part == part_name => {
+                return chart_data.as_deref().cloned().or_else(|| {
+                    chart_xml
+                        .as_deref()
+                        .and_then(rust_office_charts::parse_chart_xml)
+                })
+            }
             SlideNode::Group { children, .. } => pending.extend(children),
             _ => {}
         }

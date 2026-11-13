@@ -22,6 +22,9 @@ pub(crate) enum Ns {
     Dr3d,
     DrawExt,
     Chart,
+    ChartExt,
+    LibreOfficeExt,
+    Number,
     Xlink,
     Dc,
     MathMl,
@@ -47,6 +50,7 @@ impl Ns {
                 "meta:1.0" => Self::Meta,
                 "dr3d:1.0" => Self::Dr3d,
                 "chart:1.0" => Self::Chart,
+                "datastyle:1.0" => Self::Number,
                 _ => Self::OtherOdf,
             };
         }
@@ -56,6 +60,10 @@ impl Ns {
             "http://www.w3.org/1998/Math/MathML" => Self::MathMl,
             "http://www.w3.org/XML/1998/namespace" => Self::Xml,
             "http://openoffice.org/2010/draw" => Self::DrawExt,
+            "http://openoffice.org/2010/chart" => Self::ChartExt,
+            "urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0" => {
+                Self::LibreOfficeExt
+            }
             uri if uri.starts_with("urn:oasis:names:tc:opendocument:") => Self::OtherOdf,
             _ => Self::Foreign,
         }
@@ -64,7 +72,15 @@ impl Ns {
     /// An element from outside OpenDocument, which readers treat as if only
     /// its content were there.
     pub(crate) fn is_foreign(self) -> bool {
-        matches!(self, Self::Foreign | Self::Xlink | Self::Dc | Self::Xml)
+        matches!(
+            self,
+            Self::Foreign
+                | Self::Xlink
+                | Self::Dc
+                | Self::Xml
+                | Self::ChartExt
+                | Self::LibreOfficeExt
+        )
     }
 }
 
@@ -376,7 +392,6 @@ impl<'i> Document<'i> {
         // and its name as written, which its end tag must repeat.
         let mut open: Vec<(u32, u32, usize, &'i str)> = vec![(0, 0, 0, "")];
         let mut scopes = Scopes::new();
-        let mut pending: Vec<(&'i str, &'i str)> = Vec::new();
         let mut position = 0;
         while position < bytes.len() {
             if bytes[position] != b'<' {
@@ -428,7 +443,7 @@ impl<'i> Document<'i> {
                     }
                     let bindings = scopes.bindings.len();
                     let (id, qualified, after, empty) =
-                        document.element(position, &mut scopes, &mut pending, max_nodes)?;
+                        document.element(position, &mut scopes, max_nodes)?;
                     document.nodes[id as usize].source = (position as u32, after as u32);
                     document.link(&mut open, id);
                     if open.len() == 1 {
@@ -542,7 +557,6 @@ impl<'i> Document<'i> {
         &mut self,
         start: usize,
         scopes: &mut Scopes<'i>,
-        pending: &mut Vec<(&'i str, &'i str)>,
         max_nodes: usize,
     ) -> Result<(u32, &'i str, usize, bool), DomError> {
         let input = self.input;
@@ -555,7 +569,7 @@ impl<'i> Document<'i> {
         if qualified.is_empty() {
             return Err(malformed("a tag without a name"));
         }
-        pending.clear();
+        let first = self.attributes.len();
         let empty = loop {
             while bytes.get(cursor).is_some_and(|byte| is_space(*byte)) {
                 cursor += 1;
@@ -603,32 +617,32 @@ impl<'i> Document<'i> {
             match key.strip_prefix("xmlns") {
                 Some("") => scopes.declare("", &unescape(value)?),
                 Some(prefix) if prefix.starts_with(':') => scopes.declare(&prefix[1..], &unescape(value)?),
-                _ => pending.push((key, value)),
+                _ => self.attributes.push(Attribute {
+                    namespace: None,
+                    name: key,
+                    value: unescape(value)?,
+                }),
             }
         };
         let (namespace, name) = match qualified.split_once(':') {
             Some((prefix, name)) => (scopes.resolve(prefix), name),
             None => (scopes.resolve(""), qualified),
         };
-        let first = self.attributes.len() as u32;
-        for (key, value) in pending.iter() {
+        for attribute in &mut self.attributes[first..] {
             // An attribute without a prefix has no namespace.
-            let (namespace, name) = match key.split_once(':') {
+            let (namespace, name) = match attribute.name.split_once(':') {
                 Some((prefix, name)) => (scopes.resolve(prefix), name),
-                None => (None, *key),
+                None => (None, attribute.name),
             };
-            self.attributes.push(Attribute {
-                namespace,
-                name,
-                value: unescape(value)?,
-            });
+            attribute.namespace = namespace;
+            attribute.name = name;
         }
         let id = self.push(
             NodeData {
                 name,
                 namespace,
                 text: Cow::Borrowed(""),
-                attributes: (first, self.attributes.len() as u32),
+                attributes: (first as u32, self.attributes.len() as u32),
                 parent: 0,
                 first_child: 0,
                 next_sibling: 0,

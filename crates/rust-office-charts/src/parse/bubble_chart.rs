@@ -25,7 +25,15 @@ impl Axis {
         nominal_radius: f64,
         label_spacing: f64,
     ) -> Self {
-        Self::with_defaults(raw, node, length, nominal_radius, label_spacing, false)
+        Self::with_defaults(
+            raw,
+            node,
+            length,
+            nominal_radius,
+            label_spacing,
+            false,
+            false,
+        )
     }
 
     fn spreadsheet(
@@ -35,7 +43,33 @@ impl Axis {
         nominal_radius: f64,
         label_spacing: f64,
     ) -> Self {
-        Self::with_defaults(raw, node, length, nominal_radius, label_spacing, true)
+        Self::with_defaults(
+            raw,
+            node,
+            length,
+            nominal_radius,
+            label_spacing,
+            true,
+            false,
+        )
+    }
+
+    fn opendocument(
+        raw: (f64, f64),
+        node: Option<Node>,
+        length: f64,
+        nominal_radius: f64,
+        label_spacing: f64,
+    ) -> Self {
+        Self::with_defaults(
+            raw,
+            node,
+            length,
+            nominal_radius,
+            label_spacing,
+            false,
+            true,
+        )
     }
 
     fn with_defaults(
@@ -45,6 +79,7 @@ impl Axis {
         nominal_radius: f64,
         label_spacing: f64,
         spreadsheet: bool,
+        opendocument: bool,
     ) -> Self {
         let scaling = node.and_then(|n| child(n, "scaling"));
         let explicit_min = number(val(scaling, "min"));
@@ -68,12 +103,16 @@ impl Axis {
             lo -= delta;
             hi += delta;
         }
-        let zero_min = lo > 0. && lo <= hi * 0.5;
-        let zero_max = hi < 0. && hi >= lo * 0.5;
+        let zero_min = !opendocument && lo > 0. && lo <= hi * 0.5;
+        let zero_max = !opendocument && hi < 0. && hi >= lo * 0.5;
         let span = (if zero_max { 0. } else { hi }) - (if zero_min { 0. } else { lo });
-        let pad = nominal_radius.min(length * 0.35)
-            / (length - 2. * nominal_radius.min(length * 0.35)).max(1.)
-            * span;
+        let pad = if opendocument {
+            0.
+        } else {
+            nominal_radius.min(length * 0.35)
+                / (length - 2. * nominal_radius.min(length * 0.35)).max(1.)
+                * span
+        };
         let mut lower = if zero_min {
             (lo - pad).min(0.)
         } else {
@@ -89,9 +128,14 @@ impl Axis {
         if upper <= lower {
             upper = lower + lower.abs().max(1.);
         }
-        let intervals = (length / label_spacing.max(1.))
-            .floor()
-            .clamp(1., if spreadsheet { 10. } else { 40. });
+        let intervals = (length / label_spacing.max(1.)).floor().clamp(
+            1.,
+            if spreadsheet || opendocument {
+                10.
+            } else {
+                40.
+            },
+        );
         let desired = ((upper - lower) / intervals).max(1e-300);
         let decade = 10f64.powf(desired.log10().floor());
         let nice = [1., 2., 5., 10.]
@@ -102,8 +146,23 @@ impl Axis {
             .map(|n| n / multiplier)
             .filter(|u| *u > 0. && u.is_finite())
             .unwrap_or(decade * nice);
-        let low = explicit_min.map_or((lower / unit).floor() * unit, |v| v / multiplier);
-        let high = explicit_max.map_or((upper / unit).ceil() * unit, |v| v / multiplier);
+        if opendocument {
+            if lower != 0. {
+                lower -= span * 0.05;
+                if lo >= 0. {
+                    lower = lower.max(0.);
+                }
+            }
+            if upper != 0. {
+                upper += span * 0.05;
+                if hi <= 0. {
+                    upper = upper.min(0.);
+                }
+            }
+        }
+        let epsilon = if opendocument { 1e-10 } else { 0. };
+        let low = explicit_min.map_or((lower / unit + epsilon).floor() * unit, |v| v / multiplier);
+        let high = explicit_max.map_or((upper / unit - epsilon).ceil() * unit, |v| v / multiplier);
         let (low, high, unit) =
             if !low.is_finite() || !high.is_finite() || high <= low || !unit.is_finite() {
                 (lower, upper, upper - lower)
@@ -366,7 +425,8 @@ pub(super) fn render(
             svg.push_str(r#"<g font-weight="bold">"#);
         }
         let (x, y, anchor) = title_position(
-            child(chart, "title").filter(|_| colors.spreadsheet_defaults),
+            child(chart, "title")
+                .filter(|_| colors.spreadsheet_defaults || colors.opendocument_defaults),
             width,
             height,
             tf,
@@ -490,9 +550,9 @@ pub(super) fn render(
     } else {
         0.
     };
-    let top = ((if legacy { 8.9 } else { 7. }) + title_height + above + yf * (4. / 7.))
+    let mut top = ((if legacy { 8.9 } else { 7. }) + title_height + above + yf * (4. / 7.))
         .min(height * 0.75);
-    let bottom = (height - 7. - below - legacy_pad - yf * (4. / 7.)).max(top + 1.);
+    let mut bottom = (height - 7. - below - legacy_pad - yf * (4. / 7.)).max(top + 1.);
     // Size against the space left by the title and legend before allocating tick labels.
     // The diameter occupies 30% of the shorter dimension, including its own padding.
     let preliminary = (height - 2. * inset - title_height - legend_height)
@@ -501,7 +561,7 @@ pub(super) fn render(
     let bubble_scale =
         (number(val(Some(group), "bubbleScale")).unwrap_or(100.) / 100.).clamp(0., 3.);
     let radius = |length: f64, scale: f64| length.max(1.) * 0.15 * scale / (1. + 0.3 * scale);
-    let max_radius = radius(preliminary, bubble_scale);
+    let mut max_radius = radius(preliminary, bubble_scale);
     let axis_scale = if colors.spreadsheet_defaults {
         bubble_scale
     } else {
@@ -519,12 +579,14 @@ pub(super) fn render(
         },
         axis_scale,
     );
-    let make_axis = if colors.spreadsheet_defaults {
+    let make_axis = if colors.opendocument_defaults {
+        Axis::opendocument
+    } else if colors.spreadsheet_defaults {
         Axis::spreadsheet
     } else {
         Axis::new
     };
-    let y_axis = make_axis(yr, y_ax, bottom - top, nominal_y_radius, yf * 1.4);
+    let mut y_axis = make_axis(yr, y_ax, bottom - top, nominal_y_radius, yf * 1.4);
     let y_labels = val(y_ax, "tickLblPos") != Some("none") && !on(val(y_ax, "delete"));
     let widest_y = y_axis
         .ticks()
@@ -554,6 +616,24 @@ pub(super) fn render(
     }
     left = left.min(width - 2.);
     right = right.max(left + 1.);
+    if colors.opendocument_defaults {
+        let manual = child(plot, "layout").and_then(|n| child(n, "manualLayout"));
+        if let (Some(x), Some(y), Some(w), Some(h)) = (
+            number(val(manual, "x")),
+            number(val(manual, "y")),
+            number(val(manual, "w")),
+            number(val(manual, "h")),
+        ) {
+            if w > 0. && h > 0. {
+                left = x * width;
+                right = (x + w) * width;
+                top = y * height;
+                bottom = (y + h) * height;
+            }
+        }
+        max_radius = (right - left).min(bottom - top).max(1.) * 0.125 * bubble_scale;
+        y_axis = make_axis(yr, y_ax, bottom - top, 0., yf * 1.4);
+    }
     x_axis = make_axis(xr, x_ax, right - left, nominal_x_radius, xf * 3.5);
     if legacy
         && xr.0 >= 0.
@@ -576,6 +656,11 @@ pub(super) fn render(
         (true, x_ax, &x_axis, xf, &xface, x_labels),
         (false, y_ax, &y_axis, yf, &yface, y_labels),
     ] {
+        let gap = if colors.opendocument_defaults {
+            super::chart_svg::odf_label_gap(node)
+        } else {
+            font * 0.9
+        };
         let deleted = on(val(node, "delete"));
         let grid = node.and_then(|n| child(n, "majorGridlines"));
         let grid_stroke = grid.map(|n| shape_paint(n, "none", axis_ink).1);
@@ -583,7 +668,13 @@ pub(super) fn render(
             .map(|n| shape_paint(n, "none", axis_ink).1)
             .unwrap_or_else(|| axis_ink.to_owned());
         let tick = match val(node, "majorTickMark") {
-            Some("out" | "cross" | "in") => font * 0.317,
+            Some("out" | "cross" | "in") => {
+                if colors.opendocument_defaults {
+                    1.5 * 96. / 25.4
+                } else {
+                    font * 0.317
+                }
+            }
             None if legacy => font * 0.317,
             _ => 0.,
         };
@@ -632,10 +723,10 @@ pub(super) fn render(
                 }
                 if show_labels {
                     let (base, anchor) = match val(node, "tickLblPos") {
-                        Some("high") => (right + font * 0.9, "start"),
-                        Some("low") => (left - font * 0.9, "end"),
-                        _ if reversed => (vline + font * 0.9, "start"),
-                        _ => (vline - font * 0.9, "end"),
+                        Some("high") => (right + gap, "start"),
+                        Some("low") => (left - gap, "end"),
+                        _ if reversed => (vline + gap, "start"),
+                        _ => (vline - gap, "end"),
                     };
                     text(
                         &mut labels,
@@ -658,7 +749,12 @@ pub(super) fn render(
             line(&mut svg, vline, top, vline, bottom, &stroke);
         }
     }
-    write!(svg,r#"<defs><clipPath id="plot"><rect x="{left:.2}" y="{top:.2}" width="{:.2}" height="{:.2}"/></clipPath></defs><g clip-path="url(#plot)">"#,right-left,bottom-top).unwrap();
+    let (clip_left, clip_top, clip_width, clip_height) = if colors.opendocument_defaults {
+        (0., 0., width, height)
+    } else {
+        (left, top, right - left, bottom - top)
+    };
+    write!(svg,r#"<defs><clipPath id="plot"><rect x="{clip_left:.2}" y="{clip_top:.2}" width="{clip_width:.2}" height="{clip_height:.2}"/></clipPath></defs><g clip-path="url(#plot)">"#).unwrap();
     let flag = |node: Node| {
         child(node, "bubble3D").map(|n| n.attribute("val").is_none_or(|v| on(Some(v))))
     };
@@ -710,6 +806,8 @@ pub(super) fn render(
         let fy = y_axis.fraction(vy / y_axis.multiplier);
         if !fx.is_finite()
             || !fy.is_finite()
+            || colors.opendocument_defaults
+                && (!(0.0..=1.0).contains(&fx) || !(0.0..=1.0).contains(&fy))
             || !(-10.0..=11.0).contains(&fx)
             || !(-10.0..=11.0).contains(&fy)
         {
@@ -793,7 +891,18 @@ pub(super) fn render(
             svg.push('>');
             let lines = &name_lines[i];
             let wrap_line_height = lf * 1.22;
-            let (cx, cy) = if side_legend {
+            let manual = legend
+                .and_then(|n| child(n, "layout"))
+                .and_then(|n| child(n, "manualLayout"));
+            let origin = number(val(manual, "x"))
+                .zip(number(val(manual, "y")))
+                .filter(|_| colors.opendocument_defaults);
+            let (cx, cy) = if let Some((x, y)) = origin {
+                (
+                    x * width + lf * 0.25,
+                    y * height + lf * (0.65 + i as f64 * 1.4),
+                )
+            } else if side_legend {
                 let text_x = if legend_pos == "l" {
                     13.5 + lf * 0.75
                 } else {

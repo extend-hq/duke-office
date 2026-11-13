@@ -1,5 +1,9 @@
 # OpenDocument benchmarks
 
+Latest follow-up: [OpenDocument parity and latency hill-climb](opendocument-hillclimb-20261113.md).
+
+For the November 13 chart fixes, matched before/after timings and two freshly rerun peers, see [OpenDocument chart fidelity and latency](opendocument-fidelity-20261113.md). The broader comparison below remains the November 12 snapshot.
+
 November 12, 2026. This compares the OpenDocument import in this repository (`rust-docx` for text documents, `rust-pptx` for presentations and drawings, both reading through `rust-odf`) with every other Rust crate found on crates.io that reads these formats, and with six general-purpose parsers. The harness is in [scripts/odf-benchmark](../scripts/odf-benchmark); its work directory, including the corpus, references and every parser's output, is `output/odf-benchmark-20261112`.
 
 ## Result
@@ -204,3 +208,5 @@ For an ordinary document the time is now mostly reading: building the XML tree i
 | textutil | macOS built-in | odt |
 
 Build notes: `kreuzberg` needs `zip` pinned to 8.6.0, `transmutation` needs `quick-xml`'s `serialize` feature, `dotext` needs `zip`'s `deflate` feature, `litchi` does not compile with only its `odf` feature, and `quarb-text-odt` needs Rust 1.99. `okbase-convert` wraps `anydoc` and was not run separately. `shiva`, `office_oxide` and `undoc` do not read OpenDocument text or presentations.
+
+The [automatic-layout and direct-extraction follow-up](opendocument-layout-extraction-20261113.md) records the next frozen-candidate comparison and its limitations.

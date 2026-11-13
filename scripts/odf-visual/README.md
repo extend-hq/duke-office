@@ -16,6 +16,14 @@ pdftocairo -png -r 96 output/odf-visual-run/reference/visual.pdf output/odf-visu
 
 The default matrix has 15 art probes and 11 chart probes, repeated across packaged and flat text, presentation, drawing, and spreadsheet containers. `--supplemental` generates a separate six-case matrix for transforms, opacity, logical coordinates and lazy equations. Normalize Poppler page suffixes to two digits for matrices with fewer than ten pages. Keep blank native pages in the report; they are flagged rather than silently discarded.
 
+For an additional automatic radar-layout matrix:
+
+```sh
+python3 scripts/odf-visual/generate_auto_layout.py output/odf-visual-run/visual.odp output/odf-auto-layout-run
+```
+
+This creates eight cases varying explicit axis/legend font sizes, category count, label length, legend placement and title presence. Export and capture both parser versions using the same procedure. These probes exercise automatic bounds; preserve corpus cases with explicit inner bounds as a separate regression set.
+
 To isolate real embedded charts from a corpus without using saved preview images:
 
 ```sh

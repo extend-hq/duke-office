@@ -44,6 +44,7 @@ pub(crate) fn parse(
     bytes: &[u8],
     limits: &ParseLimits,
     format: PresentationFormat,
+    options: &crate::ParseOptions,
 ) -> Result<PresentationDocument, ParseError> {
     let odf_limits = rust_odf::Limits {
         max_input_bytes: limits.max_input_bytes,
@@ -61,7 +62,7 @@ pub(crate) fn parse(
         OdfError::NotOdf => ParseError::UnsupportedFormat,
         error => ParseError::Corrupt(error.to_string()),
     })?;
-    Ok(Builder::new(&document, odf_limits).build(format))
+    Ok(Builder::new(&document, odf_limits, options.defer_artwork).build(format))
 }
 
 fn color(value: &str, alpha: Option<f64>) -> ColorValue {
@@ -121,12 +122,13 @@ fn with_id(mut node: SlideNode, id: String) -> SlideNode {
 fn chart_node(
     chart: &Chart,
     render: bool,
+    defer_artwork: bool,
     part: Option<String>,
     metadata: Option<Box<NodeMetadata>>,
     name: String,
     transform: Transform,
 ) -> SlideNode {
-    let chart_svg = render.then(|| rust_office_charts::odf::render_chart(chart, transform.width as f64 / 9525.0, transform.height as f64 / 9525.0)).flatten().map(|r| r.svg);
+    let chart_svg = (render && !defer_artwork).then(|| rust_office_charts::odf::render_chart(chart, transform.width as f64 / 9525.0, transform.height as f64 / 9525.0)).flatten().map(|r| r.svg);
     let categories: Vec<serde_json::Value> = chart
         .categories
         .iter()
@@ -156,7 +158,8 @@ fn chart_node(
             })
             .collect(),
         has_legend: Some(chart.has_legend),
-        chart_xml: rust_office_charts::odf::chart_xml(chart),
+        chart_xml: (!defer_artwork).then(|| rust_office_charts::odf::chart_xml(chart)).flatten(),
+        chart_data: rust_office_charts::odf::extract_chart_data(chart).map(Box::new),
         chart_part_name: part,
         chart_svg,
         chart_style_xml: None,
@@ -276,6 +279,7 @@ struct Builder<'a> {
     document: &'a OdfDocument,
     styles: &'a StyleSheet,
     limits: rust_odf::Limits,
+    defer_artwork: bool,
     assets: BTreeMap<String, PresentationAsset>,
     asset_ids: BTreeMap<String, Option<String>>,
     warnings: Vec<PresentationWarning>,
@@ -286,11 +290,12 @@ struct Builder<'a> {
 }
 
 impl<'a> Builder<'a> {
-    fn new(document: &'a OdfDocument, limits: rust_odf::Limits) -> Self {
+    fn new(document: &'a OdfDocument, limits: rust_odf::Limits, defer_artwork: bool) -> Self {
         Self {
             document,
             styles: &document.styles,
             limits,
+            defer_artwork,
             assets: BTreeMap::new(),
             asset_ids: BTreeMap::new(),
             warnings: Vec::new(),
@@ -775,8 +780,8 @@ impl<'a> Builder<'a> {
                 match embedded.as_ref().map(|embedded| (embedded, &embedded.body)) {
                     Some((_, Body::Chart(chart))) => {
                         let part = href.as_ref().map(|directory| format!("{directory}/content.xml"));
-                        let data = chart_node(chart, !drawable, part, metadata.clone(), name.clone(), transform.clone());
-                        if !drawable && matches!(&data, SlideNode::Chart { chart_svg: None, .. }) {
+                        let data = chart_node(chart, !drawable, self.defer_artwork, part, metadata.clone(), name.clone(), transform.clone());
+                        if !drawable && !self.defer_artwork && matches!(&data, SlideNode::Chart { chart_svg: None, .. }) {
                             self.warn("chart-artwork-unavailable", "The chart data is retained but its native artwork is unsupported", slide_index);
                         }
                         return Some(match preview.filter(|_| drawable) {
@@ -796,7 +801,7 @@ impl<'a> Builder<'a> {
                         });
                     }
                     Some((embedded, Body::Text(blocks))) if !drawable => {
-                        let reader = Builder::new(embedded, self.limits);
+                        let reader = Builder::new(embedded, self.limits, self.defer_artwork);
                         let context = TextContext {
                             scope: Scope::Content,
                             base: embedded.styles.resolve(Scope::Content, Family::Paragraph, None),
@@ -817,7 +822,7 @@ impl<'a> Builder<'a> {
                             .map(Table::trimmed)
                             .find(|table| !table.rows.is_empty() && table.rows.len() <= 200 && table.columns.len() <= 50);
                         if let Some(table) = used {
-                            let mut reader = Builder::new(embedded, self.limits);
+                            let mut reader = Builder::new(embedded, self.limits, self.defer_artwork);
                             return Some(reader.table(&table, Scope::Content, metadata, id, name, transform, slide_index));
                         }
                     }
@@ -999,7 +1004,9 @@ impl<'a> Builder<'a> {
         } else {
             geometry
         };
-        let artwork = rust_office_art::odf::render_shape(shape, self.styles, scope);
+        let artwork = (!self.defer_artwork)
+            .then(|| rust_office_art::odf::render_shape(shape, self.styles, scope))
+            .flatten();
         let context = self.text_context(shape, scope, slide_index.map_or(0, |index| index + 1));
         let paragraphs = self.shape_paragraphs(&shape.text, &context);
         let padding = [

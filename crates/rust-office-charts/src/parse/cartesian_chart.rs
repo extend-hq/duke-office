@@ -5,6 +5,8 @@ mod categories;
 mod error_bars;
 #[path = "cartesian_marks.rs"]
 mod marks;
+#[path = "cartesian_table.rs"]
+mod table;
 #[path = "cartesian_trendlines.rs"]
 mod trendlines;
 pub(super) use marks::DataLabels;
@@ -74,6 +76,25 @@ impl Scale {
         zero_baseline: bool,
         percent: bool,
         spreadsheet: bool,
+    ) -> Self {
+        Self::with_defaults(
+            range,
+            axis,
+            max_intervals,
+            zero_baseline,
+            percent,
+            spreadsheet,
+            false,
+        )
+    }
+    fn with_defaults(
+        range: Extent,
+        axis: Option<Node>,
+        max_intervals: f64,
+        zero_baseline: bool,
+        percent: bool,
+        spreadsheet: bool,
+        opendocument: bool,
     ) -> Self {
         let scale = axis.and_then(|n| child(n, "scaling"));
         let min = number(val(scale, "min"));
@@ -150,7 +171,7 @@ impl Scale {
                 hi += span * 0.05;
             }
         }
-        let intervals = if spreadsheet {
+        let intervals = if spreadsheet || opendocument {
             max_intervals.ceil().clamp(1., 10.)
         } else {
             (max_intervals * 1.01).floor().clamp(1., 9.)
@@ -160,7 +181,7 @@ impl Scale {
             / intervals)
             .max(span / 1000.);
         let decade = 10f64.powf(step.log10().floor());
-        let unit = number(val(axis, "majorUnit"))
+        let mut unit = number(val(axis, "majorUnit"))
             .map(|v| v / multiplier)
             .filter(|v| v.is_finite() && *v > 0.)
             .unwrap_or_else(|| {
@@ -176,6 +197,23 @@ impl Scale {
             }
             if hi != 0. {
                 hi += span * 0.05;
+            }
+        }
+        if opendocument && number(val(axis, "majorUnit")).filter(|v| *v > 0.).is_none() {
+            let power = 10f64.powf(unit.log10().floor());
+            if let Some(step) = [1., 2., 5., 10., 20., 50.]
+                .into_iter()
+                .map(|n| n * power)
+                .filter(|n| *n >= unit * (1. - 1e-10))
+                .find(|step| {
+                    let a =
+                        min.map_or_else(|| (lo / step + 1e-10).floor() * step, |n| n / multiplier);
+                    let b =
+                        max.map_or_else(|| (hi / step - 1e-10).ceil() * step, |n| n / multiplier);
+                    (b - a) / step <= intervals + 1e-9
+                })
+            {
+                unit = step;
             }
         }
         let low = min.map_or_else(|| (lo / unit + 1e-10).floor() * unit, |n| n / multiplier);
@@ -744,6 +782,7 @@ fn category_rotation(
     width: f64,
     size: f64,
     spreadsheet: bool,
+    opendocument: bool,
     face: &str,
 ) -> f64 {
     if !spreadsheet || group.horizontal || group.scatter {
@@ -757,6 +796,16 @@ fn category_rotation(
         .filter(|n| (-5400000. ..=5400000.).contains(n))
     {
         return angle / 60000.;
+    }
+    let label_slot = width / count.max(1.);
+    if opendocument
+        && body.is_some_and(|n| n.attribute("wrap") != Some("none"))
+        && labels.values().any(|s| {
+            s.split_whitespace()
+                .any(|word| text_width_for(word, size, face) > label_slot - size * 0.5)
+        })
+    {
+        return -45.;
     }
     if group.category.is_some_and(|n| chart_node(n, "dateAx"))
         && labels
@@ -854,11 +903,15 @@ fn draw_axes(
     let cp = c.point(0., axis_crossing(g.category, g.value, c.values));
     let c_pos = if g.horizontal { cp.0 } else { cp.1 };
     if draw_value {
-        let props = colors
-            .spreadsheet_defaults
+        let props = (colors.spreadsheet_defaults || colors.opendocument_defaults)
             .then(|| text_props(g.value, false))
             .flatten();
         let size = font_size(props, size);
+        let gap = if colors.opendocument_defaults {
+            super::chart_svg::odf_label_gap(g.value)
+        } else {
+            size * 0.9
+        };
         let axis_face =
             props.map(|p| font_family(Some(p), face.split(',').next().unwrap_or("Calibri")));
         let face = axis_face.as_deref().unwrap_or(face);
@@ -896,7 +949,33 @@ fn draw_axes(
                 }
             }
         }
-        for v in c.values.ticks() {
+        let label_stride = if colors.opendocument_defaults {
+            let mut previous: Option<f64> = None;
+            let mut spacing = f64::INFINITY;
+            let mut extent = size * 1.2;
+            for v in c.values.ticks() {
+                let (x, y) = c.point(0., v);
+                let position = if g.horizontal { x } else { y };
+                if let Some(previous) = previous {
+                    spacing = spacing.min((position - previous).abs());
+                }
+                previous = Some(position);
+                if g.horizontal {
+                    extent = extent.max(
+                        text_width_for(&c.values.label(v, g.value, g.percent), size, face)
+                            + size * 0.5,
+                    );
+                }
+            }
+            if spacing.is_finite() && spacing > 0. {
+                (extent / spacing).ceil().clamp(1., 512.) as usize
+            } else {
+                1
+            }
+        } else {
+            1
+        };
+        for (index, v) in c.values.ticks().enumerate() {
             let (x, y) = c.point(0., v);
             if grid.is_some() {
                 axis_line(
@@ -914,11 +993,15 @@ fn draw_axes(
                     v_pos,
                     outside,
                     val(g.value, "majorTickMark").unwrap_or(major_tick),
-                    4.2,
+                    if colors.opendocument_defaults {
+                        1.5 * 96. / 25.4
+                    } else {
+                        4.2
+                    },
                     &axis_stroke,
                 );
             }
-            if has_labels(g.value, visible_by_default) {
+            if index % label_stride == 0 && has_labels(g.value, visible_by_default) {
                 let s = c.values.label(v, g.value, g.percent);
                 if g.horizontal {
                     text(
@@ -935,7 +1018,7 @@ fn draw_axes(
                     let right = side == "r";
                     text(
                         labels,
-                        v_pos + if right { size * 0.90 } else { -size * 0.90 },
+                        v_pos + if right { gap } else { -gap },
                         y + size * 0.31,
                         if right { "start" } else { "end" },
                         size,
@@ -959,11 +1042,15 @@ fn draw_axes(
         }
     }
     if draw_category {
-        let props = colors
-            .spreadsheet_defaults
+        let props = (colors.spreadsheet_defaults || colors.opendocument_defaults)
             .then(|| text_props(g.category, false))
             .flatten();
         let size = font_size(props, size);
+        let gap = if colors.opendocument_defaults {
+            super::chart_svg::odf_label_gap(g.category)
+        } else {
+            size * 0.9
+        };
         let axis_face =
             props.map(|p| font_family(Some(p), face.split(',').next().unwrap_or("Calibri")));
         let face = axis_face.as_deref().unwrap_or(face);
@@ -973,13 +1060,15 @@ fn draw_axes(
         }
         let grid = g.category.and_then(|n| child(n, "majorGridlines"));
         let grid_paint = stroke(grid, colors, axis_color);
+        let label_slot = c.slot_width();
         let rotation = category_rotation(
             g,
             cats,
             c.count,
             r.width(),
             size,
-            colors.spreadsheet_defaults,
+            colors.spreadsheet_defaults || colors.opendocument_defaults,
+            colors.opendocument_defaults,
             face,
         );
         let paint = |svg: &mut String, labels: &mut String, n: f64, s: &str| {
@@ -997,7 +1086,7 @@ fn draw_axes(
                     let right = val(g.category, "axPos") == Some("r");
                     text(
                         labels,
-                        c_pos + if right { size * 0.90 } else { -size * 0.90 },
+                        c_pos + if right { gap } else { -gap },
                         y + size * 0.31,
                         if right { "start" } else { "end" },
                         size,
@@ -1006,7 +1095,19 @@ fn draw_axes(
                         false,
                     );
                 } else if rotation != 0. {
-                    let y = c_pos + size * 1.05;
+                    let angle = rotation.to_radians();
+                    let x = x - if colors.opendocument_defaults {
+                        size * 0.35 * angle.sin()
+                    } else {
+                        0.
+                    };
+                    let y = c_pos
+                        + size
+                            * if colors.opendocument_defaults {
+                                0.3 + 0.75 * angle.cos().abs()
+                            } else {
+                                1.05
+                            };
                     write!(
                         labels,
                         r#"<g transform="rotate({rotation:.2} {x:.2} {y:.2})">"#
@@ -1028,8 +1129,8 @@ fn draw_axes(
                         g,
                         s,
                         size,
-                        c.slot_width(),
-                        colors.spreadsheet_defaults,
+                        label_slot,
+                        colors.spreadsheet_defaults || colors.opendocument_defaults,
                         face,
                     )
                     .iter()
@@ -1038,7 +1139,12 @@ fn draw_axes(
                         text(
                             labels,
                             x,
-                            c_pos + size * (1.60 + i as f64 * 1.22),
+                            c_pos
+                                + if colors.opendocument_defaults {
+                                    gap + size * (0.8 + i as f64 * 1.22)
+                                } else {
+                                    size * (1.60 + i as f64 * 1.22)
+                                },
                             "middle",
                             size,
                             face,
@@ -1056,6 +1162,9 @@ fn draw_axes(
         } else if grid.is_some() || has_labels(g.category, visible_by_default) {
             let skip = number(val(g.category, "tickLblSkip"))
                 .unwrap_or_else(|| {
+                    if colors.opendocument_defaults {
+                        return 1.;
+                    }
                     (c.count
                         / ((if g.horizontal { r.height() } else { r.width() }) / (size * 2.5))
                             .max(1.))
@@ -1079,8 +1188,8 @@ fn draw_axes(
                                 g,
                                 label,
                                 size,
-                                c.slot_width(),
-                                colors.spreadsheet_defaults,
+                                label_slot,
+                                colors.spreadsheet_defaults || colors.opendocument_defaults,
                                 face,
                             )
                             .len()
@@ -1484,6 +1593,7 @@ fn draw_legend(
     face: &str,
     title_center_offset: f64,
     columns: usize,
+    legend: Option<Node>,
 ) {
     let side = matches!(pos, "r" | "l" | "tr");
     let rows = (height / (size * 1.65)).floor().max(1.) as usize;
@@ -1526,6 +1636,30 @@ fn draw_legend(
     } else {
         (height + title_center_offset - total_height) * 0.5 + size * 0.8
     };
+    let manual = colors
+        .opendocument_defaults
+        .then(|| {
+            legend
+                .and_then(|n| child(n, "layout"))
+                .and_then(|n| child(n, "manualLayout"))
+        })
+        .flatten();
+    let origin = number(val(manual, "x"))
+        .zip(number(val(manual, "y")))
+        .map(|(x, y)| (x * width, y * height));
+    if let Some((x, y)) = origin {
+        let padding = size * 0.25;
+        let w = if side { max_width } else { total } + 2. * padding;
+        let h = if side { total_height } else { size * 1.2 } + 2. * padding;
+        let props = legend.and_then(|n| child(n, "spPr"));
+        let fill = props
+            .and_then(|n| colors.shape_fill(n))
+            .unwrap_or_else(|| "none".into());
+        let stroke = props
+            .and_then(|n| colors.shape_stroke(n))
+            .unwrap_or_else(|| "none".into());
+        write!(svg, r#"<rect x="{x:.2}" y="{y:.2}" width="{w:.2}" height="{h:.2}" fill="{fill}" stroke="{stroke}"/>"#).unwrap();
+    }
     for (j, e) in entries.iter().enumerate() {
         write!(svg, r#"<g data-docx-series="{}""#, e.index).unwrap();
         if colors.interactive {
@@ -1537,7 +1671,7 @@ fn draw_legend(
             .unwrap();
         }
         svg.push('>');
-        let (x, y) = if side {
+        let (mut x, mut y) = if side {
             let x = if pos == "l" {
                 12.
             } else {
@@ -1560,6 +1694,25 @@ fn draw_legend(
         } else {
             (cur, if pos == "t" { 19.7 } else { height - 19.7 })
         };
+        if let Some((ox, oy)) = origin {
+            x = ox
+                + size * 0.25
+                + if side {
+                    0.
+                } else {
+                    extents[..j].iter().sum::<f64>() + space * j as f64
+                };
+            y = oy
+                + size * 0.85
+                + if side {
+                    lines[..j]
+                        .iter()
+                        .map(|ls| entry_height(ls.len()))
+                        .sum::<f64>()
+                } else {
+                    0.
+                };
+        }
         let is_line = chart_node(e.group, "lineChart") || chart_node(e.group, "scatterChart");
         let paint = marks::legend_color(e.group, e.ser, e.index, e.point, e.value, colors, is_line);
         if let Some(trendline) = e.trendline {
@@ -1826,16 +1979,21 @@ pub(super) fn render(
                     categories.entry(p.index).or_insert_with(String::new);
                 }
                 if let Some(label) = p.categories.iter().find(|label| label.level == 0) {
-                    let formatted = if colors.spreadsheet_defaults {
+                    let formatted = if colors.spreadsheet_defaults || colors.opendocument_defaults {
                         g.category
-                            .filter(|n| chart_node(*n, "dateAx"))
+                            .filter(|n| colors.opendocument_defaults || chart_node(*n, "dateAx"))
                             .and_then(|axis| {
                                 let code = child(axis, "numFmt")?.attribute("formatCode")?;
-                                super::chart_svg::date_label(
-                                    number(Some(&label.label))?,
-                                    flag(Some(root), "date1904", false),
-                                    code,
-                                )
+                                let serial = number(Some(&label.label))?;
+                                if colors.opendocument_defaults {
+                                    super::chart_svg::odf_date_label(serial, code)
+                                } else {
+                                    super::chart_svg::date_label(
+                                        serial,
+                                        flag(Some(root), "date1904", false),
+                                        code,
+                                    )
+                                }
                             })
                     } else {
                         None
@@ -1883,30 +2041,52 @@ pub(super) fn render(
         }
     }
     let x_scale = |g: &Group, rect: Box2| {
-        Scale::new(
+        Scale::with_defaults(
             x_ranges[&g.category.map(|n| n.id())],
             g.category,
-            rect.width() / (size * 3.5),
+            rect.width()
+                / (font_size(
+                    text_props(g.category, false).filter(|_| colors.opendocument_defaults),
+                    size,
+                ) * 3.5),
             false,
             false,
             colors.spreadsheet_defaults,
+            colors.opendocument_defaults,
         )
     };
     let value_scale = |g: &Group, rect: Box2| {
-        Scale::new(
+        let size = font_size(
+            text_props(g.value, false).filter(|_| colors.opendocument_defaults),
+            size,
+        );
+        Scale::with_defaults(
             y_ranges[&value_axis(g)],
             g.value,
             if g.horizontal {
                 rect.width() / (size * 3.5)
             } else {
-                rect.height() / (size * 1.4)
+                rect.height()
+                    / (size
+                        * if colors.opendocument_defaults {
+                            0.8
+                        } else {
+                            1.4
+                        })
             },
             zero_axes.contains(&value_axis(g)),
             g.percent,
             colors.spreadsheet_defaults,
+            colors.opendocument_defaults,
         )
     };
+    let outer_odf = colors.opendocument_defaults
+        && val(
+            child(plot, "layout").and_then(|n| child(n, "manualLayout")),
+            "layoutTarget",
+        ) == Some("outer");
     let mut gutters = [0f64; 4];
+    let label_slot = rect.width() / (count as f64).max(1.);
     for g in &groups {
         for (axis, is_value) in [(g.value, true), (g.category, false)] {
             if !has_labels(axis, visible_by_default) {
@@ -1918,8 +2098,7 @@ pub(super) fn render(
                 val(axis, "axPos").unwrap_or(if is_value { "l" } else { "b" })
             };
             let horizontal = matches!(pos, "b" | "t");
-            let props = colors
-                .spreadsheet_defaults
+            let props = (colors.spreadsheet_defaults || colors.opendocument_defaults)
                 .then(|| text_props(axis, false))
                 .flatten();
             let size = font_size(props, size);
@@ -1935,7 +2114,8 @@ pub(super) fn render(
                         count as f64,
                         rect.width(),
                         size,
-                        colors.spreadsheet_defaults,
+                        colors.spreadsheet_defaults || colors.opendocument_defaults,
+                        colors.opendocument_defaults,
                         &measure_face,
                     )
                 };
@@ -1950,8 +2130,8 @@ pub(super) fn render(
                                     g,
                                     label,
                                     size,
-                                    rect.width() / (count as f64).max(1.),
-                                    colors.spreadsheet_defaults,
+                                    label_slot,
+                                    colors.spreadsheet_defaults || colors.opendocument_defaults,
                                     &measure_face,
                                 )
                                 .len()
@@ -1959,7 +2139,8 @@ pub(super) fn render(
                             .max()
                             .unwrap_or(1)
                     };
-                    size * (1.355 + lines.saturating_sub(1) as f64 * 1.22)
+                    size * (if outer_odf { 1.95 } else { 1.355 }
+                        + lines.saturating_sub(1) as f64 * 1.22)
                 } else {
                     let angle = rotation.to_radians().abs();
                     categories
@@ -1985,13 +2166,13 @@ pub(super) fn render(
                         )
                     })
                     .fold(0., f64::max)
-                    + size * 0.45
+                    + size * if outer_odf { 0.9 } else { 0.45 }
             } else {
                 categories
                     .values()
                     .map(|s| text_width_for(s, size, &measure_face))
                     .fold(0., f64::max)
-                    + size * 0.45
+                    + size * if outer_odf { 0.9 } else { 0.45 }
             };
             let extent =
                 if colors.spreadsheet_defaults && (g.scatter || (g.horizontal && !is_value)) {
@@ -2052,6 +2233,9 @@ pub(super) fn render(
                 0.
             };
             gutters[i] = gutters[i].max(extent + title_space);
+            if outer_odf && !horizontal {
+                gutters[1] = gutters[1].max(size * 0.5);
+            }
         }
     }
     rect.left += gutters[0];
@@ -2079,6 +2263,12 @@ pub(super) fn render(
             } else {
                 rect.top
             } + v.clamp(0., 1.) * height;
+        }
+        if colors.opendocument_defaults && val(Some(layout), "layoutTarget") == Some("outer") {
+            rect.left += gutters[0];
+            rect.top += gutters[1];
+            rect.right -= gutters[2];
+            rect.bottom -= gutters[3];
         }
         if colors.spreadsheet_defaults && gutters[0] > 0. {
             rect.left = rect.left.max(label_left);
@@ -2141,7 +2331,8 @@ pub(super) fn render(
             values: value_scale(g, rect),
             x: g.scatter.then(|| x_scale(g, rect)),
         };
-        let draw_c = seen_c.insert(g.category.map(|n| n.id()));
+        let draw_c = seen_c.insert(g.category.map(|n| n.id()))
+            && !(colors.opendocument_defaults && child(plot, "dTable").is_some());
         let draw_v = seen_v.insert(value_axis(g));
         draw_axes(
             &mut svg,
@@ -2182,6 +2373,16 @@ pub(super) fn render(
             default_face,
         );
     }
+    table::draw(
+        &mut labels,
+        plot,
+        data,
+        colors,
+        rect,
+        (width, height),
+        size,
+        &axis_face,
+    );
     labels.push_str("</g>");
     write!(svg, r#"<g clip-path="url(#plot)">{geometry}</g>{labels}"#).unwrap();
     if chart_title.is_some() {
@@ -2190,7 +2391,7 @@ pub(super) fn render(
             .unwrap_or_else(|| label_fill.clone());
         write!(svg, r#"<g fill="{paint}">"#).unwrap();
         let (x, y, anchor) = title_position(
-            title.filter(|_| colors.spreadsheet_defaults),
+            title.filter(|_| colors.spreadsheet_defaults || colors.opendocument_defaults),
             width,
             height,
             title_size,
@@ -2227,6 +2428,7 @@ pub(super) fn render(
         &legend_face,
         title_center_offset,
         legend_column_count,
+        legend,
     );
     svg.push_str("</g></svg>");
     Some(svg)

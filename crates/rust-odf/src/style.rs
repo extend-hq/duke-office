@@ -6,7 +6,10 @@ use std::collections::{BTreeMap, HashMap};
 use crate::draw::{self, Shape};
 use crate::text::{self, Block, Ctx};
 use crate::units::{parse_bool, parse_color, parse_length, parse_number, parse_percent, Length};
-use crate::xml::{attr, child, elements, is, owned, Node, CHART, DRAW, FO, OFFICE, PRESENTATION, STYLE, SVG, TABLE, TEXT};
+use crate::xml::{
+    attr, child, elements, is, owned, Node, CHART, DRAW, FO, LO_EXT, NUMBER, OFFICE, PRESENTATION,
+    STYLE, SVG, TABLE, TEXT,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Family {
@@ -275,6 +278,7 @@ properties! {
 properties! {
     /// Table, column, row and cell properties.
     TableProps {
+        number_style: String,
         width: Length,
         align: String,
         margin_left: Length,
@@ -461,6 +465,71 @@ pub struct StyleSheet {
     pub fill_images: BTreeMap<String, String>,
     /// Font face names mapped to family names.
     pub fonts: BTreeMap<String, String>,
+    pub number_formats: BTreeMap<String, String>,
+}
+
+fn number_format(node: Node<'_, '_>) -> Option<String> {
+    let date = node.tag_name().name() == "date-style";
+    if !date
+        && !matches!(
+            node.tag_name().name(),
+            "number-style" | "percentage-style" | "currency-style"
+        )
+    {
+        return None;
+    }
+    let mut code = String::new();
+    for part in elements(node) {
+        if part.tag_name().namespace() != Some(NUMBER) {
+            continue;
+        }
+        let long = attr(part, NUMBER, "style") == Some("long");
+        match part.tag_name().name() {
+            "year" if date => code.push_str(if long { "yyyy" } else { "yy" }),
+            "month" if date => code.push_str(if attr(part, NUMBER, "textual") == Some("true") {
+                if long {
+                    "mmmm"
+                } else {
+                    "mmm"
+                }
+            } else if long {
+                "mm"
+            } else {
+                "m"
+            }),
+            "day" if date => code.push_str(if long { "dd" } else { "d" }),
+            "number" if !date => {
+                let decimals =
+                    attr(part, NUMBER, "decimal-places").and_then(|v| v.parse::<usize>().ok());
+                if decimals.is_none() {
+                    code.push_str("General");
+                    continue;
+                }
+                code.push_str(if attr(part, NUMBER, "grouping") == Some("true") {
+                    "#,##0"
+                } else {
+                    "0"
+                });
+                let decimals = decimals.unwrap_or(0).min(30);
+                if decimals > 0 {
+                    code.push('.');
+                    code.extend(std::iter::repeat_n('0', decimals));
+                }
+            }
+            "text" | "currency-symbol" => {
+                let text = crate::xml::text_content(part);
+                for ch in text.chars() {
+                    if !matches!(ch, '/' | '-' | '.' | ' ' | '%') {
+                        code.push('\\');
+                    }
+                    code.push(ch);
+                }
+            }
+            "text-properties" => {}
+            _ => return None,
+        }
+    }
+    (!code.is_empty()).then_some(code)
 }
 
 fn scope_index(scope: Scope) -> usize {
@@ -653,6 +722,13 @@ impl StyleSheet {
         for node in elements(styles) {
             let name = node.tag_name().name();
             match node.tag_name().namespace() {
+                Some(NUMBER) => {
+                    if let (Some(name), Some(code)) =
+                        (owned(node, STYLE, "name"), number_format(node))
+                    {
+                        self.number_formats.insert(name, code);
+                    }
+                }
                 Some(STYLE) if name == "style" => {
                     if let Some(style) = self.read_style(node, false, ctx) {
                         self.common[style.family.index()].insert(style.name.clone(), Box::new(style));
@@ -715,6 +791,13 @@ impl StyleSheet {
         for node in elements(styles) {
             let name = node.tag_name().name();
             match node.tag_name().namespace() {
+                Some(NUMBER) => {
+                    if let (Some(name), Some(code)) =
+                        (owned(node, STYLE, "name"), number_format(node))
+                    {
+                        self.number_formats.insert(name, code);
+                    }
+                }
                 Some(STYLE) if name == "style" => {
                     if let Some(style) = self.read_style(node, true, ctx) {
                         self.automatic[scope_index(scope)][style.family.index()]
@@ -790,7 +873,16 @@ impl StyleSheet {
 
     fn read_props(&self, node: Node<'_, '_>) -> Props {
         let mut props = Props::default();
-        for properties in elements(node).filter(|child| child.tag_name().namespace() == Some(STYLE)) {
+        if attr(node, STYLE, "family") == Some("table-cell") {
+            props.table.number_style = owned(node, STYLE, "data-style-name");
+        }
+        if attr(node, STYLE, "family") == Some("chart") {
+            if let Some(name) = owned(node, STYLE, "data-style-name") {
+                props.chart.insert("number-style-name".into(), name);
+            }
+        }
+        for properties in elements(node).filter(|child| child.tag_name().namespace() == Some(STYLE))
+        {
             match properties.tag_name().name() {
                 "text-properties" => props.text = self.text_props(properties),
                 "paragraph-properties" => props.paragraph = paragraph_props(properties),
@@ -798,8 +890,22 @@ impl StyleSheet {
                     props.graphic = graphic_props(properties);
                 }
                 "chart-properties" => {
-                    for attribute in properties.attributes().iter().filter(|a| a.namespace == Some(CHART)) {
-                        props.chart.insert(attribute.name.to_string(), attribute.value.to_string());
+                    for attribute in properties.attributes().iter().filter(|a| {
+                        a.namespace == Some(CHART)
+                            || a.namespace == Some(LO_EXT)
+                                && matches!(
+                                    a.name,
+                                    "show-horizontal-border"
+                                        | "show-vertical-border"
+                                        | "show-outline"
+                                        | "show-keys"
+                                )
+                            || a.namespace == Some(TEXT) && a.name == "line-break"
+                            || a.namespace == Some(STYLE) && a.name == "rotation-angle"
+                    }) {
+                        props
+                            .chart
+                            .insert(attribute.name.to_string(), attribute.value.to_string());
                     }
                 }
                 "table-properties" | "table-column-properties" | "table-row-properties"
@@ -969,14 +1075,15 @@ fn borders(node: Node<'_, '_>) -> [Option<Border>; 4] {
         .map(|name| attr(node, FO, name).map(parse_border).or_else(|| all.clone()))
 }
 
-/// `fo:margin` and its four sides: left, right, top, bottom.
+/// A shorthand length and its four sides: left, right, top, bottom.
 fn margins(node: Node<'_, '_>, shorthand: &str) -> [Option<Length>; 4] {
     let all = attr(node, FO, shorthand).and_then(parse_length);
-    ["left", "right", "top", "bottom"].map(|side| {
-        attr(node, FO, &format!("{shorthand}-{side}"))
-            .and_then(parse_length)
-            .or(all)
-    })
+    let names = match shorthand {
+        "margin" => ["margin-left", "margin-right", "margin-top", "margin-bottom"],
+        "padding" => ["padding-left", "padding-right", "padding-top", "padding-bottom"],
+        _ => unreachable!(),
+    };
+    names.map(|name| attr(node, FO, name).and_then(parse_length).or(all))
 }
 
 fn paragraph_props(node: Node<'_, '_>) -> ParagraphProps {
@@ -1142,6 +1249,7 @@ fn vertical_align(value: &str) -> Option<VerticalAlign> {
 fn table_props(node: Node<'_, '_>, props: &mut TableProps) {
     let [border_top, border_bottom, border_left, border_right] = borders(node);
     let own = TableProps {
+        number_style: None,
         width: attr(node, STYLE, "width").and_then(parse_length),
         align: owned(node, TABLE, "align"),
         margin_left: attr(node, FO, "margin-left").and_then(parse_length),

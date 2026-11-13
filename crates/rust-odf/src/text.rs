@@ -191,6 +191,7 @@ impl Table {
 /// parts the content refers to.
 pub(crate) struct Ctx<'l> {
     pub limits: &'l Limits,
+    pub styles: Option<&'l crate::style::StyleSheet>,
     /// Package paths of images and media referenced by the content.
     pub hrefs: BTreeSet<String>,
     /// Package directories of embedded objects.
@@ -208,6 +209,7 @@ impl<'l> Ctx<'l> {
     pub fn new(limits: &'l Limits) -> Self {
         Self {
             limits,
+            styles: None,
             hrefs: BTreeSet::new(),
             objects: BTreeSet::new(),
             inline_objects: BTreeMap::new(),
@@ -332,6 +334,16 @@ fn parse_paragraph(node: Node<'_, '_>, ctx: &mut Ctx<'_>) -> Paragraph {
 /// Collapses white space as OpenDocument defines it: runs become one space
 /// and a paragraph's leading white space disappears.
 fn push_text(text: &str, out: &mut Vec<Inline>, after_space: &mut bool) {
+    if memchr::memchr3(b'\t', b'\r', b'\n', text.as_bytes()).is_none()
+        && memchr::memmem::find(text.as_bytes(), b"  ").is_none()
+    {
+        let text = if *after_space { text.trim_start_matches(' ') } else { text };
+        if !text.is_empty() {
+            *after_space = text.ends_with(' ');
+            push_literal(text, out);
+        }
+        return;
+    }
     let mut collapsed = String::with_capacity(text.len());
     for ch in text.chars() {
         if matches!(ch, ' ' | '\t' | '\r' | '\n') {
@@ -559,8 +571,43 @@ fn table_children(parent: Node<'_, '_>, ctx: &mut Ctx<'_>, table: &mut Table, he
                     let value = ["value", "date-value", "time-value", "boolean-value", "string-value"]
                         .iter()
                         .find_map(|name| owned(cell, OFFICE, name));
+                    let style = owned(cell, TABLE, "style-name");
+                    let mut blocks = parse_blocks(cell, ctx);
+                    let empty = blocks.iter().all(|block| matches!(block,
+                        Block::Paragraph(p) if p.inlines.is_empty()
+                    ));
+                    let string_value = (value_type.as_deref() == Some("string"))
+                        .then(|| attr(cell, OFFICE, "string-value")).flatten();
+                    fn text_only(items: &[Inline]) -> bool {
+                        items.iter().all(|item| match item {
+                            Inline::Text(_) => true,
+                            Inline::Span { children, .. } => text_only(children),
+                            _ => false,
+                        })
+                    }
+                    let replace_string = string_value.is_some() && blocks.iter().all(|block| {
+                        matches!(block, Block::Paragraph(p) if text_only(&p.inlines))
+                    });
+                    if !covered && (empty || replace_string) {
+                        if let (Some(kind), Some(raw)) = (value_type.as_deref(), string_value.or(value.as_deref())) {
+                            let code = ctx.styles.and_then(|styles| {
+                                style.as_deref().and_then(|name| {
+                                    styles.ancestors(crate::style::Scope::Content, crate::style::Family::TableCell, name)
+                                        .find_map(|style| style.props.table.number_style.as_deref())
+                                }).and_then(|name| styles.number_formats.get(name)).map(String::as_str)
+                            });
+                            let displayed = crate::display::cell_value(kind, raw, code);
+                            if empty || plain_text(&blocks) != displayed {
+                                let mut paragraph = blocks.first().and_then(|block| match block {
+                                    Block::Paragraph(p) => Some(p.clone()), _ => None,
+                                }).unwrap_or_default();
+                                paragraph.inlines = vec![Inline::Text(displayed)];
+                                blocks = vec![Block::Paragraph(paragraph)];
+                            }
+                        }
+                    }
                     row.cells.push(TableCell {
-                        style: owned(cell, TABLE, "style-name"),
+                        style,
                         covered,
                         column_span: ctx.repeat(cell, "number-columns-spanned"),
                         row_span: ctx.repeat(cell, "number-rows-spanned"),
@@ -568,7 +615,7 @@ fn table_children(parent: Node<'_, '_>, ctx: &mut Ctx<'_>, table: &mut Table, he
                         value_type,
                         value,
                         formula: owned(cell, TABLE, "formula"),
-                        blocks: parse_blocks(cell, ctx),
+                        blocks,
                     });
                 }
                 table.rows.push(row);

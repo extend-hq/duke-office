@@ -5616,6 +5616,7 @@ fn parse_graphic_frame(
             series: chart.series,
             has_legend: chart.has_legend,
             chart_xml,
+            chart_data: None,
             chart_part_name: path.cloned(),
             chart_style_xml: companions.and_then(|parts| parts.style_xml.clone()),
             chart_colors_xml: companions.and_then(|parts| parts.colors_xml.clone()),

@@ -555,7 +555,9 @@ version = "0.0.0"
 dependencies = [
  "rust-docx",
  "rust-odf",
+ "rust-office-charts",
  "rust-pptx",
+ "serde_json",
 ]
 
 [[package]]
@@ -698,7 +700,7 @@ checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 
 [[package]]
 name = "rust-docx"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "arc-swap",
  "base64",
@@ -725,7 +727,7 @@ dependencies = [
 
 [[package]]
 name = "rust-odf"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "base64",
  "memchr",
@@ -736,7 +738,7 @@ dependencies = [
 
 [[package]]
 name = "rust-office-art"
-version = "0.1.8"
+version = "0.1.9"
 dependencies = [
  "base64",
  "image",
@@ -745,6 +747,7 @@ dependencies = [
  "memchr",
  "quick-xml 0.37.5",
  "roxmltree",
+ "rust-odf",
  "rustybuzz",
  "serde",
  "serde_bytes",
@@ -752,12 +755,13 @@ dependencies = [
 
 [[package]]
 name = "rust-office-charts"
-version = "0.1.10"
+version = "0.2.0"
 dependencies = [
  "base64",
  "kurbo",
  "miniz_oxide 0.8.9",
  "roxmltree",
+ "rust-odf",
  "rust-office-art",
  "serde",
  "svgtypes",
@@ -765,7 +769,7 @@ dependencies = [
 
 [[package]]
 name = "rust-pptx"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "base64",
  "base64-simd",
