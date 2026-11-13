@@ -7,7 +7,7 @@ publish = false
 [workspace]
 
 [dependencies]
-duke-docx = { version = "=0.3.1", path = "../../crates/duke-docx" }
+duke-pages = { version = "=0.3.1", path = "../../crates/duke-pages" }
 serde = "1"
 serde_json = "1"
 flate2 = "1"

@@ -1,6 +1,6 @@
 # Publishing Rust crates
 
-`duke-docx` and `duke-docx-wasm` share a release version: bump both whenever either package changes. The release check rejects mismatched versions. Other crates have independent Cargo versions. For a change to a crate's packaged source or manifest, bump the version in the same PR and run `cargo update --workspace` to refresh the lockfile. Update local dependency requirements when the new version falls outside their range. Rebuild the browser chart distribution when its Rust renderer or bindings change.
+`duke-pages` and `duke-pages-wasm` share a release version: bump both whenever either package changes. The release check rejects mismatched versions. Other crates have independent Cargo versions. For a change to a crate's packaged source or manifest, bump the version in the same PR and run `cargo update --workspace` to refresh the lockfile. Update local dependency requirements when the new version falls outside their range. Rebuild the browser chart distribution when its Rust renderer or bindings change.
 
 On pull requests and pushes affecting the Rust workspace, CI packages the workspace and compares each existing version with its verified crates.io archive. Changing published contents without changing the version fails the check and lists the differing paths. The comparison ignores Cargo's checkout metadata, original unnormalized manifest and generated library lockfile.
 

@@ -222,7 +222,7 @@ def corpus(run, manifest, reference_records, name):
         for index, row in enumerate(rows):
             assert sha(row['path']) == row['sha256']
             output = run / (name + '.current.compact.json.gz')
-            record = compact(run / 'candidate', 'duke-pptx', row, output, 0)
+            record = compact(run / 'candidate', 'duke-slides', row, output, 0)
             equal = fields(record) == fields(previous[row['id']])
             if not equal:
                 old, before = invoke(OUT / 'experiments/xml-recent1/candidate', row, run / (row['id'] + '.before.json.gz'))

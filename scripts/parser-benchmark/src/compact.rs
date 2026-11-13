@@ -1,4 +1,4 @@
-use duke_docx::*;
+use duke_pages::*;
 use serde_json::{json, Value};
 
 fn paragraph(p: &ParagraphNode) -> Value {

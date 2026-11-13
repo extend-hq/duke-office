@@ -31,15 +31,15 @@ def main(phase, duke_label='0.1.6 + local'):
     data = json.loads(source.read_text())
     engines = data['identity']['selected_engines']
     assert engines == ORIGINAL_ENGINES + PEER_ENGINES
-    labels = [f'duke-pptx {duke_label}', *ORIGINAL_LABELS[1:], *PEER_LABELS]
+    labels = [f'duke-slides {duke_label}', *ORIGINAL_LABELS[1:], *PEER_LABELS]
     colors = [*COLORS, '#008b9b', '#657d25', '#626b7b']
     summary = data['summary']
     site = OUT / 'report/peers'
     site.mkdir(parents=True, exist_ok=True)
     date = datetime.fromtimestamp(data['identity']['start'], timezone.utc).strftime('%Y-%m-%d')
-    scope = f"{summary['duke-pptx']['reference_total']} reference packages · {phase} · measured {date}"
+    scope = f"{summary['duke-slides']['reference_total']} reference packages · {phase} · measured {date}"
     receipt = matrix('pptx', source, site, PPTX, engines,
-        [f'duke-pptx\n{duke_label}', *[label.rsplit(' ', 1)[0] + '\n' + label.rsplit(' ', 1)[1] for label in labels[1:]]],
+        [f'duke-slides\n{duke_label}', *[label.rsplit(' ', 1)[0] + '\n' + label.rsplit(' ', 1)[1] for label in labels[1:]]],
         summary, scope, {**data['identity'], 'display_scope': scope}, snapshot=True, unscored_features=unscored)
     fig, ax = plt.subplots(figsize=(11, 6))
     for index, (engine, color) in enumerate(zip(engines, colors)):
@@ -84,7 +84,7 @@ def main(phase, duke_label='0.1.6 + local'):
         markdown.append('| ' + ' | '.join(values) + ' |')
         table.append('<tr>' + ''.join(f'<{tag}>{html.escape(value)}</{tag}>' for tag, value in zip(['th', *['td'] * 5], values)) + '</tr>')
     method = [
-        f"All eight parsers are freshly measured on the same {summary['duke-pptx']['total']} OOXML tuning packages. The independent ZIP/XML reference accepts {summary['duke-pptx']['reference_total']}; reference exclusions remain separate. Failures count as zero where source features exist. Timings use the {len(data['common_ids'])} nonempty inputs accepted by all eight engines. This cohort may differ from earlier five-parser results; cross-run ratios are not causal speed estimates.",
+        f"All eight parsers are freshly measured on the same {summary['duke-slides']['total']} OOXML tuning packages. The independent ZIP/XML reference accepts {summary['duke-slides']['reference_total']}; reference exclusions remain separate. Failures count as zero where source features exist. Timings use the {len(data['common_ids'])} nonempty inputs accepted by all eight engines. This cohort may differ from earlier five-parser results; cross-run ratios are not causal speed estimates.",
         'The input and engine order use a saved random seed. Each subprocess performs one cold parse followed by five warm samples averaging 1–10 parses. Input reads, process startup, imports, explicit destruction, comparison normalization, hashing and output serialization are excluded. Timing jobs run sequentially on a shared development machine after other owned heavy jobs finish. Background activity and load averages are retained; this is not an isolated laboratory measurement.',
         'Rust-pptx includes renderer-facing model construction and generated SVG artwork. Office Oxide includes IR projection. Python-pptx includes eager traversal of its lazy model; MarkItDown uses its dedicated PPTX converter without OCR or LLM calls. These APIs perform different amounts of work. The complete-output speed target remains unmet; the workload difference is not a claim of superior speed.',
         'pptxboss-core 2.3.0 is set to one thread. Timed work materializes slide content, notes, comments, charts, diagrams, hyperlink targets, image bytes, core/application properties and declared layout/master parts through its public APIs. Lazy content reads stay inside timing; comparison normalization and payload hashing stay outside. Failed subparts and unknown content diagnostics are retained. A successful top-level return is not proof of complete content.',
@@ -124,7 +124,7 @@ def main(phase, duke_label='0.1.6 + local'):
             review = table_change['native_review']
             counts = review['source_counts']
             method.append(f"This build retains every source table cell, including covered cells within merged regions, with explicit merge flags and a resolved origin when available. Styling uses source grid columns, correcting band and edge selection after horizontal merges. The {review['total']:,}-input full-model review has {review['exact']:,} exact outputs/errors and {review['changed']} independently reviewed table changes; all 156 SDK outputs/errors remain exact. Changed models retain {counts['covered_cells']} covered cells, including {counts['covered_nonempty_cells']} with nonempty text. All non-table-row model values and payloads remain exact.")
-            method.append('The unchanged literal-source reference includes covered-cell contents. Recovered text increases extraction recall, but is not additional visible slide text. React rendering, visible-text search and slide-text collection exclude covered cells; ten native-derived browser cases verify that behavior, spans, column widths and band/edge colors. Ten focused native/WASM cases and all 32 existing duke-pptx and 102 React checks pass. The table contract and supplemental audit do not establish full PowerPoint rendering parity.')
+            method.append('The unchanged literal-source reference includes covered-cell contents. Recovered text increases extraction recall, but is not additional visible slide text. React rendering, visible-text search and slide-text collection exclude covered cells; ten native-derived browser cases verify that behavior, spans, column widths and band/edge colors. Ten focused native/WASM cases and all 32 existing duke-slides and 102 React checks pass. The table contract and supplemental audit do not establish full PowerPoint rendering parity.')
             method.append('A separate source adjudication attributes the remaining 30 unmatched body-text five-grams to typed equation insertions in two presentations: the literal reference omits OMML while the parser retains it inline. Removing only typed math runs from temporary diagnostic copies accounts for those differences. Production output, the independent reference and the displayed scores are unchanged; this does not establish mathematical or rendered fidelity.')
             timing = table_change['timing']; low, high = timing['median_speedup_ci95']
             cost = table_change['table_cohort_timing']
@@ -197,6 +197,6 @@ def main(phase, duke_label='0.1.6 + local'):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('phase', nargs='?', default='expanded-peers')
-    parser.add_argument('--duke-label', default='0.1.6 + local', help='version label for the measured duke-pptx build')
+    parser.add_argument('--duke-label', default='0.1.6 + local', help='version label for the measured duke-slides build')
     arguments = parser.parse_args()
     main(arguments.phase, arguments.duke_label)

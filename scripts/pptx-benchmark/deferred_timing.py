@@ -33,7 +33,7 @@ def main():
         raise SystemExit('The deferred-artwork semantic gate must pass for this executable first.')
     reference = json.loads((OUT / args.cohort_phase / 'assessment.json').read_text())
     manifest = {r['id']: r for r in json.loads((OUT / args.cohort_phase / 'cohort.json').read_text())}
-    eligible = sorted([r for r in reference['rows'] if r['engine'] == 'duke-pptx' and r['id'] in reference['common_ids']], key=lambda r: r['median_ms'])
+    eligible = sorted([r for r in reference['rows'] if r['engine'] == 'duke-slides' and r['id'] in reference['common_ids']], key=lambda r: r['median_ms'])
     count = min(args.count, len(eligible))
     selected = [eligible[round(i * (len(eligible) - 1) / max(1, count - 1))]['id'] for i in range(count)]
     gated = {json.loads(line)['id'] for line in (run / 'artwork-deferral.jsonl').read_text().splitlines()}
@@ -51,7 +51,7 @@ def main():
     records = []
     with output.open('w', buffering=1) as stream:
         for ident in selected:
-            engines = [('eager', 'duke-pptx'), ('deferred', 'duke-pptx-deferred'), ('office_oxide', 'office_oxide'), ('undoc', 'undoc')]
+            engines = [('eager', 'duke-slides'), ('deferred', 'duke-slides-deferred'), ('office_oxide', 'office_oxide'), ('undoc', 'undoc')]
             rng.shuffle(engines)
             for label, engine in engines:
                 record = invoke(candidate, engine, manifest[ident], '-', 7)

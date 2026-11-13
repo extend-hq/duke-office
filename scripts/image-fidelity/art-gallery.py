@@ -282,11 +282,11 @@ def gallery(directory, candidate, model, output):
         writer.writeheader()
         writer.writerows(rows)
     root = Path(__file__).resolve().parents[2]
-    sources = [p for package in ['duke-docx', 'duke-office-art'] for p in (root / 'crates' / package / 'src').rglob('*.rs')]
+    sources = [p for package in ['duke-pages', 'duke-office-art'] for p in (root / 'crates' / package / 'src').rglob('*.rs')]
     sources += [p for p in (root / 'crates/duke-office-art/src').rglob('*') if p.is_file() and p.suffix != '.rs']
-    sources += [root / 'Cargo.lock', root / 'crates/duke-office-art/Cargo.toml', root / 'crates/duke-docx/Cargo.toml']
+    sources += [root / 'Cargo.lock', root / 'crates/duke-office-art/Cargo.toml', root / 'crates/duke-pages/Cargo.toml']
     source_hashes = {str(p.relative_to(root)): digest(p) for p in sorted(sources)}
-    provenance = dict(date='2026-11-06', pipeline='Native duke-docx model using duke-office-art; generated SVGs and saved raster assets displayed by Chromium',
+    provenance = dict(date='2026-11-06', pipeline='Native duke-pages model using duke-office-art; generated SVGs and saved raster assets displayed by Chromium',
                       documentSha256=manifest['documentSha256'], sourceSha256=manifest['sourceSha256'],
                       modelSha256=digest(model), nativeReference=reference, galleries=galleries,
                       baselineModelSha256=digest(directory / 'model-before.json') if (directory / 'model-before.json').exists() else None,

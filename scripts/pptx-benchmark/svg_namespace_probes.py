@@ -123,10 +123,10 @@ def main():
             else:
                 assert base64.b64encode(archive.read(expected)).decode() in image['pictureSvg'], ident
         assert image.get('crop') == dict(left=.1, top=.15, right=0, bottom=0), ident
-        old = compact(baseline, 'duke-pptx', row, target / (ident + '.baseline.json.gz'), 0)
+        old = compact(baseline, 'duke-slides', row, target / (ident + '.baseline.json.gz'), 0)
         before = json.load(gzip.open(target / (ident + '.baseline.json.gz'), 'rt'))
         old_image = list(images(before['slides'][0]['nodes']))[0]
-        current = compact(run / 'candidate', 'duke-pptx', row, target / (ident + '.compact.json.gz'), 0)
+        current = compact(run / 'candidate', 'duke-slides', row, target / (ident + '.compact.json.gz'), 0)
         current.update(id=ident, artwork_hashes=artwork_hashes(document)); records.append(current)
         receipts.append(dict(id=ident, selected=expected, baseline_selected=old_image['assetId'], selection_corrected=old_image['assetId'] != expected, full_equal=current['full_sha256'] == old['full_sha256'], passed=True))
         print(ident, expected, flush=True)

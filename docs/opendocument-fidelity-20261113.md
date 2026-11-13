@@ -4,7 +4,7 @@ Latest follow-up: [OpenDocument parity and latency hill-climb](opendocument-hill
 
 The shared Rust changes improve median visual agreement on 21 corpus-derived charts from **32.2% to 62.2%**, and mean agreement from **40.6% to 56.4%**. Extracting data from an already parsed chart is **24.9× faster** than serializing and parsing chart XML, with identical results on all 33 embedded charts in the corpus. Whole-document latency is approximately unchanged. This is progress on specific chart gaps, not complete LibreOffice parity or evidence of market-wide superiority.
 
-The baseline is frozen source at `6d8aa7b3e986e309270905245523037d7575319b`: `duke-odf` 0.2.0, `duke-office-charts` 0.2.0, `duke-office-art` 0.1.9, `duke-docx` 0.3.1 and `duke-pptx` 0.4.1. The candidate is that checkpoint plus the local fixes, with unchanged manifest versions. These fixes have not been published. No React package was changed or published in this evaluation.
+The baseline is frozen source at `6d8aa7b3e986e309270905245523037d7575319b`: `duke-odf` 0.2.0, `duke-office-charts` 0.2.0, `duke-office-art` 0.1.9, `duke-pages` 0.3.1 and `duke-slides` 0.4.1. The candidate is that checkpoint plus the local fixes, with unchanged manifest versions. These fixes have not been published. No React package was changed or published in this evaluation.
 
 ## Implementation
 

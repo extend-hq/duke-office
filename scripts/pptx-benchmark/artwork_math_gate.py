@@ -147,7 +147,7 @@ def main():
     records = []
     with destination.open('w', buffering=1) as stream:
         for index, row in enumerate(rows):
-            current = invoke(binary, 'duke-pptx', row, run / (row['id'] + '.compact.json.gz'), 0)
+            current = invoke(binary, 'duke-slides', row, run / (row['id'] + '.compact.json.gz'), 0)
             old = previous[row['id']]
             fields = lambda r: (r['status'], r.get('error'), r.get('full_sha256'))
             exact = fields(current) == fields(old)
@@ -180,7 +180,7 @@ def main():
                 print('MISMATCH', row['id'], issues[:8], flush=True)
             if index % 25 == 0:
                 print(index, len(rows), flush=True)
-    summary = dict(total=len(records), exact=sum(r['exact'] for r in records), numerical_only=sum(r['numerical_only'] for r in records), changed_artwork=sum(r['changes']['changed_artwork'] for r in records), changed_numeric_attributes=sum(r['changes']['numeric_attributes'] for r in records), viewport_changes=sum(len(r['changes']['viewport_changes']) for r in records), paint_bounds=sum(len(r['changes']['paint_bounds']) for r in records), failures=[r['id'] for r in records if r['issues']], pending='Pixel-bound changes require a separate review; this audit alone does not approve them.', candidate_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(), baseline_sha256=proof['candidate_sha256'], baseline_label=args.baseline_label, records_sha256=hashlib.sha256(destination.read_bytes()).hexdigest(), source_sha256={str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for folder in ['duke-pptx', 'duke-office-art', 'duke-office-charts'] for p in (ROOT / 'crates' / folder).rglob('*.rs')})
+    summary = dict(total=len(records), exact=sum(r['exact'] for r in records), numerical_only=sum(r['numerical_only'] for r in records), changed_artwork=sum(r['changes']['changed_artwork'] for r in records), changed_numeric_attributes=sum(r['changes']['numeric_attributes'] for r in records), viewport_changes=sum(len(r['changes']['viewport_changes']) for r in records), paint_bounds=sum(len(r['changes']['paint_bounds']) for r in records), failures=[r['id'] for r in records if r['issues']], pending='Pixel-bound changes require a separate review; this audit alone does not approve them.', candidate_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(), baseline_sha256=proof['candidate_sha256'], baseline_label=args.baseline_label, records_sha256=hashlib.sha256(destination.read_bytes()).hexdigest(), source_sha256={str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for folder in ['duke-slides', 'duke-office-art', 'duke-office-charts'] for p in (ROOT / 'crates' / folder).rglob('*.rs')})
     (run / 'artwork-math-summary.json').write_text(json.dumps(summary, indent=2))
     print(json.dumps({k: v for k, v in summary.items() if k != 'source_sha256'}))
     if summary['failures']:

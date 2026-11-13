@@ -25,7 +25,7 @@ def main():
         for row in rows:
             jobs = [('baseline',baseline),('candidate',candidate)]; rng.shuffle(jobs)
             for label,binary in jobs:
-                r = invoke(binary,'duke-pptx',row,'-',7); assert r['status'] == 'ok'
+                r = invoke(binary,'duke-slides',row,'-',7); assert r['status'] == 'ok'
                 r.update(id=row['id'],label=label,load=os.getloadavg()); records.append(r); stream.write(json.dumps(r)+'\n')
             print(row['id'],flush=True)
     values = {(r['id'],r['label']):statistics.median(r['samples_ms']) for r in records}

@@ -27,7 +27,7 @@ def main():
     for row in json.loads((args.manifest or OUT/'manifest.json').read_text()):
         ident=row['id'];record=dict(id=ident,status_equal=wasm[ident]['status']==native[ident]['status'])
         if wasm[ident]['status']=='ok':
-            path=OUT/'experiments'/args.native_experiment/(ident+'.compact.json.gz') if args.native_experiment else OUT/args.phase/'native'/(ident+'.duke-pptx.json.gz') if row['format']=='pptx' else OUT/'parity-baseline'/(ident+'.json.gz')
+            path=OUT/'experiments'/args.native_experiment/(ident+'.compact.json.gz') if args.native_experiment else OUT/args.phase/'native'/(ident+'.duke-slides.json.gz') if row['format']=='pptx' else OUT/'parity-baseline'/(ident+'.json.gz')
             a=json.load(gzip.open(path,'rt'));b=json.load(gzip.open(wasm_dir/(ident+'.json.gz'),'rt'))
             record['differences']=differences(a,b)
             record['semantic_equal']=all(r[0].endswith('/shapeSvgBytes') for r in record['differences'])

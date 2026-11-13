@@ -35,11 +35,11 @@ def main():
             equal = before == after
             if not equal:
                 assert not records[ident]['equal'] and without_rows(before) == without_rows(after)
-                result = compact(native, 'duke-pptx', row, run/'wasm-native.current.json.gz', 0)
+                result = compact(native, 'duke-slides', row, run/'wasm-native.current.json.gz', 0)
                 assert result['full_sha256'] == records[ident]['full_sha256']
                 diff = differences(read(run/'wasm-native.current.json.gz'), after)
                 if diff:
-                    compact(prior_native, 'duke-pptx', row, run/'wasm-native.previous.json.gz', 0)
+                    compact(prior_native, 'duke-slides', row, run/'wasm-native.previous.json.gz', 0)
                     previous_diff = differences(read(run/'wasm-native.previous.json.gz'), before)
                     assert sorted(diff) == sorted(previous_diff)
                     known.append(ident)
@@ -58,7 +58,7 @@ def main():
         for row in json.loads(cohort.read_text()):
             assert sha(row['path']) == row['sha256']
             full, document = invoke(native, row, run/'wasm-extra.full.json.gz')
-            result = compact(native, 'duke-pptx', row, run/'wasm-extra.compact.json.gz', 0)
+            result = compact(native, 'duke-slides', row, run/'wasm-extra.compact.json.gz', 0)
             assert full['status'] == result['status'] == observed[row['id']]['status'] == 'ok'
             assert full['full_sha256'] == result['full_sha256']
             assert read(run/'wasm-extra.compact.json.gz') == read(folder/(row['id']+'.json.gz'))

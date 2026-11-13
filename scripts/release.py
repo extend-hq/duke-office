@@ -55,12 +55,12 @@ def packaged_contents(data):
 def release_plan():
     workspace = json.loads(cargo("metadata", "--locked", "--format-version=1", "--no-deps"))
     versions = {package["name"]: package["version"] for package in workspace["packages"]}
-    if versions["duke-docx"] != versions["duke-docx-wasm"]:
-        sys.exit("duke-docx and duke-docx-wasm must use the same release version.")
-    bindings = next(package for package in workspace["packages"] if package["name"] == "duke-docx-wasm")
-    parser_dependency = next(dependency for dependency in bindings["dependencies"] if dependency["name"] == "duke-docx")
-    if parser_dependency["req"] != f"={versions['duke-docx']}":
-        sys.exit("duke-docx-wasm must pin the matching duke-docx release version.")
+    if versions["duke-pages"] != versions["duke-pages-wasm"]:
+        sys.exit("duke-pages and duke-pages-wasm must use the same release version.")
+    bindings = next(package for package in workspace["packages"] if package["name"] == "duke-pages-wasm")
+    parser_dependency = next(dependency for dependency in bindings["dependencies"] if dependency["name"] == "duke-pages")
+    if parser_dependency["req"] != f"={versions['duke-pages']}":
+        sys.exit("duke-pages-wasm must pin the matching duke-pages release version.")
     cargo("package", "--workspace", "--locked", "--no-verify")
     artifacts = Path(workspace["target_directory"]) / "package"
     pending = []

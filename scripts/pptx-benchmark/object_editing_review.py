@@ -69,7 +69,7 @@ def source_fragments(data, tree):
 
 
 def audit_invoke(binary, row, output):
-    result = subprocess.run([str(binary), 'duke-pptx', row['path'], str(output), '0', 'editing'], capture_output=True, text=True, timeout=120, check=True)
+    result = subprocess.run([str(binary), 'duke-slides', row['path'], str(output), '0', 'editing'], capture_output=True, text=True, timeout=120, check=True)
     record = json.loads(result.stdout.splitlines()[-1])
     return record, json.load(gzip.open(output, 'rt')) if record['status'] == 'ok' else None
 
@@ -231,7 +231,7 @@ def main():
         for i, row in enumerate(rows[start:], start):
             assert row.get('split') != 'validation' and sha(row['path']) == row['sha256']
             if a.audit_binary:
-                record = compact(run/'candidate', 'duke-pptx', row, run/(a.name+'.compact.json.gz'), 0)
+                record = compact(run/'candidate', 'duke-slides', row, run/(a.name+'.compact.json.gz'), 0)
                 audited, artifact = audit_invoke(a.audit_binary, row, run/(a.name+'.audit.json.gz'))
                 assert fields(audited) == fields(record), row['id']
                 after = dict(nodes=[value['node'] for value in artifact['nodes']]) if artifact else None

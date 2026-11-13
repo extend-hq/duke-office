@@ -33,7 +33,7 @@ def main():
     parser.add_argument('--candidate', default='chart-group1')
     parser.add_argument('--manifest', type=Path, default=OUT / 'poi-runtime/legacy-tuning-cohort.json')
     parser.add_argument('--reference', type=Path, default=OUT / 'poi-legacy-tuning')
-    parser.add_argument('--engines', nargs='+', choices=['duke-pptx', 'office_oxide', 'undoc'], default=['duke-pptx', 'office_oxide', 'undoc'])
+    parser.add_argument('--engines', nargs='+', choices=['duke-slides', 'office_oxide', 'undoc'], default=['duke-slides', 'office_oxide', 'undoc'])
     args = parser.parse_args()
     poi = args.reference
     run = OUT / args.output
@@ -60,7 +60,7 @@ def main():
             if reference is not None:
                 if record['status'] == 'ok':
                     data = json.load(gzip.open(target, 'rt'))
-                    actual = core(data) if engine == 'duke-pptx' else ir(engine, data)
+                    actual = core(data) if engine == 'duke-slides' else ir(engine, data)
                 else:
                     actual = dict(slides=[])
                 record['metrics'] = {key: agreement(reference, actual, key) for key in ['body_text', 'notes']}

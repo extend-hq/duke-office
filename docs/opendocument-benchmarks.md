@@ -4,7 +4,7 @@ Latest follow-up: [OpenDocument parity and latency hill-climb](opendocument-hill
 
 For the November 13 chart fixes, matched before/after timings and two freshly rerun peers, see [OpenDocument chart fidelity and latency](opendocument-fidelity-20261113.md). The broader comparison below remains the November 12 snapshot.
 
-November 12, 2026. This compares the OpenDocument import in this repository (`duke-docx` for text documents, `duke-pptx` for presentations and drawings, both reading through `duke-odf`) with every other Rust crate found on crates.io that reads these formats, and with six general-purpose parsers. The harness is in [scripts/odf-benchmark](../scripts/odf-benchmark); its work directory, including the corpus, references and every parser's output, is `output/odf-benchmark-20261112`.
+November 12, 2026. This compares the OpenDocument import in this repository (`duke-pages` for text documents, `duke-slides` for presentations and drawings, both reading through `duke-odf`) with every other Rust crate found on crates.io that reads these formats, and with six general-purpose parsers. The harness is in [scripts/odf-benchmark](../scripts/odf-benchmark); its work directory, including the corpus, references and every parser's output, is `output/odf-benchmark-20261112`.
 
 ## Result
 
@@ -28,7 +28,7 @@ The first complete run was followed by a round of accuracy and speed work, and t
 
 - **Second round, accuracy:** embedded charts, text documents and spreadsheets on slides are read; a body with more than one content element is read in full; list and heading numbers are part of the scored text, as they are in LibreOffice's export.
 - **Second round, speed:** `duke-odf` builds its own XML tree with namespaces resolved to an enum, in place of a general-purpose tree; entries are inflated with `zlib-rs`; style lookups no longer allocate.
-- **Direct model:** until this round an OpenDocument text file was written out as Word markup and parsed again by the DOCX reader. `duke-docx` now builds its document model straight from what `duke-odf` read, with no Word package in between, and moves text and image bytes into the model instead of copying them. In `duke-odf`, the XML tree is built in one scan with no tokenizer in front, styles are stored boxed and by family so that a document with thousands of automatic styles no longer shifts kilobytes per insertion, and one property group can be resolved without the other three. The scored text is unchanged: the new path produced the same letters and digits as the old one on all 756 readable files, and identical output on every presentation and drawing.
+- **Direct model:** until this round an OpenDocument text file was written out as Word markup and parsed again by the DOCX reader. `duke-pages` now builds its document model straight from what `duke-odf` read, with no Word package in between, and moves text and image bytes into the model instead of copying them. In `duke-odf`, the XML tree is built in one scan with no tokenizer in front, styles are stored boxed and by family so that a document with thousands of automatic styles no longer shifts kilobytes per insertion, and one property group can be resolved without the other three. The scored text is unchanged: the new path produced the same letters and digits as the old one on all 756 readable files, and identical output on every presentation and drawing.
 
 ## Corpus
 
@@ -163,9 +163,9 @@ Sum of the fastest repeat per phase over the 418 `.odt` files this import reads:
 | --- | ---: | ---: | ---: | ---: |
 | `duke-odf`: inflate, parse XML, build styles and content | 176 ms | 113 ms | 84 ms | 51% |
 | Write the Word package | 94 ms | 60 ms | — | |
-| `duke-docx`: parse that package into the document model | 96 ms | 87 ms | — | |
-| `duke-docx`: build the document model directly | — | — | 39 ms | 24% |
-| `duke-docx`: extract blocks | 46 ms | 41 ms | 41 ms | 25% |
+| `duke-pages`: parse that package into the document model | 96 ms | 87 ms | — | |
+| `duke-pages`: build the document model directly | — | — | 39 ms | 24% |
+| `duke-pages`: extract blocks | 46 ms | 41 ms | 41 ms | 25% |
 | Total | 412 ms | 301 ms | 164 ms | |
 
 Building the model directly takes 39 ms where writing and re-parsing Word markup took 147 ms. That phase includes the identity hash of the file and the block identifiers. Block extraction is the code the DOCX path uses and was not changed. For the 217 `.odp` files the total went from 145 ms to 88 ms to 72 ms, of which `duke-odf` is 63 ms: a presentation's `styles.xml` is large and the slide adapter is thin.

@@ -1,0 +1,29 @@
+[package]
+name = "duke-pages-wasm"
+version = "0.3.1"
+edition.workspace = true
+license.workspace = true
+description = "WebAssembly bindings for the duke-pages parser and serializer"
+repository = "https://github.com/extend-hq/duke-office"
+documentation = "https://docs.rs/duke-pages-wasm"
+keywords = ["docx", "doc", "ooxml", "parser", "wasm"]
+categories = ["parser-implementations", "wasm"]
+readme = "README.md"
+include = ["src/**", "third-party/**", "Cargo.toml", "README.md", "LICENSE"]
+
+[lib]
+name = "duke_pages_wasm"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+duke-pages = { version = "=0.3.1", path = "../duke-pages" }
+serde.workspace = true
+serde_json = { workspace = true, features = ["float_roundtrip"] }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O3", "--enable-bulk-memory", "--enable-nontrapping-float-to-int", "--enable-simd"]

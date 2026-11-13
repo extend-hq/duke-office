@@ -9,8 +9,8 @@ publish = false
 [dependencies]
 serde_json = "1"
 duke-odf = { path = "../../../../crates/duke-odf" }
-duke-docx = { path = "../../../../crates/duke-docx" }
-duke-pptx = { path = "../../../../crates/duke-pptx" }
+duke-pages = { path = "../../../../crates/duke-pages" }
+duke-slides = { path = "../../../../crates/duke-slides" }
 
 duke-office-charts = { path = "../../../../crates/duke-office-charts" }
 

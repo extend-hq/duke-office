@@ -33,7 +33,7 @@ def main():
     package=run/'relationships-and-media.pptx'
     with zipfile.ZipFile(package,'w',zipfile.ZIP_DEFLATED) as z:
         for name,data in contents.items():z.writestr(name,data)
-    result=subprocess.run([sys.argv[1] if len(sys.argv)>1 else str(ROOT/'scripts/pptx-benchmark/target/release/pptx-benchmark'),'duke-pptx',str(package),str(run/'model.json.gz'),'0','full'],capture_output=True,text=True,check=True)
+    result=subprocess.run([sys.argv[1] if len(sys.argv)>1 else str(ROOT/'scripts/pptx-benchmark/target/release/pptx-benchmark'),'duke-slides',str(package),str(run/'model.json.gz'),'0','full'],capture_output=True,text=True,check=True)
     record=json.loads(result.stdout.splitlines()[-1]);assert record['status']=='ok',record
     document=json.load(gzip.open(run/'model.json.gz','rt'));node=next(n for n in document['slides'][0]['nodes'] if n['type']=='media')
     checks={

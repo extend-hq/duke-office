@@ -18,10 +18,10 @@ def main():
     details = []
     unclassified = 0
     for row in assessment['rows']:
-        if row['engine'] != 'duke-pptx' or row['status'] != 'ok' or row['metrics']['images']['recall'] == 1:
+        if row['engine'] != 'duke-slides' or row['status'] != 'ok' or row['metrics']['images']['recall'] == 1:
             continue
         ident = row['id']
-        path = run / 'native' / (ident + '.duke-pptx.json.gz')
+        path = run / 'native' / (ident + '.duke-slides.json.gz')
         model = json.load(gzip.open(path, 'rt'))
         reference = json.loads((run / 'reference' / (ident + '.json')).read_text())
         actual = common.core(model)

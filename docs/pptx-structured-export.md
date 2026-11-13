@@ -1,11 +1,11 @@
 # Presentation bundles and semantic export
 
-`duke-pptx` provides a portable extraction and export contract for native and WebAssembly callers. Storage, OCR, figure descriptions, chunking, access control, and process scheduling remain host responsibilities.
+`duke-slides` provides a portable extraction and export contract for native and WebAssembly callers. Storage, OCR, figure descriptions, chunking, access control, and process scheduling remain host responsibilities.
 
 ## Bundle
 
 ```rust
-use duke_pptx::{
+use duke_slides::{
     parse_presentation_bundle, export_presentation, ExtractPresentationBundleOptions,
     ExportRequest,
 };
@@ -35,11 +35,11 @@ Table details include `rowCount`, `columnCount`, column widths, and row heights.
 
 ## Shared chart data
 
-With `includeCharts: true`, `charts` maps chart part names to the exact `duke-office-charts::ChartData` type also used by `duke-docx::DocumentBundle`. Chart figures expose `details.chartPartName` and `details.chartId`. If an imported model lacks a chart part name, its block ID is the chart key and `chartPartName` is omitted. Repeated occurrences of the same chart part share one data entry.
+With `includeCharts: true`, `charts` maps chart part names to the exact `duke-office-charts::ChartData` type also used by `duke-pages::DocumentBundle`. Chart figures expose `details.chartPartName` and `details.chartId`. If an imported model lacks a chart part name, its block ID is the chart key and `chartPartName` is omitted. Repeated occurrences of the same chart part share one data entry.
 
 Cached and literal values retain their original string precision, sparse point indices, hierarchical categories, X/Y coordinates, bubble sizes, series names, and per-series chart types. Formulas and external workbook references are not evaluated. Missing or unreadable chart data produces a scoped `chart-data-unavailable` warning. An empty cache remains empty; the exporter does not fabricate values from artwork.
 
-The shared types are available under `duke_pptx::chart::{ChartData, ChartSeries, ChartPoint, ChartCategory}`. `ChartData`, `ChartPoint`, and `ChartCategory` are also re-exported at the crate root. `ExtractedChartSeries` aliases the shared series type; the existing root `ChartSeries` remains the simplified rendering-model type for compatibility. `extract_chart_data(&document, part_name)` reads shared chart data independently of bundle extraction or artwork rendering.
+The shared types are available under `duke_slides::chart::{ChartData, ChartSeries, ChartPoint, ChartCategory}`. `ChartData`, `ChartPoint`, and `ChartCategory` are also re-exported at the crate root. `ExtractedChartSeries` aliases the shared series type; the existing root `ChartSeries` remains the simplified rendering-model type for compatibility. `extract_chart_data(&document, part_name)` reads shared chart data independently of bundle extraction or artwork rendering.
 
 ## Assets and appearance
 

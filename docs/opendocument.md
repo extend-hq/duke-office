@@ -1,19 +1,19 @@
 # OpenDocument input
 
-`duke-docx` and `duke-pptx` read OpenDocument files into the same models they build for Word and PowerPoint files. The bytes decide the format.
+`duke-pages` and `duke-slides` read OpenDocument files into the same models they build for Word and PowerPoint files. The bytes decide the format.
 
 ## How it is put together
 
 ```text
             duke-odf  (package, styles, text, tables, drawing objects)
             /      \
-   duke-docx        duke-pptx
+   duke-pages        duke-slides
    DocModel         PresentationDocument
 ```
 
 - **`duke-odf`** opens the file (ZIP package or flat XML), resolves style inheritance and reads content into owned values, including the sub-documents of embedded charts, text documents and spreadsheets. It knows nothing about Word or PowerPoint. Its XML tree is its own: OpenDocument uses a fixed set of namespaces, so names are resolved to an enum while the tree is built.
-- **`duke-docx`** builds its document model (`DocModel`) directly from what `duke-odf` read. OpenDocument and Word are separate paths that meet at the model: no Word package or Word markup is produced on the way, and an OpenDocument file is never converted to DOCX in order to be parsed. Structured blocks, bundles and review run on the model unchanged.
-- **`duke-pptx`** builds the same `PresentationDocument` the PowerPoint readers produce. Blocks, bundles, export and the viewer model run unchanged.
+- **`duke-pages`** builds its document model (`DocModel`) directly from what `duke-odf` read. OpenDocument and Word are separate paths that meet at the model: no Word package or Word markup is produced on the way, and an OpenDocument file is never converted to DOCX in order to be parsed. Structured blocks, bundles and review run on the model unchanged.
+- **`duke-slides`** builds the same `PresentationDocument` the PowerPoint readers produce. Blocks, bundles, export and the viewer model run unchanged.
 
 Because both target the existing models, a viewer or host that already consumes those models needs little new code. The exceptions for text documents are listed under [Text documents](#text-documents).
 
@@ -21,7 +21,7 @@ Because both target the existing models, a viewer or host that already consumes 
 
 | Function | OpenDocument text |
 | --- | --- |
-| `duke_docx::parse_odt(bytes)` | The model, built directly. |
+| `duke_pages::parse_odt(bytes)` | The model, built directly. |
 | `parse_document_model`, `parse_document_model_with_options` | The model, for every supported format: DOCX and `.doc` go through their Word package, OpenDocument does not. |
 | `parse_document_blocks`, `parse_document_blocks_with_options`, `parse_document_blocks_with_revisions`, `parse_document_bundle` | Blocks, as for Word files. |
 | WebAssembly `build_doc_model_from_bytes` | The model, with an empty package beside it. |
@@ -33,22 +33,22 @@ Detection reads the `mimetype` entry, or the `office:mimetype` attribute of a fl
 
 | Media type (`application/vnd.oasis.opendocument.` + ) | Extension | Parser |
 | --- | --- | --- |
-| `text` | `.odt` | `duke-docx` |
-| `text-template` | `.ott` | `duke-docx` |
-| `text-master` | `.odm` | `duke-docx` |
-| `text-master-template` | `.otm` | `duke-docx` |
-| `text-web` | `.oth` | `duke-docx` |
-| `text-flat-xml` | `.fodt` | `duke-docx` |
-| `presentation` | `.odp` | `duke-pptx`, format `odp` |
-| `presentation-template` | `.otp` | `duke-pptx`, format `odp` |
-| `presentation-flat-xml` | `.fodp` | `duke-pptx`, format `odp` |
-| `graphics` | `.odg` | `duke-pptx`, format `odg` |
-| `graphics-template` | `.otg` | `duke-pptx`, format `odg` |
-| `graphics-flat-xml` | `.fodg` | `duke-pptx`, format `odg` |
+| `text` | `.odt` | `duke-pages` |
+| `text-template` | `.ott` | `duke-pages` |
+| `text-master` | `.odm` | `duke-pages` |
+| `text-master-template` | `.otm` | `duke-pages` |
+| `text-web` | `.oth` | `duke-pages` |
+| `text-flat-xml` | `.fodt` | `duke-pages` |
+| `presentation` | `.odp` | `duke-slides`, format `odp` |
+| `presentation-template` | `.otp` | `duke-slides`, format `odp` |
+| `presentation-flat-xml` | `.fodp` | `duke-slides`, format `odp` |
+| `graphics` | `.odg` | `duke-slides`, format `odg` |
+| `graphics-template` | `.otg` | `duke-slides`, format `odg` |
+| `graphics-flat-xml` | `.fodg` | `duke-slides`, format `odg` |
 
 `duke-odf` also recognises spreadsheets (`.ods`, `.ots`, `.fods`) and reads their tables with repeat counts intact, and it reads chart documents (`.odc`, `.otc`) into a title, categories and series. No parser in this repository accepts either as a standalone file. Formula, image and database documents are identified by `sniff` and have no body model yet.
 
-Every `duke-docx` entry point returns an error naming the type when given an OpenDocument file that is not a text document. `duke_pptx::detect_format` returns `UnsupportedFormat` for an OpenDocument file that is neither a presentation nor a drawing. Office Open XML and other ZIP formats are never mistaken for OpenDocument: a package whose first entry is `[Content_Types].xml` is rejected without reading the central directory.
+Every `duke-pages` entry point returns an error naming the type when given an OpenDocument file that is not a text document. `duke_slides::detect_format` returns `UnsupportedFormat` for an OpenDocument file that is neither a presentation nor a drawing. Office Open XML and other ZIP formats are never mistaken for OpenDocument: a package whose first entry is `[Content_Types].xml` is rejected without reading the central directory.
 
 Encrypted packages, ZIP64 packages and the pre-OpenDocument OpenOffice.org 1.x formats (`.sxw`, `.sxi`) are rejected.
 
@@ -95,7 +95,7 @@ Shapes carry typed geometry, fill and line, as legacy `.ppt` shapes do; `shapeSv
 
 ## Limits
 
-`duke-odf::Limits` bounds input size, ZIP entry count, per-entry and total inflated size, XML nodes per part, content nesting depth and content element count. `duke-pptx` maps its `ParseLimits` onto them. Table repeat counts are stored as counts by `duke-odf` and expanded by the adapters under their own caps, so a few bytes cannot declare millions of cells.
+`duke-odf::Limits` bounds input size, ZIP entry count, per-entry and total inflated size, XML nodes per part, content nesting depth and content element count. `duke-slides` maps its `ParseLimits` onto them. Table repeat counts are stored as counts by `duke-odf` and expanded by the adapters under their own caps, so a few bytes cannot declare millions of cells.
 
 ## Validation
 

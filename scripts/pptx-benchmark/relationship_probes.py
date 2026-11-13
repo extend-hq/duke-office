@@ -144,7 +144,7 @@ def main():
             receipt = dict(id=name, passed=passed, source_id=source['id'], source_sha256=source['sha256'], input_sha256=row['sha256'], counts=counts, baseline_status=old['status'], candidate_status=current['status'], issues=issues)
             receipts.append(receipt)
             print(name, passed, issues, flush=True)
-            record = compact(binary, 'duke-pptx', row, directory / (name + '.compact.json.gz'), 0)
+            record = compact(binary, 'duke-slides', row, directory / (name + '.compact.json.gz'), 0)
             record.update(id=name)
             if current['status'] == 'ok':
                 assert record['full_sha256'] == current['full_sha256']
@@ -184,7 +184,7 @@ def main():
             issues = differences(expected, after) if current['status'] == 'ok' else ['status']
             receipts.append(dict(id=name, passed=not issues, input_sha256=row['sha256'], issues=issues))
             print(name, not issues, issues, flush=True)
-            record = compact(binary, 'duke-pptx', row, directory / (name + '.compact.json.gz'), 0)
+            record = compact(binary, 'duke-slides', row, directory / (name + '.compact.json.gz'), 0)
             record.update(id=name, artwork_hashes=artwork_hashes(after))
             records.append(record)
     (directory / 'manifest.json').write_text(json.dumps(manifest, indent=2))

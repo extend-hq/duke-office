@@ -11,13 +11,13 @@ import numpy as np
 from assess import percentile
 
 OUT=Path(__file__).resolve().parents[2]/'output/pptx-benchmark-20261106'
-ENGINES=['duke-pptx','office_oxide','undoc','python-pptx','markitdown']
-LABELS=['duke-pptx 0.1.5','office_oxide 0.1.16','undoc 0.27.3','python-pptx 1.0.2','MarkItDown 0.1.9']
+ENGINES=['duke-slides','office_oxide','undoc','python-pptx','markitdown']
+LABELS=['duke-slides 0.1.5','office_oxide 0.1.16','undoc 0.27.3','python-pptx 1.0.2','MarkItDown 0.1.9']
 COLORS=['#165dcb','#8b5fbc','#dd8831','#27836b','#b75170']
 FEATURES=[('body_text','Slide text · five-gram recall'),('ordered_text','Slide text · ordered character recall'),('paragraphs','Paragraphs · exact anchors'),('tables_literal','Tables · literal text retained'),('tables','Tables · exact anchors'),('cells','Table cells · exact anchors'),('horizontal_spans','Horizontal spans · text + span'),('vertical_spans','Vertical spans · text + span'),('images','Images · payload-matched occurrences'),('bold','Explicit bold · run five-grams'),('italic','Explicit italic · run five-grams'),('link','Text hyperlinks · run five-grams'),('notes','Speaker notes · five-grams'),('comments','Comments · exact anchors'),('chart_count','Charts · occurrence-count proxy'),('chart_series','Chart series · exact cached values'),('shape_positions','Explicit top-level frames · ID + EMUs'),('hidden_slides','Hidden-slide flags'),('slide_size','Slide dimensions · exact EMUs')]
 
 def pct(x):return f'{100*x:.2f}%'
-def ns(engine,key):return (key in ['shape_positions','slide_size'] and engine not in ['duke-pptx','python-pptx']) or (key=='hidden_slides' and engine in ['python-pptx','markitdown']) or (key=='comments' and engine!='duke-pptx')
+def ns(engine,key):return (key in ['shape_positions','slide_size'] and engine not in ['duke-slides','python-pptx']) or (key=='hidden_slides' and engine in ['python-pptx','markitdown']) or (key=='comments' and engine!='duke-slides')
 
 def main(phase):
     run=OUT/phase;d=json.loads((run/'assessment.json').read_text());summary=d['summary'];site=OUT/'report';site.mkdir(exist_ok=True)
@@ -50,7 +50,7 @@ def main(phase):
     common_rows=''.join(f'<tr><th>{label}</th><td>{pct(summary[e]["common_features"]["body_text"]["recall"])}</td><td>{pct(summary[e]["common_features"]["body_text"]["f1"])}</td></tr>' for e,label in zip(ENGINES,LABELS))
     feature_rows=[]
     for key,label in FEATURES:
-        expected=summary['duke-pptx']['features'].get(key,{}).get('expected',0)
+        expected=summary['duke-slides']['features'].get(key,{}).get('expected',0)
         if not expected:continue
         cells=''.join('<td class="muted">Not scored</td>' if ns(e,key) else f'<td>{pct(summary[e]["features"][key]["recall"])}</td>' for e in ENGINES)
         feature_rows.append(f'<tr><th>{label}</th><td>{expected:,}</td>{cells}</tr>')
@@ -67,7 +67,7 @@ def main(phase):
         experiments.append(f'<tr><th>{html.escape(p.parent.name)} · {timing.get("split","tuning")} · vs {html.escape(reference)}</th><td>{parity["equal"]}/{parity["total"]}</td><td>{timing["inputs"]}</td><td>{timing["median_speedup"]:.3f}×</td><td>{timing["candidate_wins"]}/{timing["inputs"]}</td></tr>')
     comparison=''
     if phase!='comparison':
-        baseline=json.loads((OUT/'comparison/assessment.json').read_text())['summary']['duke-pptx'];current=summary['duke-pptx']
+        baseline=json.loads((OUT/'comparison/assessment.json').read_text())['summary']['duke-slides'];current=summary['duke-slides']
         comparison='<h2>Change from the original parser</h2><p>Fresh five-parser timings retain the original 145-input timing cohort. Newly accepted empty decks cannot lower the measured median. Shared-machine timing variation remains possible. <a href="baseline/index.html">Original report and charts</a>.</p><div class="scroll"><table><thead><tr><th>Measurement</th><th>Original</th><th>Current</th></tr></thead><tbody>'
         for title,old,new in [('Reference packages accepted',str(baseline['reference_success'])+'/157',str(current['reference_success'])+'/157'),('Median latency',f'{baseline["median_ms"]:.3f} ms',f'{current["median_ms"]:.3f} ms'),('p95 latency',f'{baseline["p95_ms"]:.3f} ms',f'{current["p95_ms"]:.3f} ms'),('Chart-series recall',pct(baseline['features']['chart_series']['recall']),pct(current['features']['chart_series']['recall'])),('Notes recall',pct(baseline['features']['notes']['recall']),pct(current['features']['notes']['recall']))]:
             comparison+=f'<tr><th>{title}</th><td>{old}</td><td>{new}</td></tr>'
@@ -109,7 +109,7 @@ def main(phase):
             statuses=[acceptance['engines'][e].get(kind,{}) for e in ENGINES[:3]]
             total=sum(statuses[0].values())
             expansion_rows.append('<tr><th>.'+kind+'</th><td>'+str(expanded['by_format'][kind])+'</td>'+''.join('<td>'+str(status.get('ok',0))+'/'+str(total)+'</td>' for status in statuses)+'</tr>')
-        details=f'<h2>Expanded corpus</h2><p>The corpus now contains {expanded["combined"]:,} unique files: the original 318 plus {expanded["added"]:,} additions from pinned LibreOffice, Apache Tika and Apache POI repositories and Embrace. Downloads are SHA-256 verified and deduplicated. {expanded["by_split"]["tuning"]} additions form the tuning set; {expanded["by_split"]["validation"]} are reserved for later validation. These sources are regression suites and archive collections, not a prevalence sample.</p><img src="corpus.png" alt="Additional corpus files by format"><p>The table below is an <strong>acceptance-only</strong> check of the preceding validated build on the new tuning set. It does not measure text accuracy or visual fidelity. The main latency and accuracy charts above still use the original cohort.</p><div class="scroll"><table><thead><tr><th>Format</th><th>Added files</th><th>duke-pptx accepted/tested</th><th>Office Oxide accepted/tested</th><th>undoc accepted/tested</th></tr></thead><tbody>'+''.join(expansion_rows)+'</tbody></table></div><p>Of the 13 legacy inputs accepted by Office Oxide and rejected by duke-pptx, 12 are rejected by our CFB reader for malformed or truncated container structures; one fails slide-record resolution. Acceptance alone does not establish that the competitor recovered correct content. OpenDocument and older Impress files remain outside the current parser format support.</p>'
+        details=f'<h2>Expanded corpus</h2><p>The corpus now contains {expanded["combined"]:,} unique files: the original 318 plus {expanded["added"]:,} additions from pinned LibreOffice, Apache Tika and Apache POI repositories and Embrace. Downloads are SHA-256 verified and deduplicated. {expanded["by_split"]["tuning"]} additions form the tuning set; {expanded["by_split"]["validation"]} are reserved for later validation. These sources are regression suites and archive collections, not a prevalence sample.</p><img src="corpus.png" alt="Additional corpus files by format"><p>The table below is an <strong>acceptance-only</strong> check of the preceding validated build on the new tuning set. It does not measure text accuracy or visual fidelity. The main latency and accuracy charts above still use the original cohort.</p><div class="scroll"><table><thead><tr><th>Format</th><th>Added files</th><th>duke-slides accepted/tested</th><th>Office Oxide accepted/tested</th><th>undoc accepted/tested</th></tr></thead><tbody>'+''.join(expansion_rows)+'</tbody></table></div><p>Of the 13 legacy inputs accepted by Office Oxide and rejected by duke-slides, 12 are rejected by our CFB reader for malformed or truncated container structures; one fails slide-record resolution. Acceptance alone does not establish that the competitor recovered correct content. OpenDocument and older Impress files remain outside the current parser format support.</p>'
         if (site/'expanded.html').exists():
             details += '<p><a href="expanded.html">Open the five-parser results on the expanded corpus</a>: separate timing cohort, failure-inclusive accuracy, source-feature table and selectable complexity/performance axes.</p>'
         page=page.replace('<h2>Legacy PPT robustness</h2>',details+'<h2>Legacy PPT robustness</h2>')
@@ -121,7 +121,7 @@ def main(phase):
         s=summary[e];f=s['features'];md.append(f'| {label} | {s["reference_success"]}/{s["reference_total"]} | {s["median_ms"]:.3f} | {s["p95_ms"]:.3f} | {pct(f["body_text"]["macro_f1"])} | {pct(f["ordered_text"]["macro_f1"])} | {pct(f["body_text"]["recall"])} |')
     md+=['','Text F1 is macro-averaged over text-bearing decks; recall pools reference five-grams. Ordered F1 aligns whitespace-normalized characters within each slide. Source-literal F1 penalizes legitimate extra master/layout or chart text and is not a visual fidelity score.','', '| Feature | Expected units | '+' | '.join(LABELS)+' |','| --- | ---: | '+' | '.join(['---:']*5)+' |']
     for key,label in FEATURES:
-        expected=summary['duke-pptx']['features'].get(key,{}).get('expected',0)
+        expected=summary['duke-slides']['features'].get(key,{}).get('expected',0)
         if expected:md.append(f'| {label} | {expected:,} | '+' | '.join('Not scored' if ns(e,key) else pct(summary[e]['features'][key]['recall']) for e in ENGINES)+' |')
     md+=['','See the interactive report for method, distributions, source provenance and limitations.','', '[Expanded-corpus results](EXPANDED-RESULTS.md) retain a separate cohort and denominators.']
     (site/'RESULTS.md').write_text('\n'.join(md)+'\n')

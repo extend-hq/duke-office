@@ -10,7 +10,7 @@ Shared OpenDocument readers for the [Duke Office](https://github.com/extend-hq/d
 - The body is text blocks (paragraphs, lists, tables, sections), drawing pages (slides), spreadsheet tables or a chart (title, categories and series).
 - `EmbeddedObject::document` reads the sub-document of an embedded chart, text document or spreadsheet the same way.
 
-The crate does not produce a viewer or export model. `duke-docx` builds its document model from text documents and `duke-pptx` builds its presentation model from presentations and drawings, each directly from these values, so both parsers and their viewers accept OpenDocument input.
+The crate does not produce a viewer or export model. `duke-pages` builds its document model from text documents and `duke-slides` builds its presentation model from presentations and drawings, each directly from these values, so both parsers and their viewers accept OpenDocument input.
 
 Encrypted packages, ZIP64 packages and the pre-OpenDocument OpenOffice.org 1.x formats are rejected. Tracked changes are read as accepted text.
 

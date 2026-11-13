@@ -1,6 +1,6 @@
 # Office Art comparisons
 
-The main README's expanded gallery compares 30 drawing objects with Microsoft Word for Mac 16.106.1. The November 6, 2026 candidate uses the current native `duke-docx` adapter and shared `duke-office-art` renderer; Chromium displays the emitted SVGs and saved image assets. This is a renderer comparison, not a fresh React DOCX pagination benchmark or a claim of complete Office fidelity.
+The main README's expanded gallery compares 30 drawing objects with Microsoft Word for Mac 16.106.1. The November 6, 2026 candidate uses the current native `duke-pages` adapter and shared `duke-office-art` renderer; Chromium displays the emitted SVGs and saved image assets. This is a renderer comparison, not a fresh React DOCX pagination benchmark or a claim of complete Office fidelity.
 
 ![Word and Duke Office Art](readme-assets/word-officeart-expanded-overview.png)
 
@@ -53,7 +53,7 @@ Generate the fixed pages from a local source containing the retained drawing obj
 
 ```sh
 python3 scripts/image-fidelity/art-gallery.py --source INPUT.docx --output OUTPUT
-cargo run -p duke-docx --example image_fidelity -- OUTPUT/office-art-gallery.docx OUTPUT/model.json
+cargo run -p duke-pages --example image_fidelity -- OUTPUT/office-art-gallery.docx OUTPUT/model.json
 python3 scripts/image-fidelity/prepare-pages.py --directory OUTPUT --model OUTPUT/model.json
 ```
 

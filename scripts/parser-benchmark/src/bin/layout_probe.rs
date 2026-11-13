@@ -2,26 +2,26 @@ use std::mem::{align_of, size_of};
 
 fn formatting_diagnostics() -> serde_json::Value {
     let xml = r#"<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:rPr><w:b/><w:rFonts w:ascii="serif"/></w:rPr><w:t>First</w:t></w:r><w:r><w:rPr><w:b/><w:rFonts w:ascii="serif"/></w:rPr><w:t>Second</w:t></w:r></w:p></w:body></w:document>"#;
-    let package = duke_docx::create_minimal_docx_package(Some(xml));
-    let mut model = duke_docx::build_doc_model(&package);
-    let blocks = duke_docx::extract_document_blocks(&model);
+    let package = duke_pages::create_minimal_docx_package(Some(xml));
+    let mut model = duke_pages::build_doc_model(&package);
+    let blocks = duke_pages::extract_document_blocks(&model);
     let block_json = serde_json::to_value(&blocks).unwrap();
-    let round_trip: duke_docx::StructuredDocument =
+    let round_trip: duke_pages::StructuredDocument =
         serde_json::from_value(block_json.clone()).unwrap();
     let typed_raw_round_trip =
         round_trip == blocks && serde_json::to_value(&round_trip).unwrap() == block_json;
     let mut extended = block_json.clone();
     extended["blocks"][0]["details"]["extension"] =
         serde_json::json!({"nested": [null, true, {"value": 7}]});
-    let imported: duke_docx::StructuredDocument = serde_json::from_value(extended.clone()).unwrap();
+    let imported: duke_pages::StructuredDocument = serde_json::from_value(extended.clone()).unwrap();
     let imported_extensions_retained = serde_json::to_value(imported).unwrap() == extended;
-    let duke_docx::DocNode::Paragraph(paragraph) = &mut model.nodes[0] else {
+    let duke_pages::DocNode::Paragraph(paragraph) = &mut model.nodes[0] else {
         panic!("expected paragraph");
     };
-    let duke_docx::ParagraphChildNode::Text(first) = &paragraph.children[0] else {
+    let duke_pages::ParagraphChildNode::Text(first) = &paragraph.children[0] else {
         panic!("expected text");
     };
-    let duke_docx::ParagraphChildNode::Text(second) = &paragraph.children[1] else {
+    let duke_pages::ParagraphChildNode::Text(second) = &paragraph.children[1] else {
         panic!("expected text");
     };
     let first_style = first.style.as_deref().unwrap();
@@ -36,14 +36,14 @@ fn formatting_diagnostics() -> serde_json::Value {
         == serde_json::to_value(first_style).unwrap();
     let original_style = serde_json::to_value(first_style).unwrap();
     let original_provenance = serde_json::to_value(&paragraph.source_run_provenance).unwrap();
-    let duke_docx::ParagraphChildNode::Text(first) = &mut paragraph.children[0] else {
+    let duke_pages::ParagraphChildNode::Text(first) = &mut paragraph.children[0] else {
         unreachable!();
     };
     let style = first.style.as_mut().unwrap();
     style.bold = Some(false);
     style.font_family = Some("monospace".into());
     let changed_style = serde_json::to_value(style).unwrap();
-    let duke_docx::ParagraphChildNode::Text(second) = &paragraph.children[1] else {
+    let duke_pages::ParagraphChildNode::Text(second) = &paragraph.children[1] else {
         unreachable!();
     };
     let sibling_unchanged =
@@ -79,17 +79,17 @@ fn main() {
             }));
         };
     }
-    record!("core.TextStyle", duke_docx::TextStyle);
-    record!("core.TextRunNode", duke_docx::TextRunNode);
-    record!("core.ImageRunNode", duke_docx::ImageRunNode);
-    record!("core.FormFieldRunNode", duke_docx::FormFieldRunNode);
-    record!("core.ParagraphChildNode", duke_docx::ParagraphChildNode);
-    record!("core.ParagraphNode", duke_docx::ParagraphNode);
-    record!("core.TableNode", duke_docx::TableNode);
-    record!("core.DocNode", duke_docx::DocNode);
+    record!("core.TextStyle", duke_pages::TextStyle);
+    record!("core.TextRunNode", duke_pages::TextRunNode);
+    record!("core.ImageRunNode", duke_pages::ImageRunNode);
+    record!("core.FormFieldRunNode", duke_pages::FormFieldRunNode);
+    record!("core.ParagraphChildNode", duke_pages::ParagraphChildNode);
+    record!("core.ParagraphNode", duke_pages::ParagraphNode);
+    record!("core.TableNode", duke_pages::TableNode);
+    record!("core.DocNode", duke_pages::DocNode);
     record!(
         "core.ParagraphSourceTextPatchRun",
-        duke_docx::ParagraphSourceTextPatchRun
+        duke_pages::ParagraphSourceTextPatchRun
     );
     record!("oxide.RunProperties", office_oxide::docx::RunProperties);
     record!("oxide.Run", office_oxide::docx::Run);

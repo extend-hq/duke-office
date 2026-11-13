@@ -36,7 +36,7 @@ def main():
 
     def check(row):
         output = run / (row['id'] + '.compact.json.gz')
-        current = invoke(binary, 'duke-pptx', row, output, 0)
+        current = invoke(binary, 'duke-slides', row, output, 0)
         before = old[row['id']]
         exact = (before['status'], before.get('full_sha256'), before.get('error')) == (current['status'], current.get('full_sha256'), current.get('error'))
         recovered = False
@@ -57,7 +57,7 @@ def main():
                 print('RECOVERED' if record['recovered'] else 'MISMATCH', record['id'], flush=True)
             if i % 50 == 0:
                 print(i, len(rows), flush=True)
-    summary = dict(total=len(records), passed=sum(r['passed'] for r in records), exact=sum(r['exact'] for r in records), recoveries=[dict(id=r['id'], metrics=r['metrics']) for r in records if r['recovered']], failures=[r['id'] for r in records if not r['passed']], baseline_label=args.reference_label, baseline_sha256=proof['candidate_sha256'], candidate_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(), source_sha256={str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for folder in ['duke-pptx', 'duke-office-art', 'duke-office-charts'] for p in (ROOT / 'crates' / folder).rglob('*.rs')})
+    summary = dict(total=len(records), passed=sum(r['passed'] for r in records), exact=sum(r['exact'] for r in records), recoveries=[dict(id=r['id'], metrics=r['metrics']) for r in records if r['recovered']], failures=[r['id'] for r in records if not r['passed']], baseline_label=args.reference_label, baseline_sha256=proof['candidate_sha256'], candidate_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(), source_sha256={str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for folder in ['duke-slides', 'duke-office-art', 'duke-office-charts'] for p in (ROOT / 'crates' / folder).rglob('*.rs')})
     (run / 'semantic-summary.json').write_text(json.dumps(summary, indent=2))
     print(json.dumps({k: v for k, v in summary.items() if k != 'source_sha256'}))
     assert summary['passed'] == summary['total']

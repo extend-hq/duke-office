@@ -1,6 +1,6 @@
 # Shared OfficeArt rendering
 
-`duke-office-art` owns picture paint, DrawingML preset/custom geometry, shape and connector paint, style-reference hooks, and bounded SmartArt data/drawing readers. `duke-docx` and `duke-pptx` resolve package relationships and themes, supply images, and compose application-specific positioning and text. Their WASM bindings use the same Rust code. React viewers consume the resulting SVG and paint bounds while retaining source assets and editable text where available.
+`duke-office-art` owns picture paint, DrawingML preset/custom geometry, shape and connector paint, style-reference hooks, and bounded SmartArt data/drawing readers. `duke-pages` and `duke-slides` resolve package relationships and themes, supply images, and compose application-specific positioning and text. Their WASM bindings use the same Rust code. React viewers consume the resulting SVG and paint bounds while retaining source assets and editable text where available.
 
 The implementation covers all 187 preset geometry definitions, adjustment overrides, standard guide operators, multiple paths, elliptical arcs, markers, supported solid/gradient/pattern/bitmap fills and outlines, local transforms, and shared picture effects. It includes native pattern tiles, scaled linear and circular gradients, rectangular path gradients, and closed compound outlines. Preset geometry data is pinned to Apache POI with its license and notice. Parsing and rendering are bounded by XML, guide, path, command, coordinate and image-decoding limits.
 

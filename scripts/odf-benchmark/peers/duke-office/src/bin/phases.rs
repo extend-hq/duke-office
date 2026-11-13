@@ -32,9 +32,9 @@ fn main() {
         let mut phases = [odf, 0.0, 0.0, 0.0];
         match kind.family {
             duke_odf::OdfFamily::Text => {
-                let (model_ms, model) = time(|| duke_docx::parse_odt(&bytes));
+                let (model_ms, model) = time(|| duke_pages::parse_odt(&bytes));
                 let Ok(model) = model else { continue };
-                let (blocks_ms, _) = time(|| duke_docx::extract_document_blocks(&model));
+                let (blocks_ms, _) = time(|| duke_pages::extract_document_blocks(&model));
                 // Everything after the shared read: building the model, the
                 // identity hash and the block identifiers.
                 phases[1] = (model_ms - odf).max(0.0);
@@ -42,7 +42,7 @@ fn main() {
             }
             duke_odf::OdfFamily::Presentation | duke_odf::OdfFamily::Graphics => {
                 let (total, document) =
-                    time(|| duke_pptx::parse_presentation(&bytes, &duke_pptx::ParseLimits::server()));
+                    time(|| duke_slides::parse_presentation(&bytes, &duke_slides::ParseLimits::server()));
                 if document.is_err() {
                     continue;
                 }

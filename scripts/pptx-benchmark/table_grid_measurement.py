@@ -68,12 +68,12 @@ def main():
         prior_reference = OUT/'experiments/xml-indexed1/parity.jsonl'
         assert sha(prior_reference) == editing_proof['reference_records_sha256']
         prior_rows = {r['id']:r for r in map(json.loads,prior_reference.read_text().splitlines())}
-        assert all(fields(r) == fields(prior_rows[ident]) for (ident,engine),r in old.items() if engine == 'duke-pptx')
+        assert all(fields(r) == fields(prior_rows[ident]) for (ident,engine),r in old.items() if engine == 'duke-slides')
     changes, native_changes = [], []
     for (ident,engine), record in current.items():
         before = old[ident,engine]
         assert before['status'] == record['status']
-        if engine == 'duke-pptx':
+        if engine == 'duke-slides':
             assert fields(record) == fields(reviewed[ident])
             if a.exact_gate:
                 assert fields(record) == fields(before)
@@ -106,7 +106,7 @@ def main():
         assert len(observed) > 1
     replay = dict(inputs=len(changes),variable_inputs=len(changes),invocations=len(replay_receipts),receipts=replay_receipts,candidate_sha256=identity['binary_sha256'],scope='Untimed replays only. Table blocks vary in order; full table content and every other field remain unchanged. Raw measured output is retained.')
     (run/'undoc-replay-summary.json').write_text(json.dumps(replay,indent=2)+'\n')
-    proof = dict(records=len(rows),unique_records=len(current),statuses_equal_to_previous=True,native_outputs_match_source_review=sum(r['engine']=='duke-pptx' for r in rows),native_changed_inputs=native_changes,peer_output_changes={'undoc_table_order_only':[r['id'] for r in changes]},sources_and_harness_unchanged_at_measurement_completion=True,candidate_sha256=identity['binary_sha256'],identity_sha256=sha(run/'identity.json'),records_sha256=sha(run/'records.jsonl'),harness_sha256=sha(__file__))
+    proof = dict(records=len(rows),unique_records=len(current),statuses_equal_to_previous=True,native_outputs_match_source_review=sum(r['engine']=='duke-slides' for r in rows),native_changed_inputs=native_changes,peer_output_changes={'undoc_table_order_only':[r['id'] for r in changes]},sources_and_harness_unchanged_at_measurement_completion=True,candidate_sha256=identity['binary_sha256'],identity_sha256=sha(run/'identity.json'),records_sha256=sha(run/'records.jsonl'),harness_sha256=sha(__file__))
     proof.update(baseline_phase=a.baseline_phase, exact_native_output_gate=a.exact_gate,
                  native_review_sha256=sha(experiment/(review_name+'-summary.json')))
     if editing_proof:

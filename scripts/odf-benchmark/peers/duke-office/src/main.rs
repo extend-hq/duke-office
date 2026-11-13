@@ -1,11 +1,11 @@
-//! This repository's parsers: `duke-docx` for text documents and `duke-pptx`
+//! This repository's parsers: `duke-pages` for text documents and `duke-slides`
 //! for presentations and drawings.
 
 #[path = "../../../harness.rs"]
 mod harness;
 
-use duke_docx::{BlockDetails, BlockType, DocumentBlock};
-use duke_pptx::{ParseLimits, SlideNode, TextParagraph};
+use duke_pages::{BlockDetails, BlockType, DocumentBlock};
+use duke_slides::{ParseLimits, SlideNode, TextParagraph};
 
 /// Main-story text in reading order, the scope of the reference. Blocks
 /// carry their story, so header, footer, footnote, endnote and comment
@@ -37,7 +37,7 @@ fn document_text(bytes: &[u8]) -> Result<String, String> {
         out.push('\n');
     }
     // OpenDocument text is built straight into the document model.
-    let structured = duke_docx::extract_document_blocks(&duke_docx::parse_odt(bytes)?);
+    let structured = duke_pages::extract_document_blocks(&duke_pages::parse_odt(bytes)?);
     let mut out = String::new();
     for block in &structured.blocks {
         push(block, &mut out);
@@ -86,7 +86,7 @@ fn presentation_text(bytes: &[u8]) -> Result<String, String> {
         }
     }
     let document =
-        duke_pptx::parse_presentation(bytes, &ParseLimits::server()).map_err(|error| error.to_string())?;
+        duke_slides::parse_presentation(bytes, &ParseLimits::server()).map_err(|error| error.to_string())?;
     let mut out = String::new();
     for slide in &document.slides {
         nodes(&slide.nodes, &mut out);

@@ -2,7 +2,7 @@
 //!
 //! This crate opens the package (ZIP or flat XML), resolves styles and reads
 //! text and drawing content into owned values. It does not decide how a
-//! document is presented: `duke-docx` and `duke-pptx` turn the result into
+//! document is presented: `duke-pages` and `duke-slides` turn the result into
 //! their own models.
 
 pub mod chart;

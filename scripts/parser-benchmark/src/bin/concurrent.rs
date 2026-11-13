@@ -40,7 +40,7 @@ fn canonicalize(value: &mut Value, document_id: &str) {
     }
 }
 
-fn output_digest(model: &duke_docx::DocModel, blocks: &duke_docx::StructuredDocument) -> [u8; 32] {
+fn output_digest(model: &duke_pages::DocModel, blocks: &duke_pages::StructuredDocument) -> [u8; 32] {
     let mut model = serde_json::to_value(model).unwrap();
     let mut blocks = serde_json::to_value(blocks).unwrap();
     let id = model["metadata"]["documentId"]
@@ -79,9 +79,9 @@ fn run() {
         inputs
             .iter()
             .map(|bytes| {
-                let package = duke_docx::parse_document_bytes(bytes).unwrap();
-                let model = duke_docx::build_doc_model(&package);
-                output_digest(&model, &duke_docx::extract_document_blocks(&model))
+                let package = duke_pages::parse_document_bytes(bytes).unwrap();
+                let model = duke_pages::build_doc_model(&package);
+                output_digest(&model, &duke_pages::extract_document_blocks(&model))
             })
             .collect::<Vec<_>>()
     } else {
@@ -102,9 +102,9 @@ fn run() {
                     for round in 0..rounds {
                         for index in (worker..inputs.len()).step_by(workers) {
                             let start = Instant::now();
-                            let package = duke_docx::parse_document_bytes(&inputs[index]).unwrap();
-                            let model = duke_docx::build_doc_model(&package);
-                            let blocks = duke_docx::extract_document_blocks(&model);
+                            let package = duke_pages::parse_document_bytes(&inputs[index]).unwrap();
+                            let model = duke_pages::build_doc_model(&package);
+                            let blocks = duke_pages::extract_document_blocks(&model);
                             black_box((&package, &model, &blocks));
                             let ms = start.elapsed().as_secs_f64() * 1000.0;
                             if audit {

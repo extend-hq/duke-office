@@ -243,7 +243,49 @@ dependencies = [
 ]
 
 [[package]]
-name = "duke-docx"
+name = "duke-odf"
+version = "0.2.1"
+dependencies = [
+ "base64",
+ "memchr",
+ "miniz_oxide 0.8.9",
+ "quick-xml 0.37.5",
+ "zlib-rs",
+]
+
+[[package]]
+name = "duke-office-art"
+version = "0.1.10"
+dependencies = [
+ "base64",
+ "duke-odf",
+ "image",
+ "kurbo",
+ "libm",
+ "memchr",
+ "quick-xml 0.37.5",
+ "roxmltree",
+ "rustybuzz",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
+name = "duke-office-charts"
+version = "0.2.1"
+dependencies = [
+ "base64",
+ "duke-odf",
+ "duke-office-art",
+ "kurbo",
+ "miniz_oxide 0.8.9",
+ "roxmltree",
+ "serde",
+ "svgtypes",
+]
+
+[[package]]
+name = "duke-pages"
 version = "0.3.1"
 dependencies = [
  "arc-swap",
@@ -267,48 +309,6 @@ dependencies = [
  "simdutf8",
  "unicode-segmentation",
  "zlib-rs",
-]
-
-[[package]]
-name = "duke-odf"
-version = "0.2.0"
-dependencies = [
- "base64",
- "memchr",
- "miniz_oxide 0.8.9",
- "quick-xml 0.37.5",
- "zlib-rs",
-]
-
-[[package]]
-name = "duke-office-art"
-version = "0.1.9"
-dependencies = [
- "base64",
- "duke-odf",
- "image",
- "kurbo",
- "libm",
- "memchr",
- "quick-xml 0.37.5",
- "roxmltree",
- "rustybuzz",
- "serde",
- "serde_bytes",
-]
-
-[[package]]
-name = "duke-office-charts"
-version = "0.2.0"
-dependencies = [
- "base64",
- "duke-odf",
- "duke-office-art",
- "kurbo",
- "miniz_oxide 0.8.9",
- "roxmltree",
- "serde",
- "svgtypes",
 ]
 
 [[package]]
@@ -668,7 +668,7 @@ name = "parser-benchmark"
 version = "0.1.0"
 dependencies = [
  "docx-rs",
- "duke-docx",
+ "duke-pages",
  "flate2",
  "office_oxide",
  "serde",

@@ -224,7 +224,7 @@ dependencies = [
 
 [[package]]
 name = "duke-odf"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64",
  "memchr",
@@ -235,7 +235,7 @@ dependencies = [
 
 [[package]]
 name = "duke-office-art"
-version = "0.1.9"
+version = "0.1.10"
 dependencies = [
  "base64",
  "duke-odf",
@@ -252,7 +252,7 @@ dependencies = [
 
 [[package]]
 name = "duke-office-charts"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "base64",
  "duke-odf",
@@ -265,7 +265,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "duke-pptx"
+name = "duke-slides"
 version = "0.4.1"
 dependencies = [
  "base64",
@@ -642,7 +642,7 @@ dependencies = [
 name = "pptx-benchmark"
 version = "0.1.0"
 dependencies = [
- "duke-pptx",
+ "duke-slides",
  "flate2",
  "office_oxide",
  "serde_json",

@@ -66,7 +66,7 @@ def main():
             assert comments[0]['text'] == ' leading\nline\ntab\t&&lt;\n\r tail '
             assert comments[2]['text'] == ' \t '
             assert all('createdAt' not in c for c in comments)
-        record = compact(binary, 'duke-pptx', row, destination / (name + '.compact.json.gz'), 0)
+        record = compact(binary, 'duke-slides', row, destination / (name + '.compact.json.gz'), 0)
         assert record['full_sha256'] == new['full_sha256']
         record.update(id=name, artwork_hashes=artwork_hashes(after)); records.append(record)
         receipts.append(dict(id=name, input_sha256=row['sha256'], counts=counts, passed=True, full_sha256=new['full_sha256']))

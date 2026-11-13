@@ -2,7 +2,7 @@
 
 The [0.13.0 release comparison](benchmarks-0.13.0.md) contains the final benchmarks rerun on merged main.
 
-`duke-docx::parse_document_bytes`, `parse_document_model` and `parse_document_blocks` accept bytes, not a filename or MIME type. They dispatch compound-file input to the legacy Word adapter and other input to the OOXML ZIP reader. `parse_document_model` and `parse_document_blocks` also accept [OpenDocument text](opendocument.md), which is built into the document model directly; `parse_document_bytes` returns a Word package and rejects it. The document structures inside the container must still be valid; a ZIP or CFB signature alone does not establish Word support.
+`duke-pages::parse_document_bytes`, `parse_document_model` and `parse_document_blocks` accept bytes, not a filename or MIME type. They dispatch compound-file input to the legacy Word adapter and other input to the OOXML ZIP reader. `parse_document_model` and `parse_document_blocks` also accept [OpenDocument text](opendocument.md), which is built into the document model directly; `parse_document_bytes` returns a Word package and rejects it. The document structures inside the container must still be valid; a ZIP or CFB signature alone does not establish Word support.
 
 The standard Word input family comprises six extensions and five distinct MIME types:
 

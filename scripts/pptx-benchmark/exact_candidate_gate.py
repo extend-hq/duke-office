@@ -37,7 +37,7 @@ def main():
     fields = lambda row: (row['status'], row.get('full_sha256'), row.get('error'))
     def evaluate(row):
         assert hashlib.sha256(Path(row['path']).read_bytes()).hexdigest() == row['sha256']
-        current = invoke(binary, 'duke-pptx', row, run / (row['id'] + '.compact.json.gz'), 0)
+        current = invoke(binary, 'duke-slides', row, run / (row['id'] + '.compact.json.gz'), 0)
         old = previous[row['id']]
         equal = fields(current) == fields(old)
         current.update(id=row['id'], equal=equal)

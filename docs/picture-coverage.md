@@ -1,6 +1,6 @@
 # Office picture rendering coverage
 
-`duke-office-art` is shared by `duke-docx` and `duke-docx-wasm`. The parser resolves relationships and theme colors, preserves original assets and ordered presentation properties, and passes picture appearance to the shared renderer. The viewer consumes the resulting image and paint bounds; `presentation.transformApplied` prevents applying a second rotation or flip.
+`duke-office-art` is shared by `duke-pages` and `duke-pages-wasm`. The parser resolves relationships and theme colors, preserves original assets and ordered presentation properties, and passes picture appearance to the shared renderer. The viewer consumes the resulting image and paint bounds; `presentation.transformApplied` prevents applying a second rotation or flip.
 
 This is a measured implementation, not full OfficeArt or pixel-identical Word compatibility. Parsing a property, rendering it, preserving a stored preview, and proving visual equivalence are separate capabilities.
 

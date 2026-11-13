@@ -1,6 +1,6 @@
 [package]
 name = "duke-office-art"
-version = "0.1.9"
+version = "0.1.10"
 edition.workspace = true
 license = "MIT AND Apache-2.0 AND OFL-1.1"
 repository.workspace = true
@@ -11,7 +11,7 @@ categories = ["graphics", "rendering"]
 include = ["src/**", "Cargo.toml", "README.md", "LICENSE"]
 
 [dependencies]
-duke-odf = { version = "=0.2.0", path = "../duke-odf" }
+duke-odf = { version = "=0.2.1", path = "../duke-odf" }
 base64 = "0.22"
 memchr = "2"
 libm = { version = "0.2.16", default-features = false, features = ["force-soft-floats"] }

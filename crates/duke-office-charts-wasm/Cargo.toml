@@ -1,6 +1,6 @@
 [package]
 name = "duke-office-charts-wasm"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "MIT"
 description = "WebAssembly bindings for the Office Open XML chart renderer"
@@ -17,7 +17,7 @@ extended-charts = ["duke-office-charts/extended-charts"]
 map-fallback = ["extended-charts", "duke-office-charts/map-fallback"]
 
 [dependencies]
-duke-office-charts = { version = "=0.2.0", path = "../duke-office-charts", default-features = false }
+duke-office-charts = { version = "=0.2.1", path = "../duke-office-charts", default-features = false }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 wasm-bindgen = "=0.2.123"

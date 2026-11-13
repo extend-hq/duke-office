@@ -47,16 +47,16 @@ def main(phase):
         memory_descendant = bounds_gate['equal'] == bounds_gate['total'] and bounds_gate['candidate_sha256'] == group_gate['baseline_sha256'] and bounds_gate['baseline_sha256'] == resource_gate['candidate_sha256']
     if resource_gate and ((resource_gate['candidate_sha256'] != data['identity']['binary_sha256'] and not memory_descendant) or resource_gate['passed'] != resource_gate['total']):
         resource_gate = None
-    labels = ['duke-pptx 0.1.5 + local changes', *LABELS[1:]]
-    scope = f"{summary['duke-pptx']['reference_total']} reference packages · {phase} · measured " + datetime.fromtimestamp(data['identity']['start'], timezone.utc).strftime('%Y-%m-%d')
-    matrix('pptx', OUT / phase / 'assessment.json', site, PPTX, ENGINES, ['duke-pptx\n0.1.5 + local', *[label.rsplit(' ', 1)[0] + '\n' + label.rsplit(' ', 1)[1] for label in LABELS[1:]]], summary, scope, {**data['identity'], 'display_scope': scope}, snapshot=True)
+    labels = ['duke-slides 0.1.5 + local changes', *LABELS[1:]]
+    scope = f"{summary['duke-slides']['reference_total']} reference packages · {phase} · measured " + datetime.fromtimestamp(data['identity']['start'], timezone.utc).strftime('%Y-%m-%d')
+    matrix('pptx', OUT / phase / 'assessment.json', site, PPTX, ENGINES, ['duke-slides\n0.1.5 + local', *[label.rsplit(' ', 1)[0] + '\n' + label.rsplit(' ', 1)[1] for label in LABELS[1:]]], summary, scope, {**data['identity'], 'display_scope': scope}, snapshot=True)
     rows = []
     for engine, label in zip(ENGINES, labels):
         row = summary[engine]; features = row['features']
         rows.append(f'<tr><th>{label}</th><td>{row["reference_success"]}/{row["reference_total"]}</td><td>{row["median_ms"]:.3f}</td><td>{row["p95_ms"]:.3f}</td><td>{pct(features["body_text"]["recall"])}</td><td>{pct(features["body_text"]["macro_f1"])}</td></tr>')
     feature_rows = []
     for key, label in FEATURES:
-        units = summary['duke-pptx']['features'].get(key, {}).get('expected', 0)
+        units = summary['duke-slides']['features'].get(key, {}).get('expected', 0)
         if not units: continue
         cells = ''.join('<td>Not scored</td>' if ns(engine, key) else '<td>' + pct(summary[engine]['features'][key]['recall']) + '</td>' for engine in ENGINES)
         feature_rows.append(f'<tr><th>{label}</th><td>{units:,}</td>{cells}</tr>')
@@ -113,7 +113,7 @@ def main(phase):
         legacy = json.loads(legacy_path.read_text())
         previous = json.loads((OUT / 'legacy-poi-comparison/summary.json').read_text())
         legacy_rows = []
-        for label, result in [('duke-pptx, legacy-notes1', legacy['engines']['duke-pptx']), ('duke-pptx, before', previous['engines']['duke-pptx']), ('Office Oxide', previous['engines']['office_oxide']), ('undoc', previous['engines']['undoc'])]:
+        for label, result in [('duke-slides, legacy-notes1', legacy['engines']['duke-slides']), ('duke-slides, before', previous['engines']['duke-slides']), ('Office Oxide', previous['engines']['office_oxide']), ('undoc', previous['engines']['undoc'])]:
             body, notes = [result['metrics'][key] for key in ['body_text', 'notes']]
             legacy_rows.append(f'<tr><th>{label}</th><td>{result["accepted"]}/{legacy["inputs"]}</td><td>{body["recall"]:.3%}</td><td>{body["f1"]:.3%}</td><td>{notes["recall"]:.3%}</td></tr>')
         page += '<h2>Legacy PPT content comparison</h2><p>This separate 328-input cohort compares content against Apache POI 6.0.0 on its 288 accepted inputs. Parser failures count as empty output. The current legacy candidate adds live speaker notes and dual-storage support; the peer runs and POI reference remain frozen. These are agreement measurements, not rendering fidelity or latency rankings. POI includes some repeated notes-page headers and footers; the denominator is unchanged.</p><div class="scroll"><table><thead><tr><th>Parser / build</th><th>Accepted</th><th>Body recall</th><th>Body F1</th><th>Notes recall</th></tr></thead><tbody>' + ''.join(legacy_rows) + '</tbody></table></div><p><a href="LEGACY-POI.md">Legacy method and raw results</a> · <a href="../legacy-poi-notes1/summary.json">Current build identity and metrics</a></p>'
@@ -123,7 +123,7 @@ def main(phase):
         directory = json.loads(directory_path.read_text())
         directory_poi = json.loads((OUT / 'corpus-aspose/poi-directory1/summary.json').read_text())
         page += f'<h2>Additional legacy container recovery</h2><p>A separately validated legacy-directory1 build passes {directory["passed"]}/{directory["total"]} native checks: {directory["exact"]} exact outputs/errors and one recovered legacy presentation. Two unreachable all-FF directory slots are normalized; all five live streams remain byte-identical. The full recovered model matches the frozen parser on an independently canonicalized container, with one explicit recovery warning. This narrow recovery supports header-contained FAT tables and rejects cycles, invalid live links and sector aliasing. All 32 focused version-3/version-4 container probes pass in native and WASM.</p>'
-        body = directory_poi['engines']['duke-pptx']['metrics']['body_text']
+        body = directory_poi['engines']['duke-slides']['metrics']['body_text']
         page += f'<p>On the separate six-input OLE tuning subset, Rust and Office Oxide accept all five POI-readable inputs and match all {body["expected"]} body-text five-grams; undoc accepts four. The sixth input is encrypted. These are content-agreement checks, not a latency measurement or rendering-fidelity result. The timing tables above still identify their frozen measured build.</p>'
     if fixed_path.exists():
         fixed = json.loads(fixed_path.read_text())
@@ -153,7 +153,7 @@ def main(phase):
             comments = json.loads((OUT / 'experiments/comments2/comments-reviewed-summary.json').read_text())
             counts = comments['source_counts']
             page += f'<p>The classic-comment source audit passes {comments["passed"]}/{comments["total"]} inputs: {comments["exact"]} full outputs/errors are exact, and {comments["changed"]} models change only in comments. It independently verifies all {counts["comments"]} classic comments, including {counts["empty"]} empty comments previously omitted, their authors, modification timestamps and eighth-point positions. XML literal newlines/attribute whitespace are normalized, while character references retain their decoded values. Nonstandard paths resolve by relationship type; external targets are not fetched. Five nonclassic comment parts remain explicitly unscored by this audit. Six focused contract probes and three depth-boundary probes pass. Typed modern threads, classic threading extensions and viewer comment overlays remain incomplete.</p>'
-            comment_metric = summary['duke-pptx']['features']['comments']
+            comment_metric = summary['duke-slides']['features']['comments']
             page += f'<p>The main source-literal comment metric matches {comment_metric["matched"]}/{comment_metric["expected"]} reference items against {comment_metric["found"]} output items. Recall is {comment_metric["recall"]:.3%} and precision is {comment_metric["precision"]:.3%}; full recall is not complete comment accuracy.</p>'
     if cache_build in {'relationships2', 'fields1', 'fields2', 'image-fallback1', 'svg-namespace2', 'picture-fallback2'}:
         packaging = json.loads((OUT / 'experiments/relationships2/parity-summary.json').read_text())
@@ -189,7 +189,7 @@ def main(phase):
             before = json.loads((OUT / 'corpus-aspose/initial/summary.json').read_text())
             after = json.loads(after_path.read_text())
             acceptance_rows = []
-            for label, source, engine in [('duke-pptx before BOM fix', before, 'duke-pptx'), ('duke-pptx with BOM fix', after, 'duke-pptx'), ('Office Oxide', after, 'office_oxide'), ('undoc', after, 'undoc')]:
+            for label, source, engine in [('duke-slides before BOM fix', before, 'duke-slides'), ('duke-slides with BOM fix', after, 'duke-slides'), ('Office Oxide', after, 'office_oxide'), ('undoc', after, 'undoc')]:
                 accepted = sum(statuses.get('ok', 0) for statuses in source['engines'][engine].values())
                 acceptance_rows.append(f'<tr><th>{label}</th><td>{accepted}/{source["total"]}</td></tr>')
             page += '<p>The separate acceptance-only check below includes all 173 tuning files, including unsupported formats. Seventy-nine PPTX failures in the preceding Rust build were caused by source slices using XML-reader offsets against bytes that still included a UTF-8 byte-order mark. The corrected build aligns those offsets; successful parsing alone is not an accuracy score.</p><div class="scroll"><table><thead><tr><th>Build</th><th>Accepted / attempted</th></tr></thead><tbody>' + ''.join(acceptance_rows) + '</tbody></table></div>'
@@ -211,7 +211,7 @@ def main(phase):
     if gaps.exists():
         audit = json.loads(gaps.read_text())
         alternatives = audit['counts'].get('svg_alternative_with_original_payload', 0)
-        body = summary['duke-pptx']['features']['body_text']
+        body = summary['duke-slides']['features']['body_text']
         gap = f'The resource-limit recovery restores 6,678 body-text five-grams. The unchanged literal reference now has {body["expected"] - body["matched"]:,} unmatched units.' if resource_gate else 'One reference-readable 19-slide presentation exceeds the default 250,000-node per-part limit: its largest layout has 325,458 elements. That failed parse accounts for 6,678 of 6,723 unmatched body-text five-grams. It remains in every applicable accuracy denominator.'
         page += f'<h2>Interpreting the new gaps</h2><p>{gap}</p><p>Independent relationship and payload checks explain {alternatives} unmatched picture occurrences on successful parses: each node selects the source SVG alternative and retains both SVG and original fallback-image bytes exactly. The raw image score retains these mismatches. Other inspected differences include equation text inserted into source paragraphs and text in merged-cell continuation slots. An older audit also identified two omitted empty comments; the later classic-comment change preserves them. These observations explain source-literal scores; they do not prove rendered fidelity.</p>'
     keynote_path = OUT / 'corpus-followup/keynote-supplement/classification.json'
@@ -225,7 +225,7 @@ def main(phase):
         if sdk_check.exists():
             accepted = json.loads(sdk_check.read_text())
             counts = {engine: sum(group.get('ok', 0) for group in groups.values()) for engine, groups in accepted['engines'].items()}
-            page += f'<p>Separate acceptance-only checks on the {accepted["total"]} new tuning inputs: duke-pptx {counts["duke-pptx"]}, Office Oxide {counts["office_oxide"]}, undoc {counts["undoc"]}. These are successful returns, not content accuracy or visual fidelity. The headline benchmark remains the frozen 630-input cohort; this new corpus is not mixed into its scores.</p>'
+            page += f'<p>Separate acceptance-only checks on the {accepted["total"]} new tuning inputs: duke-slides {counts["duke-slides"]}, Office Oxide {counts["office_oxide"]}, undoc {counts["undoc"]}. These are successful returns, not content accuracy or visual fidelity. The headline benchmark remains the frozen 630-input cohort; this new corpus is not mixed into its scores.</p>'
         source_check = sdk_path.parent / 'source-check1/assessment.json'
         if source_check.exists():
             source = json.loads(source_check.read_text())
@@ -264,7 +264,7 @@ def main(phase):
     if phase != 'expanded-comparison':
         page = page.replace('<h1>Expanded PowerPoint benchmark</h1>', '<h1>Expanded PowerPoint benchmark</h1><p><a href="expanded-baseline/index.html">Frozen starting comparison for the expanded corpus</a></p>')
     (site / 'expanded.html').write_text(page)
-    lines = ['# Expanded PowerPoint comparison', '', f'{len(data["common_ids"])} common nonempty timing inputs; {summary["duke-pptx"]["reference_total"]} reference-bearing packages out of {summary["duke-pptx"]["total"]} OOXML tuning inputs. The {reserved_main}-file validation set in the source manifest remains unused.', '', '| Parser | Accepted/reference | Median ms | p95 ms | Literal text recall | Macro text F1 |', '| --- | ---: | ---: | ---: | ---: | ---: |']
+    lines = ['# Expanded PowerPoint comparison', '', f'{len(data["common_ids"])} common nonempty timing inputs; {summary["duke-slides"]["reference_total"]} reference-bearing packages out of {summary["duke-slides"]["total"]} OOXML tuning inputs. The {reserved_main}-file validation set in the source manifest remains unused.', '', '| Parser | Accepted/reference | Median ms | p95 ms | Literal text recall | Macro text F1 |', '| --- | ---: | ---: | ---: | ---: | ---: |']
     for engine, label in zip(ENGINES, LABELS):
         row = summary[engine]; feature = row['features']['body_text']
         lines.append(f'| {label} | {row["reference_success"]}/{row["reference_total"]} | {row["median_ms"]:.3f} | {row["p95_ms"]:.3f} | {pct(feature["recall"])} | {pct(feature["macro_f1"])} |')

@@ -10,24 +10,24 @@ struct ModelSizes {
 }
 
 impl ModelSizes {
-    fn include(&mut self, nodes: &[duke_pptx::SlideNode]) {
+    fn include(&mut self, nodes: &[duke_slides::SlideNode]) {
         for node in nodes {
             self.nodes += 1;
             match node {
-                duke_pptx::SlideNode::Shape { source_xml, shape_svg, .. } => {
+                duke_slides::SlideNode::Shape { source_xml, shape_svg, .. } => {
                     self.source_bytes += source_xml.as_ref().map_or(0, String::len);
                     self.svg_bytes += shape_svg.as_ref().map_or(0, String::len);
                 }
-                duke_pptx::SlideNode::Image { source_xml, picture_svg, .. } => {
+                duke_slides::SlideNode::Image { source_xml, picture_svg, .. } => {
                     self.source_bytes += source_xml.as_ref().map_or(0, String::len);
                     self.svg_bytes += picture_svg.as_ref().map_or(0, String::len);
                 }
-                duke_pptx::SlideNode::Group { children, .. } => self.include(children),
-                duke_pptx::SlideNode::Chart { chart_xml, chart_svg, .. } => {
+                duke_slides::SlideNode::Group { children, .. } => self.include(children),
+                duke_slides::SlideNode::Chart { chart_xml, chart_svg, .. } => {
                     self.source_bytes += chart_xml.as_ref().map_or(0, String::len);
                     self.svg_bytes += chart_svg.as_ref().map_or(0, String::len);
                 }
-                duke_pptx::SlideNode::Media { source_xml, poster, .. } => {
+                duke_slides::SlideNode::Media { source_xml, poster, .. } => {
                     self.source_bytes += source_xml.as_ref().map_or(0, String::len);
                     if let Some(poster) = poster { self.include(std::slice::from_ref(poster)); }
                 }
@@ -43,12 +43,12 @@ fn main() {
         .stack_size(64 * 1024 * 1024)
         .spawn(move || {
             let bytes = fs::read(&args[1]).expect("read input");
-            let mut limits = duke_pptx::ParseLimits::default();
+            let mut limits = duke_slides::ParseLimits::default();
             if let Some(value) = args.get(2) {
                 limits.max_xml_nodes = value.parse().expect("node limit");
             }
             let start = Instant::now();
-            match duke_pptx::parse_presentation(&bytes, &limits) {
+            match duke_slides::parse_presentation(&bytes, &limits) {
                 Ok(document) => {
                     let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
                     let mut sizes = ModelSizes::default();

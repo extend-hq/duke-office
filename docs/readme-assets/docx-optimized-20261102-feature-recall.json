@@ -17,7 +17,7 @@
   "generator_sha256": "328e45474c33443f39e3aab34ef490bdcc2f5c1b64036990f03ad9b9b5350ad8",
   "matplotlib_version": "3.11.2",
   "numpy_version": "2.5.4",
-  "source": "crates/duke-docx/benchmarks/optimized-20261102/accuracy.json",
+  "source": "crates/duke-pages/benchmarks/optimized-20261102/accuracy.json",
   "source_sha256": "c9825ca33297c39476bfb51ef09a6c416853633666579647df3006e641dd2680",
   "scale": [
     0,

@@ -65,7 +65,7 @@ def metadata(node, part, relationships):
     return out
 
 def invoke(binary, row, output):
-    result = subprocess.run([str(binary),'duke-pptx',row['path'],str(output),'0','full'], capture_output=True,text=True,timeout=120,check=True)
+    result = subprocess.run([str(binary),'duke-slides',row['path'],str(output),'0','full'], capture_output=True,text=True,timeout=120,check=True)
     record = json.loads(result.stdout.splitlines()[-1])
     return record, json.load(gzip.open(output,'rt')) if record['status'] == 'ok' else None
 

@@ -20,8 +20,8 @@ def main():
     with output.open('w', buffering=1) as stream:
         for index, row in enumerate(rows):
             assert digest(Path(row['path'])) == row['sha256']
-            old = invoke(baseline, 'duke-pptx', row, target / (row['id'] + '.baseline.json.gz'), 0)
-            current = invoke(binary, 'duke-pptx', row, target / (row['id'] + '.compact.json.gz'), 0)
+            old = invoke(baseline, 'duke-slides', row, target / (row['id'] + '.baseline.json.gz'), 0)
+            current = invoke(binary, 'duke-slides', row, target / (row['id'] + '.compact.json.gz'), 0)
             identity = lambda r: (r['status'], r.get('full_sha256'), r.get('error'))
             current.update(id=row['id'], equal=identity(current) == identity(old), baseline=old)
             records.append(current); stream.write(json.dumps(current) + '\n')
