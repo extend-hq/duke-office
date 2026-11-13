@@ -278,6 +278,7 @@ dependencies = [
  "duke-office-art",
  "kurbo",
  "miniz_oxide 0.8.9",
+ "quick-xml 0.37.5",
  "roxmltree",
  "serde",
  "svgtypes",

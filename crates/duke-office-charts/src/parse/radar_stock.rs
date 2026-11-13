@@ -50,22 +50,38 @@ fn fit_radar_labels(
     };
     let width = (available.right - available.left).max(0.);
     let height = (available.bottom - available.top).max(0.);
-    let minimum_radius = width.min(height) / 6.;
-    let (mut low, mut high) = (minimum_radius, width.min(height) / 2.);
-    for _ in 0..20 {
-        let middle = (low + high) / 2.;
-        let e = extent(middle);
-        if e.right - e.left <= width && e.bottom - e.top <= height {
-            low = middle;
-        } else {
-            high = middle;
+    let maximum = width.min(height) / 2.;
+    let fit = |horizontal: bool| {
+        let limit = if horizontal { width } else { height };
+        let (mut low, mut high) = ((limit / 6.).min(maximum), maximum);
+        for _ in 0..20 {
+            let middle = (low + high) / 2.;
+            let e = extent(middle);
+            let span = if horizontal {
+                e.right - e.left
+            } else {
+                e.bottom - e.top
+            };
+            if span <= limit {
+                low = middle;
+            } else {
+                high = middle;
+            }
         }
-    }
+        low
+    };
+    let horizontal = fit(true);
+    let horizontal_extent = extent(horizontal);
+    let low = if horizontal_extent.bottom - horizontal_extent.top <= height {
+        horizontal
+    } else {
+        horizontal.min(fit(false))
+    };
     let e = extent(low);
     let preferred = (available.left + available.right - e.left - e.right) / 2.;
     let first = canvas.left + (canvas.right - canvas.left) * 0.02 - e.left;
     let last = canvas.right - (canvas.right - canvas.left) * 0.02 - e.right;
-    let cx = if first <= last {
+    let cx = if first <= last && e.right - e.left + gap <= canvas.right - canvas.left {
         preferred.clamp(first, last)
     } else {
         let (mut lo, mut hi) = (preferred.min(last), preferred.max(first));
@@ -138,6 +154,7 @@ struct OdfLegend {
     padding_y: f64,
     text_gap: f64,
     row_height: f64,
+    ascent: f64,
 }
 
 #[derive(Clone, Copy)]
@@ -379,8 +396,7 @@ impl AxisText {
         }
     }
     fn vertical_metrics(&self) -> (f64, f64) {
-        let (ascent, descent) = super::odf_text::vertical_metrics(&self.family);
-        (ascent * self.size, descent * self.size)
+        super::odf_text::polar_metrics(&self.family, self.size)
     }
 
     fn begin(&self, svg: &mut String) {
@@ -1375,7 +1391,8 @@ pub(super) fn render(
     let odf_legend = (odf_auto && legend.is_some() && !entries.is_empty()).then(|| {
         let padding_x = (96. / 25.4_f64).max(legend_font * 0.33);
         let padding_y = (96. / 25.4_f64).max(legend_font * 0.2);
-        let row_height = legend_font * 1.2;
+        let (ascent, descent) = super::odf_text::line_metrics(&legend_face, legend_font);
+        let row_height = ascent + descent;
         let w = if side {
             legend_max
         } else {
@@ -1419,6 +1436,7 @@ pub(super) fn render(
             padding_y,
             text_gap: odf_text_gap,
             row_height,
+            ascent,
         }
     });
     if title_reserved {
@@ -1784,8 +1802,19 @@ pub(super) fn render(
         };
         if let Some(layout) = &odf_legend {
             let b = layout.bounds;
-            let (fill, stroke) = paint(legend, colors, "none", "none");
-            write!(svg, r#"<rect x="{:.2}" y="{:.2}" width="{:.2}" height="{:.2}" fill="{fill}" stroke="{stroke}"/>"#, b.left, b.top, b.right - b.left, b.bottom - b.top).unwrap();
+            super::odf_text::LegendLayout {
+                left: b.left,
+                top: b.top,
+                width: b.right - b.left,
+                height: b.bottom - b.top,
+                padding_x: layout.padding_x,
+                padding_y: layout.padding_y,
+                text_gap: layout.text_gap,
+                ascent: layout.ascent,
+                line_height: layout.row_height,
+                step: layout.row_height + layout.padding_y,
+            }
+            .frame(&mut svg, legend, colors);
             x = b.left + layout.padding_x;
             y = b.top + layout.padding_y + layout.row_height * 0.5;
         }
@@ -1856,7 +1885,9 @@ pub(super) fn render(
             text(
                 &mut svg,
                 x + key + odf_legend.as_ref().map_or(2.7, |l| l.text_gap),
-                y + legend_font * 0.29,
+                y + odf_legend
+                    .as_ref()
+                    .map_or(legend_font * 0.29, |l| l.ascent - l.row_height / 2.),
                 "start",
                 legend_font,
                 &face,
@@ -1892,7 +1923,63 @@ pub(super) fn render(
 
 #[cfg(test)]
 mod tests {
-    use super::date_label;
+    use super::{date_label, fit_radar_labels, Bounds};
+
+    #[test]
+    fn horizontal_label_overflow_keeps_the_width_minimum() {
+        let available = Bounds {
+            left: 0.,
+            right: 280.,
+            top: 0.,
+            bottom: 180.,
+        };
+        let canvas = Bounds {
+            left: 0.,
+            right: 400.,
+            top: 0.,
+            bottom: 200.,
+        };
+        let (plot, view) = fit_radar_labels(
+            available,
+            canvas,
+            &[(-1., 0., 160.), (1., 0., 160.)],
+            (10., 3.),
+            10.,
+        );
+        let radius = (plot.right - plot.left) / 2.;
+        let center = (plot.right + plot.left) / 2.;
+        assert!((radius - 280. / 6.).abs() < 0.001);
+        assert!(view.left <= center - radius - 170.);
+        assert!(view.right >= center + radius + 170.);
+    }
+
+    #[test]
+    fn vertical_label_overflow_keeps_the_height_minimum() {
+        let available = Bounds {
+            left: 0.,
+            right: 180.,
+            top: 0.,
+            bottom: 280.,
+        };
+        let canvas = Bounds {
+            left: 0.,
+            right: 200.,
+            top: 0.,
+            bottom: 400.,
+        };
+        let (plot, view) = fit_radar_labels(
+            available,
+            canvas,
+            &[(0., -1., 20.), (0., 1., 20.)],
+            (80., 20.),
+            10.,
+        );
+        let radius = (plot.bottom - plot.top) / 2.;
+        let center = (plot.bottom + plot.top) / 2.;
+        assert!((radius - 280. / 6.).abs() < 0.001);
+        assert!(view.top <= center - radius - 110.);
+        assert!(view.bottom >= center + radius + 110.);
+    }
 
     #[test]
     fn numeric_date_axis_labels_respect_epoch_and_format() {

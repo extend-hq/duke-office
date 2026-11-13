@@ -11,12 +11,21 @@ fn codepoint(data: &[u8], index: usize) -> u32 {
 
 pub(super) fn width(text: &str, size: f64, family: &str, bold: bool, italic: bool) -> Option<f64> {
     let primary = family.split(',').next()?.trim().trim_matches(['\'', '"']);
-    let data: &[u8] = match primary.to_ascii_lowercase().as_str() {
-        "calibri" | "carlito" => CARLITO,
-        "arial" | "arimo" => include_bytes!("font_metrics/arimo.bin"),
-        "times new roman" | "tinos" => include_bytes!("font_metrics/tinos.bin"),
-        "courier new" | "cousine" => include_bytes!("font_metrics/cousine.bin"),
-        _ => return None,
+    let data: &[u8] = if primary.eq_ignore_ascii_case("Calibri")
+        || primary.eq_ignore_ascii_case("Carlito")
+    {
+        CARLITO
+    } else if primary.eq_ignore_ascii_case("Arial") || primary.eq_ignore_ascii_case("Arimo") {
+        include_bytes!("font_metrics/arimo.bin")
+    } else if primary.eq_ignore_ascii_case("Times New Roman")
+        || primary.eq_ignore_ascii_case("Tinos")
+    {
+        include_bytes!("font_metrics/tinos.bin")
+    } else if primary.eq_ignore_ascii_case("Courier New") || primary.eq_ignore_ascii_case("Cousine")
+    {
+        include_bytes!("font_metrics/cousine.bin")
+    } else {
+        return None;
     };
     let count = usize::from(u16_at(data, 2));
     let style = usize::from(bold) + 2 * usize::from(italic);

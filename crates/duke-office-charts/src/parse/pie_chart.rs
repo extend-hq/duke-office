@@ -373,7 +373,11 @@ impl Ring<'_> {
         let mut angle = self.start;
         for p in slices {
             let sweep = p.weight / sum * TAU;
-            let sector_start = if self.colors.pie_counterclockwise { angle - sweep } else { angle };
+            let sector_start = if self.colors.pie_counterclockwise {
+                angle - sweep
+            } else {
+                angle
+            };
             let bisector = sector_start + sweep / 2.;
             let circle = self.circle.displaced(self.circle.r * p.explosion, bisector);
             let fill = self.colors.fill(self.series, Some(p.index));
@@ -405,7 +409,15 @@ impl Ring<'_> {
                 )
                 .unwrap();
             }
-            sector(&mut body, circle, self.inner, sector_start, sweep, &fill, stroke);
+            sector(
+                &mut body,
+                circle,
+                self.inner,
+                sector_start,
+                sweep,
+                &fill,
+                stroke,
+            );
             if width.is_some() {
                 body.push_str("</g>");
             }
@@ -471,7 +483,11 @@ impl Ring<'_> {
                 );
                 self.colors.end_hit(label_svg);
             }
-            angle += if self.colors.pie_counterclockwise { -sweep } else { sweep };
+            angle += if self.colors.pie_counterclockwise {
+                -sweep
+            } else {
+                sweep
+            };
         }
     }
 }
@@ -787,8 +803,26 @@ fn legend(
             (e, advance)
         })
         .collect();
-    let key = size * 0.527;
-    let step = size * 1.76;
+    let odf_side = colors.opendocument_defaults
+        && matches!(pos, "l" | "r")
+        && child(node, "layout")
+            .and_then(|n| child(n, "manualLayout"))
+            .is_none();
+    let key = size * if odf_side { 0.6 } else { 0.527 };
+    let layout = odf_side.then(|| {
+        super::odf_text::LegendLayout::side(
+            width,
+            height,
+            size,
+            face,
+            key,
+            items.iter().map(|(e, w)| {
+                super::odf_text::label_width(e.2, size, face, false, false).unwrap_or(*w)
+            }),
+            pos == "l",
+        )
+    });
+    let step = layout.as_ref().map_or(size * 1.76, |l| l.step);
     let max_name = items.iter().map(|(_, w)| *w).fold(0., f64::max);
     let total = items
         .iter()
@@ -837,6 +871,11 @@ fn legend(
             y -= rows.saturating_sub(1) as f64 * step;
         }
     }
+    if let Some(l) = &layout {
+        x = l.left + l.padding_x;
+        y = l.top + l.padding_y + l.line_height / 2.;
+        l.frame(svg, Some(node), colors);
+    }
     for (i, (&(series, index, label), w)) in items.into_iter().take(n).enumerate() {
         colors.begin_hit(svg, "legendEntry", series, None);
         let fill = colors.fill(series, Some(index));
@@ -844,8 +883,10 @@ fn legend(
         write!(svg,r#"<rect x="{x:.2}" y="{:.2}" width="{key:.2}" height="{key:.2}" fill="{fill}" stroke="{stroke}"/>"#,y-key/2.).unwrap();
         text(
             svg,
-            x + key + size * 0.225,
-            y + size * 0.3,
+            x + key + layout.as_ref().map_or(size * 0.225, |l| l.text_gap),
+            y + layout
+                .as_ref()
+                .map_or(size * 0.3, |l| l.ascent - l.line_height / 2.),
             "start",
             size,
             face,
