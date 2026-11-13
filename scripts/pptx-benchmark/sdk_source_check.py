@@ -126,7 +126,7 @@ def main():
                 actual = {'slides': []}
                 if record['status'] == 'ok':
                     data = json.load(gzip.open(output, 'rt'))
-                    actual = common.core(data) if engine == 'rust-pptx' else common.ir(engine, data) if engine in ENGINES[1:3] else common.markdown_model(data['markdown']) if engine == 'markitdown' else data
+                    actual = common.core(data) if engine == 'duke-pptx' else common.ir(engine, data) if engine in ENGINES[1:3] else common.markdown_model(data['markdown']) if engine == 'markitdown' else data
                 rows.append(dict(id=row['id'], engine=engine, status=record['status'], namespace_family=ref['namespace_family'], metrics=score(ref, actual)))
             if index % 20 == 0:
                 print(index + 1, len(cohort), flush=True)

@@ -43,7 +43,7 @@ def main():
         for index, row in enumerate(rows):
             assert digest(Path(row['path'])) == row['sha256']
             output = run / 'identity-current.json.gz'
-            current = invoke(binary, 'rust-pptx', row, output, 0, 'identity')
+            current = invoke(binary, 'duke-pptx', row, output, 0, 'identity')
             old = previous[row['id']]
             passed = current['status'] == old['status']
             if current['status'] == 'ok':

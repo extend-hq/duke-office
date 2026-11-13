@@ -1,6 +1,6 @@
 # OpenDocument parity and latency follow-up — 2026-11-13
 
-This round builds on the [preceding fidelity candidate](opendocument-fidelity-20261113.md). It keeps three measured changes: lower-allocation ODF parsing, recovery of stored table values, and improved radar/sparse-category label placement. Runtime changes remain in `rust-odf` and `rust-office-charts`. No manifests were bumped, no crates were published, and no React packages were changed or published.
+This round builds on the [preceding fidelity candidate](opendocument-fidelity-20261113.md). It keeps three measured changes: lower-allocation ODF parsing, recovery of stored table values, and improved radar/sparse-category label placement. Runtime changes remain in `duke-odf` and `duke-office-charts`. No manifests were bumped, no crates were published, and no React packages were changed or published.
 
 ## Changes retained
 

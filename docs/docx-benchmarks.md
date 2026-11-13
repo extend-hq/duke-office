@@ -1,7 +1,7 @@
 # DOCX parser benchmarks
 
 
-The native Rust parser is **rust-docx**, also used by the JavaScript package through WebAssembly. It builds an editable document model and structured blocks with source references. The comparisons below measure native parsing and extraction; browser loading, layout, pagination, and editing are outside the timing scope.
+The native Rust parser is **duke-docx**, also used by the JavaScript package through WebAssembly. It builds an editable document model and structured blocks with source references. The comparisons below measure native parsing and extraction; browser loading, layout, pagination, and editing are outside the timing scope.
 
 ### DOCX latency and text accuracy
 
@@ -9,16 +9,16 @@ Measured **November 2, 2026**, on a seeded **1,000-document DOCX corpus**. Laten
 
 | Parser | Parsed | Median | p95 | Body-text F1 | Ordered-text F1 |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| rust-docx | 1,000/1,000 | 0.673 ms | 5.080 ms | 99.983% | 99.995% |
+| duke-docx | 1,000/1,000 | 0.673 ms | 5.080 ms | 99.983% | 99.995% |
 | docx-rs | 999/1,000 | 1.193 ms | 9.499 ms | 99.740% | 99.747% |
 | office_oxide | 1,000/1,000 | 0.750 ms | 5.380 ms | 99.917% | 99.926% |
 | undoc | 1,000/1,000 | 1.130 ms | 14.260 ms | 99.988% | 99.975% |
 
 ![Native DOCX median and p95 latency for all four libraries](../docs/readme-assets/docx-core-optimized-20261102-latency-docx-summary.png)
 
-Rust-docx has the lowest median and p95 in this run. Its median is 10.3% lower than office_oxide's; this does **not** establish a 5× speedup. Undoc has the highest five-gram text F1, while rust-docx has the highest ordered-text F1.
+Rust-docx has the lowest median and p95 in this run. Its median is 10.3% lower than office_oxide's; this does **not** establish a 5× speedup. Undoc has the highest five-gram text F1, while duke-docx has the highest ordered-text F1.
 
-Each document has five warm samples, each averaging 1–20 parses. Timings include parsing and native model/IR construction; rust-docx also projects structured blocks. File reads, process startup, JSON serialization, object destruction, and reference generation are excluded. The p95 is across document medians. Results come from a shared development machine and the libraries retain different amounts of structure.
+Each document has five warm samples, each averaging 1–20 parses. Timings include parsing and native model/IR construction; duke-docx also projects structured blocks. File reads, process startup, JSON serialization, object destruction, and reference generation are excluded. The p95 is across document medians. Results come from a shared development machine and the libraries retain different amounts of structure.
 
 ### Latency by document size and complexity
 
@@ -30,7 +30,7 @@ The same 999 successful inputs appear for every library. Each point is one docum
 
 These are **recall checks against an independent source-XML extractor**, not universal accuracy or Word rendering scores. Image occurrences match retained payload bytes and multiplicity. Literal table/span checks allow additional output characters; exact-anchor checks remain separately available. Positive explicit-formatting recall does not establish precision or inherited-style correctness.
 
-| Check | Expected units | rust-docx | docx-rs | office_oxide | undoc |
+| Check | Expected units | duke-docx | docx-rs | office_oxide | undoc |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Images · payload-matched occurrences | 1,069 | 100.000% | 97.381% | 95.603% | 97.568% |
 | Explicit bold · aligned characters | 680,435 | 100.000% | 94.577% | 99.948% | 98.016% |
@@ -44,7 +44,7 @@ These are **recall checks against an independent source-XML extractor**, not uni
 <details>
 <summary>All remaining source-reference feature checks</summary>
 
-| Check | Expected units | rust-docx | docx-rs | office_oxide | undoc |
+| Check | Expected units | duke-docx | docx-rs | office_oxide | undoc |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | Tables · exact text anchors | 2,267 | 98.985% | 96.427% | 97.045% | 97.706% |
 | Table cells · exact text anchors | 62,518 | 99.744% | 99.520% | 99.575% | 99.659% |
@@ -73,7 +73,7 @@ Measured **November 3, 2026**, on **25 documents** selected from the start of th
 
 | Parser | Median / p95 | Word body recall | Word body F1 | Source image payloads |
 | --- | ---: | ---: | ---: | ---: |
-| rust-docx | 0.530 / 6.880 ms | 99.949% | 99.952% | 52/52 · 100.000% |
+| duke-docx | 0.530 / 6.880 ms | 99.949% | 99.952% | 52/52 · 100.000% |
 | docx-rs | 1.089 / 6.606 ms | 99.939% | 99.947% | 48/52 · 92.308% |
 | office_oxide | 0.680 / 3.668 ms | 99.937% | 99.946% | 48/52 · 92.308% |
 | undoc | 1.084 / 11.990 ms | 99.949% | 96.999% | 52/52 · 100.000% |
@@ -82,7 +82,7 @@ Rust-docx has the lowest median in this sample; office_oxide has the lowest p95.
 
 Each cell below is **precision / recall**. Resolved formatting covers only **10 documents** whose Word capture completed within its time budget. Native table and hyperlink references cover **24**.
 
-| Word object-model check | rust-docx | docx-rs | office_oxide | undoc |
+| Word object-model check | duke-docx | docx-rs | office_oxide | undoc |
 | --- | ---: | ---: | ---: | ---: |
 | Resolved bold · 611 characters | 100.000% / 99.836% | 100.000% / 93.781% | 100.000% / 93.781% | 93.558% / 99.836% |
 | Resolved italic · 387 characters | 100.000% / 100.000% | 100.000% / 88.372% | 100.000% / 100.000% | 100.000% / 100.000% |
@@ -93,14 +93,14 @@ The hyperlink reference omits some field-generated links, so additional valid ou
 
 ### Other Word formats
 
-Binary DOC and DOT use LibreOffice conversion as a reference proxy. Template/macro cohorts have only **2–12 inputs** each. The retained optimization improves DOC adaptation, but rust-docx remains slower than office_oxide and undoc on binary DOC. Macros are never executed.
+Binary DOC and DOT use LibreOffice conversion as a reference proxy. Template/macro cohorts have only **2–12 inputs** each. The retained optimization improves DOC adaptation, but duke-docx remains slower than office_oxide and undoc on binary DOC. Macros are never executed.
 
 <details>
 <summary>All-format accuracy table and latency chart</summary>
 
 Each cell is **body-text F1 · median / p95 milliseconds**. Accuracy and latency use the per-format scopes described above.
 
-| Format | rust-docx | docx-rs | office_oxide | undoc |
+| Format | duke-docx | docx-rs | office_oxide | undoc |
 | --- | --- | --- | --- | --- |
 | DOCX | 99.983% · 0.673 / 5.080 | 99.740% · 1.193 / 9.499 | 99.917% · 0.750 / 5.380 | 99.988% · 1.130 / 14.260 |
 | DOC | 98.748% · 0.266 / 5.016 | Unsupported | 97.979% · 0.077 / 1.290 | 95.293% · 0.027 / 0.425 |
@@ -117,11 +117,11 @@ Each cell is **body-text F1 · median / p95 milliseconds**. Accuracy and latency
 
 - [Measured revisions, timing protocol, validation, and paired optimization results](../docs/benchmarks-optimized-20261102.md)
 - [Word capture/scoring methods, coverage, and unresolved reference limitations](../docs/word-reference-benchmarks.md)
-- [Source-reference accuracy aggregates](../crates/rust-docx/benchmarks/optimized-20261102/accuracy.json), [latency summary](../crates/rust-docx/benchmarks/optimized-20261102/latency.json), and [anonymous scatter data](../crates/rust-docx/benchmarks/optimized-20261102/latency.csv)
-- [Word-reference aggregate precision, recall, F1, and coverage for every measured category](../crates/rust-docx/benchmarks/word-reference-20261103/summary.json)
+- [Source-reference accuracy aggregates](../crates/duke-docx/benchmarks/optimized-20261102/accuracy.json), [latency summary](../crates/duke-docx/benchmarks/optimized-20261102/latency.json), and [anonymous scatter data](../crates/duke-docx/benchmarks/optimized-20261102/latency.csv)
+- [Word-reference aggregate precision, recall, F1, and coverage for every measured category](../crates/duke-docx/benchmarks/word-reference-20261103/summary.json)
 - [Per-format distribution and complexity charts](#per-format-charts) and [historical npm 0.13.0 results](../docs/benchmarks-0.13.0.md)
 
-These are retained completed runs, not new measurements of a documentation release. Source revisions and executable hashes identify each measured build. Historical records use the internal engine identifier `docx-core`; chart and table labels use the published crate name **rust-docx**. Public data contains aggregate counts and anonymous numeric points, without source documents or extracted text.
+These are retained completed runs, not new measurements of a documentation release. Source revisions and executable hashes identify each measured build. Historical records use the internal engine identifier `docx-core`; chart and table labels use the published crate name **duke-docx**. Public data contains aggregate counts and anonymous numeric points, without source documents or extracted text.
 
 ## Per-format charts
 
@@ -179,10 +179,10 @@ With Matplotlib and NumPy installed, regenerate charts from the published data w
 
 ```sh
 python3 scripts/parser-benchmark/readme_charts.py \
-  --data crates/rust-docx/benchmarks/optimized-20261102 \
+  --data crates/duke-docx/benchmarks/optimized-20261102 \
   --asset-prefix docx-core-optimized-20261102
 ```
 
 ## Reproduce and inspect results
 
-See the [parser benchmark harness](../scripts/parser-benchmark/README.md) for corpus selection, scoring, native runners, and interactive reports, and the [feedback runner](../scripts/parser-feedback/README.md) for optimization experiments. Run commands from the Rust Office repository root. Private input documents, captured references, and generated run directories remain local; the committed data contains aggregate metrics and anonymous numeric points. Existing run directories can be supplied by path to the reporting commands.
+See the [parser benchmark harness](../scripts/parser-benchmark/README.md) for corpus selection, scoring, native runners, and interactive reports, and the [feedback runner](../scripts/parser-feedback/README.md) for optimization experiments. Run commands from the Duke Office repository root. Private input documents, captured references, and generated run directories remain local; the committed data contains aggregate metrics and anonymous numeric points. Existing run directories can be supplied by path to the reporting commands.

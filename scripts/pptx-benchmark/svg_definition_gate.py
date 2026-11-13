@@ -104,7 +104,7 @@ def main():
             if i % 50 == 0:
                 print(i, len(rows), flush=True)
     counts = sum((collections.Counter(r['counts']) for r in records), collections.Counter())
-    summary = dict(total=len(records), passed=sum(r['passed'] for r in records), exact=sum(r['exact'] for r in records), counts=dict(counts), baseline_label=args.baseline_label, baseline_sha256=proof['candidate_sha256'], candidate_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(), failures=[r['id'] for r in records if not r['passed']], source_sha256={str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for folder in ['rust-pptx', 'rust-office-art', 'rust-office-charts'] for p in (ROOT / 'crates' / folder).rglob('*.rs')})
+    summary = dict(total=len(records), passed=sum(r['passed'] for r in records), exact=sum(r['exact'] for r in records), counts=dict(counts), baseline_label=args.baseline_label, baseline_sha256=proof['candidate_sha256'], candidate_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(), failures=[r['id'] for r in records if not r['passed']], source_sha256={str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for folder in ['duke-pptx', 'duke-office-art', 'duke-office-charts'] for p in (ROOT / 'crates' / folder).rglob('*.rs')})
     (run / 'semantic-summary.json').write_text(json.dumps(summary, indent=2))
     print(json.dumps({k: v for k, v in summary.items() if k != 'source_sha256'}))
     assert summary['passed'] == summary['total']

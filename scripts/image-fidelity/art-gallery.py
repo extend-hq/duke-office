@@ -193,7 +193,7 @@ def draw_gallery(rows, title, path, native_version):
     draw = ImageDraw.Draw(canvas)
     dark, muted = '#244358', '#516d7e'
     draw.text((margin, 18), title, font=font(28, True), fill=dark)
-    draw.text((margin, 56), f'Word {native_version} print PDF  /  Rust Office Art + DOCX adapter  /  November 6, 2026', font=font(16), fill=muted)
+    draw.text((margin, 56), f'Word {native_version} print PDF  /  Duke Office Art + DOCX adapter  /  November 6, 2026', font=font(16), fill=muted)
     draw.text((margin, 80), 'Same crop and scale; native print-PDF page offset retained. See comparison method.', font=font(15), fill=muted)
     for i, row in enumerate(rows):
         x, y = margin + i % 2 * (card_w + margin), header + i // 2 * card_h
@@ -282,11 +282,11 @@ def gallery(directory, candidate, model, output):
         writer.writeheader()
         writer.writerows(rows)
     root = Path(__file__).resolve().parents[2]
-    sources = [p for package in ['rust-docx', 'rust-office-art'] for p in (root / 'crates' / package / 'src').rglob('*.rs')]
-    sources += [p for p in (root / 'crates/rust-office-art/src').rglob('*') if p.is_file() and p.suffix != '.rs']
-    sources += [root / 'Cargo.lock', root / 'crates/rust-office-art/Cargo.toml', root / 'crates/rust-docx/Cargo.toml']
+    sources = [p for package in ['duke-docx', 'duke-office-art'] for p in (root / 'crates' / package / 'src').rglob('*.rs')]
+    sources += [p for p in (root / 'crates/duke-office-art/src').rglob('*') if p.is_file() and p.suffix != '.rs']
+    sources += [root / 'Cargo.lock', root / 'crates/duke-office-art/Cargo.toml', root / 'crates/duke-docx/Cargo.toml']
     source_hashes = {str(p.relative_to(root)): digest(p) for p in sorted(sources)}
-    provenance = dict(date='2026-11-06', pipeline='Native rust-docx model using rust-office-art; generated SVGs and saved raster assets displayed by Chromium',
+    provenance = dict(date='2026-11-06', pipeline='Native duke-docx model using duke-office-art; generated SVGs and saved raster assets displayed by Chromium',
                       documentSha256=manifest['documentSha256'], sourceSha256=manifest['sourceSha256'],
                       modelSha256=digest(model), nativeReference=reference, galleries=galleries,
                       baselineModelSha256=digest(directory / 'model-before.json') if (directory / 'model-before.json').exists() else None,

@@ -145,7 +145,7 @@ def review(run, manifest, records_path, name):
     with destination.open('w', buffering=1) as log:
         for index, row in enumerate(rows):
             assert row.get('split') != 'validation' and sha(row['path']) == row['sha256']
-            record = compact(run / 'candidate', 'rust-pptx', row, run / (name + '.compact.json.gz'), 0)
+            record = compact(run / 'candidate', 'duke-pptx', row, run / (name + '.compact.json.gz'), 0)
             equal = fields(record) == fields(old[row['id']])
             if not equal:
                 prior, before = invoke(baseline, row, run / (name + '.before.json.gz'))

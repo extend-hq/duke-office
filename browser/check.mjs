@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { gunzipSync } from "node:zlib";
-import { loadOfficeCharts } from "@extend-ai/rust-office-charts";
-import { loadOfficeCharts as loadFullCharts } from "@extend-ai/rust-office-charts/full";
+import { loadOfficeCharts } from "@extend-ai/duke-office-charts";
+import { loadOfficeCharts as loadFullCharts } from "@extend-ai/duke-office-charts/full";
 import { sourceDigest } from "./source-digest.mjs";
 import payload from "./generated/payload.js";
 import fullPayload from "./generated/full/payload.js";
@@ -12,7 +12,7 @@ const storedDigest = readFileSync(new URL("./generated/sources.sha256", import.m
 assert.equal(sourceDigest(), storedDigest, "Renderer inputs changed. Run npm run build:browser.");
 const require = createRequire(import.meta.url);
 for (const [entry, embedded] of [["", payload], ["/full", fullPayload]]) {
-  const binary = readFileSync(require.resolve(`@extend-ai/rust-office-charts${entry}/office_charts_bg.wasm`));
+  const binary = readFileSync(require.resolve(`@extend-ai/duke-office-charts${entry}/office_charts_bg.wasm`));
   assert.deepEqual(gunzipSync(Buffer.from(embedded, "base64")), binary);
 }
 
@@ -27,7 +27,7 @@ const xml = `<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/
   </c:plotArea></c:chart></c:chartSpace>`;
 
 const renderer = await loadOfficeCharts();
-assert.equal(await require("@extend-ai/rust-office-charts").loadOfficeCharts(), renderer);
+assert.equal(await require("@extend-ai/duke-office-charts").loadOfficeCharts(), renderer);
 const options = { width: 320, height: 200, interactive: true, spreadsheetDefaults: true };
 const cached = renderer.renderChart(xml, options);
 assert.match(cached, /<svg\b/);
@@ -51,7 +51,7 @@ assert.notEqual(updated, cached);
 assert.equal(renderer.renderChart("<invalid/>"), null);
 
 const full = await loadFullCharts();
-assert.equal(await require("@extend-ai/rust-office-charts/full").loadOfficeCharts(), full);
+assert.equal(await require("@extend-ai/duke-office-charts/full").loadOfficeCharts(), full);
 assert.equal(full.renderChart(xml, options), cached);
 const series = xml.match(/<c:ser>[\s\S]*?<\/c:ser>/)[0];
 const pie = xml.replace(/<c:barChart>[\s\S]*?<\/c:valAx>/,

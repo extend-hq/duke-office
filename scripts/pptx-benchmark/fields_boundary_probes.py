@@ -53,7 +53,7 @@ def main():
                 assert fields['number']['text'] == '' and fields['number']['field']['hasCachedText'] is False
             else:
                 assert fields['number']['text'] == '7'
-        result = compact(run / 'candidate', 'rust-pptx', row, target / (name + '.compact.json.gz'), 0)
+        result = compact(run / 'candidate', 'duke-pptx', row, target / (name + '.compact.json.gz'), 0)
         result.update(id=name)
         if document:
             result['artwork_hashes'] = artwork_hashes(document)

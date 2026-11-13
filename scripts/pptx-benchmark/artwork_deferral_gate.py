@@ -1,11 +1,11 @@
 """Semantic gate for the deferred-artwork parse option.
 
 For every manifest input the candidate runner parses the file twice: eagerly
-(`rust-pptx`) and with `deferArtwork` (`rust-pptx-deferred`). After removing
+(`duke-pptx`) and with `deferArtwork` (`duke-pptx-deferred`). After removing
 artwork fields (`shapeSvg`, `pictureSvg`, `chartSvg`, `paintBounds`,
 `fallbackPicture`, in their compacted `*Bytes` forms) and the warnings that only
 rendering can raise, both compact models must be identical, and statuses and
-error strings must agree. The `rust-pptx-artwork-check` engine then renders up
+error strings must agree. The `duke-pptx-artwork-check` engine then renders up
 to `--check-limit` nodes per input on demand, both through `render_node_artwork`
 (one parse per render) and through a retained `ParsedPresentation` handle, and
 compares each result with the eagerly rendered artwork; the handle's model must
@@ -60,15 +60,15 @@ def main():
         for index, row in enumerate(rows):
             assert hashlib.sha256(Path(row['path']).read_bytes()).hexdigest() == row['sha256']
             eager_path, deferred_path = scratch / 'eager.json.gz', scratch / 'deferred.json.gz'
-            eager = invoke(binary, 'rust-pptx', row, eager_path, 0)
-            deferred = invoke(binary, 'rust-pptx-deferred', row, deferred_path, 0)
+            eager = invoke(binary, 'duke-pptx', row, eager_path, 0)
+            deferred = invoke(binary, 'duke-pptx-deferred', row, deferred_path, 0)
             record = dict(id=row['id'], status=eager['status'], deferred_status=deferred['status'], error=eager.get('error'), deferred_error=deferred.get('error'))
             equal = eager['status'] == deferred['status'] and eager.get('error') == deferred.get('error')
             if equal and eager['status'] == 'ok':
                 models = [json.load(gzip.open(path, 'rt')) for path in [eager_path, deferred_path]]
                 equal = strip(models[0]) == strip(models[1])
                 record['deferred_has_artwork'] = json.dumps(models[1]).find('"shapeSvgBytes"') >= 0 or json.dumps(models[1]).find('"pictureSvgBytes"') >= 0 or json.dumps(models[1]).find('"chartSvgBytes"') >= 0
-                check = invoke(binary, 'rust-pptx-artwork-check', row, '-', args.check_limit)
+                check = invoke(binary, 'duke-pptx-artwork-check', row, '-', args.check_limit)
                 record.update(checked=check.get('checked', 0), matched=check.get('matched', 0), reparse_matched=check.get('reparse_matched', 0), retained_matched=check.get('retained_matched', 0),
                               retained_document_equal=check.get('retained_document_equal', False), check_status=check['status'], mismatches=check.get('mismatches', []))
                 equal = (equal and check['status'] == 'ok' and record['checked'] == record['matched'] == record['reparse_matched'] == record['retained_matched']

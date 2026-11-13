@@ -485,7 +485,7 @@ def main():
         parser.error('Output directory is not empty; choose a new directory or use --overwrite')
     image = source_png()
     manifest = dict(schemaVersion=1, generator=str(Path(__file__).relative_to(ROOT)),
-                    coverageVersion='rust-office-art 0.1.2', coverageBasis='Source review and DOCX adapter smoke; native visual fidelity remains unmeasured.',
+                    coverageVersion='duke-office-art 0.1.2', coverageBasis='Source review and DOCX adapter smoke; native visual fidelity remains unmeasured.',
                     catalogSource=CATALOG, sources=SOURCES, pageSizePx={'width': 816, 'height': 1056},
                     perPage=args.per_page, supportDefinitions=SUPPORT, cases=[], documents=[])
     for family in families:

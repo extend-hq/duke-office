@@ -30,14 +30,14 @@ def main():
         records=[]
         with (run/'parity.jsonl').open('w',buffering=1) as f:
             for index,row in enumerate(manifest):
-                output=run/'current.json.gz';record=invoke(candidate,'rust-pptx',row,output,0);old=originals[row['id']]
+                output=run/'current.json.gz';record=invoke(candidate,'duke-pptx',row,output,0);old=originals[row['id']]
                 equal=(record['status']==old['status'] and (record['status']!='ok' or record['full_sha256']==old['full_sha256']))
                 record.update(id=row['id'],equal=equal,baseline_sha256=old.get('full_sha256'));records.append(record);f.write(json.dumps(record)+'\n')
                 if not equal:
                     if output.exists():output.rename(run/(row['id']+'.json.gz'))
                     print('MISMATCH',row['id'],flush=True)
                 if index%50==0:print(index,len(manifest),flush=True)
-        sources={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for name in ['rust-pptx','rust-office-art','rust-office-charts'] for p in (ROOT/'crates'/name).rglob('*.rs')}
+        sources={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for name in ['duke-pptx','duke-office-art','duke-office-charts'] for p in (ROOT/'crates'/name).rglob('*.rs')}
         summary=dict(total=len(records),equal=sum(r['equal'] for r in records),candidate_sha256=hashlib.sha256(candidate.read_bytes()).hexdigest(),baseline_sha256=hashlib.sha256(baseline.read_bytes()).hexdigest(),baseline_path=str(baseline.resolve()),source_sha256=sources)
         (run/'parity-summary.json').write_text(json.dumps(summary,indent=2));print(json.dumps(summary));return
     parity=json.loads((run/'parity-summary.json').read_text())
@@ -47,12 +47,12 @@ def main():
     if hashlib.sha256(baseline.read_bytes()).hexdigest()!=parity['baseline_sha256']:raise SystemExit('baseline changed after parity')
     previous=json.loads((OUT/'comparison/assessment.json').read_text())
     eligible=split['tuning']+split['holdout'] if args.split=='full' else split[args.split]
-    rows=sorted([r for r in previous['rows'] if r['engine']=='rust-pptx' and r['id'] in eligible],key=lambda r:r['median_ms'])
+    rows=sorted([r for r in previous['rows'] if r['engine']=='duke-pptx' and r['id'] in eligible],key=lambda r:r['median_ms'])
     count=min(len(rows),args.count or len(rows))
     selected=[rows[round(i*(len(rows)-1)/max(1,count-1))]['id'] for i in range(count)]
     rng=random.Random(20261106);rng.shuffle(selected);measurements=[]
     for ident in selected:
-        engines=[('baseline',baseline,'rust-pptx'),('candidate',candidate,'rust-pptx'),('office_oxide',candidate,'office_oxide')];rng.shuffle(engines)
+        engines=[('baseline',baseline,'duke-pptx'),('candidate',candidate,'duke-pptx'),('office_oxide',candidate,'office_oxide')];rng.shuffle(engines)
         for label,binary,engine in engines:
             record=invoke(binary,engine,by_id[ident],'-',7);record.update(id=ident,label=label,load=os.getloadavg());measurements.append(record)
         print(ident,flush=True)

@@ -87,7 +87,7 @@ def main():
         assert fields['collision']['text'] == 'retained' and fields['collision']['fontSizePt'] == 17 and fields['collision']['field']['type'] == 'custom'
         picture = fields['picture']['field']['paragraphProperties']
         assert picture.get('bulletImageAssetId') == (None if options.get('external') else 'ppt/media/bullet.png')
-        record = compact(binary, 'rust-pptx', row, destination / (name + '.compact.json.gz'), 0)
+        record = compact(binary, 'duke-pptx', row, destination / (name + '.compact.json.gz'), 0)
         record.update(id=name, artwork_hashes=artwork_hashes(document)); records.append(record)
         receipts.append(dict(id=name, input_sha256=row['sha256'], counts=dict(counts), full_sha256=result['full_sha256'], passed=True))
         print(name, dict(counts), flush=True)

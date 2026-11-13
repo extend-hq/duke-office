@@ -50,7 +50,7 @@ jobs:
   publish:
     needs: [plan, verify]
     if: >-
-      github.repository == 'extend-hq/rust-office' &&
+      github.repository == 'extend-hq/duke-office' &&
       github.ref == 'refs/heads/main' &&
       ((github.event_name == 'push' && needs.plan.outputs.pending == 'true') ||
       (github.event_name == 'workflow_dispatch' && !inputs.dry_run))

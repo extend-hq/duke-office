@@ -13,7 +13,7 @@ const rustflags = [
   `--remap-path-prefix=${homedir()}=/home/builder`,
   `--remap-path-prefix=${root}=.`,
 ].join("\x1f");
-const crate = resolve(root, "crates/rust-office-charts-wasm");
+const crate = resolve(root, "crates/duke-office-charts-wasm");
 const generated = resolve(root, "browser/generated");
 const digest = sourceDigest();
 for (const extended of [false, true]) {

@@ -6,7 +6,7 @@
   "license": "MIT AND OFL-1.1",
   "repository": {
     "type": "git",
-    "url": "https://github.com/extend-hq/rust-office.git",
+    "url": "https://github.com/extend-hq/duke-office.git",
     "directory": "packages/office-fonts"
   },
   "main": "./index.cjs",

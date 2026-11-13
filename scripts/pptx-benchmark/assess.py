@@ -11,7 +11,7 @@ from common import norm,core,ir,markdown_model
 from peer_models import ENGINES as PEER_ENGINES, model as peer_model
 
 OUT=Path(__file__).resolve().parents[2]/'output/pptx-benchmark-20261106'
-ENGINES=['rust-pptx','office_oxide','undoc','python-pptx','markitdown']
+ENGINES=['duke-pptx','office_oxide','undoc','python-pptx','markitdown']
 
 def grams(strings):
     c=collections.Counter()
@@ -114,7 +114,7 @@ def main(phase, fixed_cohort=None, exclude_empty=False, output_name='assessment.
             actual={'slides':[]}
             if record['status']=='ok':
                 data=json.load(gzip.open(run/'native'/(item['id']+'.'+e+'.json.gz'),'rt'))
-                actual=core(data) if e=='rust-pptx' else ir(e,data) if e in ['office_oxide','undoc'] else peer_model(e,data) if e in PEER_ENGINES else markdown_model(data['markdown']) if e=='markitdown' else data
+                actual=core(data) if e=='duke-pptx' else ir(e,data) if e in ['office_oxide','undoc'] else peer_model(e,data) if e in PEER_ENGINES else markdown_model(data['markdown']) if e=='markitdown' else data
             metrics=score(ref,actual)
             rows.append(dict(id=item['id'],engine=e,status=record['status'],metrics=metrics,median_ms=statistics.median(record['samples_ms']) if record.get('samples_ms') else None,bytes=item['bytes'],uncompressed_bytes=ref['uncompressed_bytes'],slides=len(ref['slides']),paragraphs=sum(len(s['paragraphs']) for s in ref['slides']),features=sum(sum(len(s[k]) for k in ['tables','images','charts','shapes']) for s in ref['slides']),characters=sum(len(p['text']) for s in ref['slides'] for p in s['paragraphs'])))
         print(item['id'],flush=True)

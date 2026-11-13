@@ -28,12 +28,12 @@ def strict_check(phase):
                     continue
             reference = common.oracle(row['path'])
             engines = {}
-            for engine in ['rust-pptx', 'office_oxide', 'undoc', 'python-pptx', 'markitdown']:
+            for engine in ['duke-pptx', 'office_oxide', 'undoc', 'python-pptx', 'markitdown']:
                 record = records[row['id'], engine]
                 actual = {'slides': []}
                 if record['status'] == 'ok':
                     data = json.load(gzip.open(run / 'native' / (row['id'] + '.' + engine + '.json.gz'), 'rt'))
-                    actual = common.core(data) if engine == 'rust-pptx' else common.ir(engine, data) if engine in ['office_oxide', 'undoc'] else common.markdown_model(data['markdown']) if engine == 'markitdown' else data
+                    actual = common.core(data) if engine == 'duke-pptx' else common.ir(engine, data) if engine in ['office_oxide', 'undoc'] else common.markdown_model(data['markdown']) if engine == 'markitdown' else data
                 engines[engine] = dict(status=record['status'], metrics=score(reference, actual))
             result.append(dict(id=row['id'], reference=reference, results=engines))
     finally:
@@ -53,7 +53,7 @@ def legacy_check(phase):
     directory.mkdir(exist_ok=True)
     results = []
     for row in rows:
-        if row['engine'] != 'rust-pptx' or row['format'] != 'ppt' or row['status'] == 'ok' or indexed[row['id'], 'office_oxide']['status'] != 'ok':
+        if row['engine'] != 'duke-pptx' or row['format'] != 'ppt' or row['status'] == 'ok' or indexed[row['id'], 'office_oxide']['status'] != 'ok':
             continue
         source = manifest[row['id']]
         if hashlib.sha256(Path(source['path']).read_bytes()).hexdigest() != source['sha256']:

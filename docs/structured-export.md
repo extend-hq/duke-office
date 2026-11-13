@@ -1,6 +1,6 @@
 # Structured extraction and export
 
-The unreleased `rust-docx` APIs provide application-independent extraction and HTML export for native and WebAssembly callers. They use stable document block IDs and UTF-16 source offsets, without requiring a React renderer, storage service, or an application response schema.
+The unreleased `duke-docx` APIs provide application-independent extraction and HTML export for native and WebAssembly callers. They use stable document block IDs and UTF-16 source offsets, without requiring a React renderer, storage service, or an application response schema.
 
 ## Extraction
 
@@ -28,7 +28,7 @@ Inline offsets address the combined text. Its ordered `sourceRefs` retain both o
 `export_document(&ExportRequest)` returns combined `content` and `blockContent` keyed by block ID. Paragraphs and figures are exported as HTML; `tableFormat` selects HTML, Markdown, or CSV for tables. This is semantic content export, not page layout or a full-document Markdown conversion.
 
 ```rust
-use rust_docx::{parse_document_bundle, export_document, ExportRequest};
+use duke_docx::{parse_document_bundle, export_document, ExportRequest};
 
 fn convert(bytes: &[u8]) -> Result<String, String> {
     let bundle = parse_document_bundle(bytes, Default::default())?;

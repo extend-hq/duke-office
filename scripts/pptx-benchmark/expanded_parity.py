@@ -13,7 +13,7 @@ def digest(path):
 
 
 def load_records(phase):
-    return {r['id']: r for r in map(json.loads, (OUT / phase / 'records.jsonl').read_text().splitlines()) if r['engine'] == 'rust-pptx'}
+    return {r['id']: r for r in map(json.loads, (OUT / phase / 'records.jsonl').read_text().splitlines()) if r['engine'] == 'duke-pptx'}
 
 
 def main():
@@ -55,7 +55,7 @@ def main():
         replay_hashes = []
         for index, binary in enumerate([args.baseline, args.baseline, candidate, candidate, candidate]):
             output = run / f'{ident}-full-replay-{index}.json.gz'
-            process = subprocess.run([str(binary), 'rust-pptx', manifest[ident]['path'], str(output), '0', 'full'], capture_output=True, text=True, check=True, timeout=120)
+            process = subprocess.run([str(binary), 'duke-pptx', manifest[ident]['path'], str(output), '0', 'full'], capture_output=True, text=True, check=True, timeout=120)
             replay = json.loads(process.stdout.splitlines()[-1])
             if replay['status'] != 'ok':
                 raise SystemExit('A full replay failed.')
@@ -63,8 +63,8 @@ def main():
             model = json.load(gzip.open(output, 'rt'))
             model['warnings'] = sorted(model.get('warnings', []), key=lambda x: json.dumps(x, sort_keys=True))
             models.append(model)
-        frozen = json.load(gzip.open(OUT / args.reference_phase / 'native' / (ident + '.rust-pptx.json.gz'), 'rt'))
-        recent = json.load(gzip.open(OUT / args.phase / 'native' / (ident + '.rust-pptx.json.gz'), 'rt'))
+        frozen = json.load(gzip.open(OUT / args.reference_phase / 'native' / (ident + '.duke-pptx.json.gz'), 'rt'))
+        recent = json.load(gzip.open(OUT / args.phase / 'native' / (ident + '.duke-pptx.json.gz'), 'rt'))
         for model in [frozen, recent]:
             model['warnings'] = sorted(model.get('warnings', []), key=lambda x: json.dumps(x, sort_keys=True))
         if all(model == models[0] for model in models[1:]) and frozen == recent and len(set(replay_hashes[2:])) == 1:

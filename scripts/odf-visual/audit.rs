@@ -1,7 +1,7 @@
-use rust_odf::draw::{Shape, ShapeKind};
-use rust_odf::style::Scope;
-use rust_odf::text::{Block, Inline, Table};
-use rust_odf::{Body, Limits, OdfDocument};
+use duke_odf::draw::{Shape, ShapeKind};
+use duke_odf::style::Scope;
+use duke_odf::text::{Block, Inline, Table};
+use duke_odf::{Body, Limits, OdfDocument};
 use serde_json::{json, Value};
 
 pub fn audit(bytes: &[u8]) -> Result<Value, Box<dyn std::error::Error>> {
@@ -73,12 +73,12 @@ fn visit_document(
             }
         }
         Body::Chart(chart) => {
-            let rendered = rust_office_charts::odf::render_chart(
+            let rendered = duke_office_charts::odf::render_chart(
                 chart,
                 chart.width.map_or(640.0, |v| v.0 as f64 / 9525.0),
                 chart.height.map_or(360.0, |v| v.0 as f64 / 9525.0),
             );
-            charts.push(json!({"class":chart.class,"rendered":rendered.is_some(),"data":rust_office_charts::odf::extract_chart_data(chart),"categories":chart.categories,"series":chart.series.iter().map(|s|json!({"name":s.name,"values":s.values,"domains":s.domains})).collect::<Vec<_>>()}));
+            charts.push(json!({"class":chart.class,"rendered":rendered.is_some(),"data":duke_office_charts::odf::extract_chart_data(chart),"categories":chart.categories,"series":chart.series.iter().map(|s|json!({"name":s.name,"values":s.values,"domains":s.domains})).collect::<Vec<_>>()}));
         }
         _ => {}
     }
@@ -87,7 +87,7 @@ fn visit_document(
             shapes.extend(children);
             continue;
         }
-        let rendered = rust_office_art::odf::render_shape(shape, &doc.styles, Scope::Content);
+        let rendered = duke_office_art::odf::render_shape(shape, &doc.styles, Scope::Content);
         let custom = if let ShapeKind::Custom(g) = &shape.kind {
             Some(
                 json!({"type":g.shape_type,"hasPath":g.path.is_some(),"evaluated":g.evaluated_paths([shape.width.map_or(21600.0,|v|v.0 as f64/360.0),shape.height.map_or(21600.0,|v|v.0 as f64/360.0)],true,true).is_some()}),

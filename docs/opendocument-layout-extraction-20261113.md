@@ -1,6 +1,6 @@
 # OpenDocument automatic chart layout and direct extraction — 2026-11-13
 
-This round builds on the [previous unpublished candidate](opendocument-hillclimb-20261113.md). Core chart geometry and data semantics remain in `rust-odf` / `rust-office-charts`; thin ODP/ODG adapters select the shared APIs. No package versions were bumped or published, and React packages were not modified.
+This round builds on the [previous unpublished candidate](opendocument-hillclimb-20261113.md). Core chart geometry and data semantics remain in `duke-odf` / `duke-office-charts`; thin ODP/ODG adapters select the shared APIs. No package versions were bumped or published, and React packages were not modified.
 
 ## Changes
 

@@ -5,7 +5,7 @@ resolver = "2"
 [workspace.package]
 edition = "2021"
 license = "MIT"
-repository = "https://github.com/extend-hq/rust-office"
+repository = "https://github.com/extend-hq/duke-office"
 
 [workspace.dependencies]
 serde = { version = "1", features = ["derive"] }

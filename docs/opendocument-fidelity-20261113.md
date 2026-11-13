@@ -4,15 +4,15 @@ Latest follow-up: [OpenDocument parity and latency hill-climb](opendocument-hill
 
 The shared Rust changes improve median visual agreement on 21 corpus-derived charts from **32.2% to 62.2%**, and mean agreement from **40.6% to 56.4%**. Extracting data from an already parsed chart is **24.9× faster** than serializing and parsing chart XML, with identical results on all 33 embedded charts in the corpus. Whole-document latency is approximately unchanged. This is progress on specific chart gaps, not complete LibreOffice parity or evidence of market-wide superiority.
 
-The baseline is frozen source at `6d8aa7b3e986e309270905245523037d7575319b`: `rust-odf` 0.2.0, `rust-office-charts` 0.2.0, `rust-office-art` 0.1.9, `rust-docx` 0.3.1 and `rust-pptx` 0.4.1. The candidate is that checkpoint plus the local fixes, with unchanged manifest versions. These fixes have not been published. No React package was changed or published in this evaluation.
+The baseline is frozen source at `6d8aa7b3e986e309270905245523037d7575319b`: `duke-odf` 0.2.0, `duke-office-charts` 0.2.0, `duke-office-art` 0.1.9, `duke-docx` 0.3.1 and `duke-pptx` 0.4.1. The candidate is that checkpoint plus the local fixes, with unchanged manifest versions. These fixes have not been published. No React package was changed or published in this evaluation.
 
 ## Implementation
 
-Runtime edits are confined to `rust-odf` and `rust-office-charts`; `rust-office-art` remains unchanged.
+Runtime edits are confined to `duke-odf` and `duke-office-charts`; `duke-office-art` remains unchanged.
 
 - The ODF model retains saved title and legend coordinates, legend expansion, legacy coordinate regions, inner versus outer plot bounds, axis number formats and grid styles, and chart data-table properties. Automatic legacy plot coordinates are no longer mistaken for manual geometry.
 - The shared renderer uses ODF axis fonts, number/date formats, rotation and wrapping, skips overlapping value labels independently of gridlines, reads bar gap widths from axis styles, preserves series line widths, and honors saved positions. It also renders chart data tables and improves radar geometry and bubble scaling/clipping at plot boundaries.
-- `rust-office-charts::odf::extract_chart_data` now constructs `ChartData` directly. It preserves series grouping, sparse point indices, original numeric strings and scatter/bubble channel roles. It does not require supported artwork. ODF parsing also avoids unused fallback allocations, repeated point-style resolution and duplicate domain-range traversal.
+- `duke-office-charts::odf::extract_chart_data` now constructs `ChartData` directly. It preserves series grouping, sparse point indices, original numeric strings and scatter/bubble channel roles. It does not require supported artwork. ODF parsing also avoids unused fallback allocations, repeated point-style resolution and duplicate domain-range traversal.
 
 The direct API is used by the ODT extraction path. ODP/ODG still use their existing chart-description XML path, so the microbenchmark speedup is not an ODP or worker-level speedup. This run did not deploy or smoke-test Extend Web. ODS/FODS chart data is checked through the shared ODF API; native spreadsheet integration is a separate remaining task.
 

@@ -4,15 +4,15 @@ use sha2::{Digest, Sha256};
 use flate2::{write::GzEncoder, Compression};
 
 enum Parsed {
-    Core(rust_pptx::PresentationDocument),
+    Core(duke_pptx::PresentationDocument),
     Oxide(office_oxide::ir::DocumentIR),
     Undoc(undoc::Document),
 }
 
 fn parse(engine: &str, bytes: &Arc<[u8]>, legacy: bool) -> Result<Parsed, String> {
     match engine {
-        "rust-pptx" => rust_pptx::parse_presentation(bytes, &Default::default()).map(Parsed::Core).map_err(|e| e.to_string()),
-        "rust-pptx-deferred" => rust_pptx::parse_presentation_with_options(bytes, &Default::default(), &rust_pptx::ParseOptions { defer_artwork: true, ..Default::default() }).map(Parsed::Core).map_err(|e| e.to_string()),
+        "duke-pptx" => duke_pptx::parse_presentation(bytes, &Default::default()).map(Parsed::Core).map_err(|e| e.to_string()),
+        "duke-pptx-deferred" => duke_pptx::parse_presentation_with_options(bytes, &Default::default(), &duke_pptx::ParseOptions { defer_artwork: true, ..Default::default() }).map(Parsed::Core).map_err(|e| e.to_string()),
         "office_oxide" => {
             let format = if legacy { office_oxide::format::DocumentFormat::Ppt } else { office_oxide::format::DocumentFormat::Pptx };
             let doc = office_oxide::Document::from_reader(Cursor::new(Arc::clone(bytes)), format).map_err(|e|e.to_string())?;
@@ -70,8 +70,8 @@ fn take_editing(v: &mut Value, path: &str, nodes: &mut Vec<Value>) {
 
 /// The first `limit` nodes with eager artwork (first occurrence of each id per
 /// node list, in model order) with that artwork, and the eager document.
-fn artwork_targets(bytes: &[u8], limit: usize) -> Result<(rust_pptx::PresentationDocument, Vec<(rust_pptx::ArtworkTarget, rust_pptx::NodeArtwork)>), String> {
-    use rust_pptx::{ArtworkTarget, NodeArtwork, SlideNode};
+fn artwork_targets(bytes: &[u8], limit: usize) -> Result<(duke_pptx::PresentationDocument, Vec<(duke_pptx::ArtworkTarget, duke_pptx::NodeArtwork)>), String> {
+    use duke_pptx::{ArtworkTarget, NodeArtwork, SlideNode};
     use std::collections::HashSet;
     fn artwork(node: &SlideNode) -> Option<NodeArtwork> {
         match node {
@@ -94,9 +94,9 @@ fn artwork_targets(bytes: &[u8], limit: usize) -> Result<(rust_pptx::Presentatio
             if let SlideNode::Group { children, .. } = node { collect(children, seen, make, out, limit); }
         }
     }
-    let limits = rust_pptx::ParseLimits::default();
-    let options = rust_pptx::ParseOptions::default();
-    let document = rust_pptx::parse_presentation_with_options(bytes, &limits, &options).map_err(|e| e.to_string())?;
+    let limits = duke_pptx::ParseLimits::default();
+    let options = duke_pptx::ParseOptions::default();
+    let document = duke_pptx::parse_presentation_with_options(bytes, &limits, &options).map_err(|e| e.to_string())?;
     let mut targets = Vec::new();
     for (index, slide) in document.slides.iter().enumerate() {
         let mut seen = HashSet::new();
@@ -117,17 +117,17 @@ fn artwork_targets(bytes: &[u8], limit: usize) -> Result<(rust_pptx::Presentatio
 /// eager artwork, both through `render_node_artwork` (one parse per render) and
 /// through a retained `ParsedPresentation`, whose model must equal the deferred parse.
 fn artwork_check(bytes: &[u8], limit: usize) -> Result<Value, String> {
-    let limits = rust_pptx::ParseLimits::default();
-    let options = rust_pptx::ParseOptions::default();
+    let limits = duke_pptx::ParseLimits::default();
+    let options = duke_pptx::ParseOptions::default();
     let (_, targets) = artwork_targets(bytes, limit)?;
-    let deferred = rust_pptx::parse_presentation_with_options(bytes, &limits, &rust_pptx::ParseOptions { defer_artwork: true, ..options }).map_err(|e| e.to_string())?;
-    let retained = rust_pptx::parse_presentation_retained(bytes, &limits, &options).map_err(|e| e.to_string())?;
+    let deferred = duke_pptx::parse_presentation_with_options(bytes, &limits, &duke_pptx::ParseOptions { defer_artwork: true, ..options }).map_err(|e| e.to_string())?;
+    let retained = duke_pptx::parse_presentation_retained(bytes, &limits, &options).map_err(|e| e.to_string())?;
     let retained_document_equal = serde_json::to_vec(retained.document()).map_err(|e| e.to_string())? == serde_json::to_vec(&deferred).map_err(|e| e.to_string())?;
     drop(deferred);
     let (mut matched, mut reparse_matched, mut retained_matched) = (0, 0, 0);
     let mut mismatches = Vec::new();
     for (target, expected) in &targets {
-        let reparsed = rust_pptx::render_node_artwork(bytes, &limits, &options, target).map_err(|e| e.to_string())?;
+        let reparsed = duke_pptx::render_node_artwork(bytes, &limits, &options, target).map_err(|e| e.to_string())?;
         let through_handle = retained.render_node_artwork(target).map_err(|e| e.to_string())?;
         let reparse_ok = reparsed.as_ref() == Some(expected);
         let retained_ok = through_handle.as_ref() == Some(expected);
@@ -143,8 +143,8 @@ fn artwork_check(bytes: &[u8], limit: usize) -> Result<Value, String> {
 /// same renders through the handle. Each sample is one complete pass; the order
 /// of the two methods alternates between samples.
 fn render_timing(bytes: &[u8], limit: usize, samples: usize) -> Result<Value, String> {
-    let limits = rust_pptx::ParseLimits::default();
-    let options = rust_pptx::ParseOptions::default();
+    let limits = duke_pptx::ParseLimits::default();
+    let options = duke_pptx::ParseOptions::default();
     let (document, targets) = artwork_targets(bytes, limit)?;
     let slides = document.slides.len();
     drop(document);
@@ -154,12 +154,12 @@ fn render_timing(bytes: &[u8], limit: usize, samples: usize) -> Result<Value, St
             if method == 0 {
                 let start = Instant::now();
                 for (target, _) in &targets {
-                    black_box(rust_pptx::render_node_artwork(bytes, &limits, &options, target).map_err(|e| e.to_string())?);
+                    black_box(duke_pptx::render_node_artwork(bytes, &limits, &options, target).map_err(|e| e.to_string())?);
                 }
                 reparse_ms.push(start.elapsed().as_secs_f64() * 1000.);
             } else {
                 let start = Instant::now();
-                let handle = rust_pptx::parse_presentation_retained(bytes, &limits, &options).map_err(|e| e.to_string())?;
+                let handle = duke_pptx::parse_presentation_retained(bytes, &limits, &options).map_err(|e| e.to_string())?;
                 let created = start.elapsed().as_secs_f64() * 1000.;
                 for (target, _) in &targets {
                     black_box(handle.render_node_artwork(target).map_err(|e| e.to_string())?);
@@ -179,8 +179,8 @@ fn run(args: &[String]) -> Result<Value,String> {
     let bytes: Arc<[u8]>=fs::read(&args[2]).map_err(|e|e.to_string())?.into();
     let legacy=bytes.starts_with(b"\xd0\xcf\x11\xe0");
     let repeats:usize=args[4].parse().unwrap();
-    if args[1]=="rust-pptx-artwork-check" { return artwork_check(&bytes, if repeats==0 {6} else {repeats}); }
-    if args[1]=="rust-pptx-render-timing" {
+    if args[1]=="duke-pptx-artwork-check" { return artwork_check(&bytes, if repeats==0 {6} else {repeats}); }
+    if args[1]=="duke-pptx-render-timing" {
         let limit=args.get(5).and_then(|value| value.parse().ok()).unwrap_or(12);
         return render_timing(&bytes, limit, if repeats==0 {7} else {repeats});
     }

@@ -14,7 +14,7 @@ ROOT=Path(__file__).resolve().parents[2]
 OUT=ROOT/'output/pptx-benchmark-20261106'
 
 def invoke(binary,row,path,full=False):
-    args=[str(binary),'rust-pptx',row['path'],str(path),'0']
+    args=[str(binary),'duke-pptx',row['path'],str(path),'0']
     if full:args.append('full')
     result=subprocess.run(args,capture_output=True,text=True,timeout=120,check=True)
     return json.loads(result.stdout.splitlines()[-1])

@@ -37,16 +37,16 @@ def copy_revision(destination, revision):
 def snapshot(temp, variant, revision, fixtures):
     source = temp / variant
     copy_revision(source, revision)
-    shutil.copy2(SCRIPTS / "snapshot.rs", source / "crates/rust-docx/examples/chart_guard.rs")
+    shutil.copy2(SCRIPTS / "snapshot.rs", source / "crates/duke-docx/examples/chart_guard.rs")
     target = temp / "target"
     env = dict(os.environ, CARGO_TARGET_DIR=str(target), CARGO_INCREMENTAL="0", CARGO_PROFILE_DEV_DEBUG="0")
     subprocess.run(
-        ["cargo", "build", "--quiet", "--locked", "-p", "rust-docx", "--example", "chart_guard"],
+        ["cargo", "build", "--quiet", "--locked", "-p", "duke-docx", "--example", "chart_guard"],
         cwd=source, env=env, check=True,
     )
     binary = target / "debug/examples/chart_guard"
     digest = hashlib.sha256()
-    for crate in ("rust-docx", "rust-office-charts"):
+    for crate in ("duke-docx", "duke-office-charts"):
         directory = source / "crates" / crate
         for path in [directory / "Cargo.toml", *sorted((directory / "src").rglob("*.rs"))]:
             digest.update(path.relative_to(source).as_posix().encode() + b"\0")

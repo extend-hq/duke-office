@@ -1,0 +1,18 @@
+[package]
+name = "duke-odf"
+version = "0.2.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Shared OpenDocument package, style, text and drawing readers for the Duke Office parsers"
+readme = "README.md"
+keywords = ["opendocument", "odf", "odt", "odp", "wasm"]
+categories = ["parser-implementations"]
+include = ["src/**", "examples/*.rs", "Cargo.toml", "README.md", "LICENSE"]
+
+[dependencies]
+base64 = "0.22"
+memchr = "2"
+miniz_oxide.workspace = true
+quick-xml.workspace = true
+zlib-rs = { version = "0.6.8", default-features = false, features = ["std"] }

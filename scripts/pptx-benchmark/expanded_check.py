@@ -42,7 +42,7 @@ def main():
         for index, row in enumerate(cohort):
             if hashlib.sha256(Path(row['path']).read_bytes()).hexdigest() != row['sha256']:
                 raise ValueError('input identity changed')
-            for engine in ['rust-pptx', 'office_oxide', 'undoc']:
+            for engine in ['duke-pptx', 'office_oxide', 'undoc']:
                 if (row['id'], engine) in done:
                     continue
                 start = time.time()
@@ -59,7 +59,7 @@ def main():
             if index % 25 == 0:
                 print(index + 1, '/', len(cohort), flush=True)
     summary = {}
-    for engine in ['rust-pptx', 'office_oxide', 'undoc']:
+    for engine in ['duke-pptx', 'office_oxide', 'undoc']:
         matching = [r for r in records if r['engine'] == engine]
         summary[engine] = {kind: dict(collections.Counter(r['status'] for r in matching if r['format'] == kind)) for kind in sorted({r['format'] for r in matching})}
     (run / 'summary.json').write_text(json.dumps(dict(identity=identity, total=len(cohort), engines=summary), indent=2))

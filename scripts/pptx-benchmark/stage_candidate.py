@@ -28,7 +28,7 @@ def main():
     run.mkdir(parents=True)
     shutil.copy2(built, run / 'candidate')
     sources = {str(path.relative_to(ROOT)): hashlib.sha256(path.read_bytes()).hexdigest()
-               for name in ['rust-pptx', 'rust-office-art', 'rust-office-charts'] for path in sorted((ROOT / 'crates' / name).rglob('*.rs'))}
+               for name in ['duke-pptx', 'duke-office-art', 'duke-office-charts'] for path in sorted((ROOT / 'crates' / name).rglob('*.rs'))}
     for name, expected in sources.items():
         destination = run / 'sources' / name
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -41,7 +41,7 @@ def main():
                    ROOT / 'scripts/pptx-benchmark/Cargo.lock',
                    ROOT / 'scripts/pptx-benchmark/src/main.rs']
     build_paths.extend(ROOT / 'crates' / name / 'Cargo.toml'
-                       for name in ['rust-pptx', 'rust-office-art', 'rust-office-charts'])
+                       for name in ['duke-pptx', 'duke-office-art', 'duke-office-charts'])
     identity['build_files'] = {}
     for path in build_paths:
         relative = path.relative_to(ROOT)

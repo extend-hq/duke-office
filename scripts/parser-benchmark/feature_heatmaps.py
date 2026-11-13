@@ -67,7 +67,7 @@ def unscored(engine, key):
         return False
     if engine == 'rustypptx':
         return key in ('shape_positions', 'slide_size', 'hidden_slides', 'comments')
-    return (key in ('shape_positions','slide_size') and engine not in ('rust-pptx','python-pptx')) or (key=='hidden_slides' and engine in ('python-pptx','markitdown')) or (key=='comments' and engine!='rust-pptx')
+    return (key in ('shape_positions','slide_size') and engine not in ('duke-pptx','python-pptx')) or (key=='hidden_slides' and engine in ('python-pptx','markitdown')) or (key=='comments' and engine!='duke-pptx')
 
 
 def matrix(kind, source, output, features, engines, labels, stats, scope, identity, snapshot=False, unscored_features=None):
@@ -118,10 +118,10 @@ def matrix(kind, source, output, features, engines, labels, stats, scope, identi
 
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--docx',type=Path,default=ROOT/'crates/rust-docx/benchmarks/optimized-20261102/accuracy.json');p.add_argument('--pptx',type=Path,required=True);p.add_argument('--output',type=Path,default=ROOT/'output/pptx-benchmark-20261106/readme-preview');p.add_argument('--snapshot',action='store_true',help='label the figures as a measured snapshot instead of a preview');p.add_argument('--pptx-label',default='0.1.5 + local',help='version label for the measured rust-pptx build');args=p.parse_args();args.output.mkdir(parents=True,exist_ok=True)
-    d=json.loads(args.docx.read_text());engines=['docx-core','docx-rs','office_oxide','undoc'];labels=['rust-docx\nNov 2 build',*[e+'\n'+d['versions'][e] for e in engines[1:]]]
+    p=argparse.ArgumentParser();p.add_argument('--docx',type=Path,default=ROOT/'crates/duke-docx/benchmarks/optimized-20261102/accuracy.json');p.add_argument('--pptx',type=Path,required=True);p.add_argument('--output',type=Path,default=ROOT/'output/pptx-benchmark-20261106/readme-preview');p.add_argument('--snapshot',action='store_true',help='label the figures as a measured snapshot instead of a preview');p.add_argument('--pptx-label',default='0.1.5 + local',help='version label for the measured duke-pptx build');args=p.parse_args();args.output.mkdir(parents=True,exist_ok=True)
+    d=json.loads(args.docx.read_text());engines=['docx-core','docx-rs','office_oxide','undoc'];labels=['duke-docx\nNov 2 build',*[e+'\n'+d['versions'][e] for e in engines[1:]]]
     matrix('docx',args.docx,args.output,DOCX,engines,labels,d['docx']['engines'],d['scope'],{**{k:d[k] for k in ['measured_date','measured_commit','binary_sha256','versions']},'display_scope':'1,000 reference inputs · measured '+d['measured_date']},snapshot=args.snapshot)
-    d=json.loads(args.pptx.read_text());engines=d['identity'].get('selected_engines',['rust-pptx','office_oxide','undoc','python-pptx','markitdown']);names={'rust-pptx':'rust-pptx\n'+args.pptx_label,'office_oxide':'office_oxide\n0.1.16','undoc':'undoc\n0.27.3','python-pptx':'python-pptx\n1.0.2','markitdown':'MarkItDown\n0.1.9','pptxboss':'pptxboss-core\n2.3.0','betteroffice':'BetterOffice\n0.5.1','rustypptx':'rustypptx\n0.2.0'};labels=[names[e] for e in engines];summary=d['summary']['rust-pptx']
+    d=json.loads(args.pptx.read_text());engines=d['identity'].get('selected_engines',['duke-pptx','office_oxide','undoc','python-pptx','markitdown']);names={'duke-pptx':'duke-pptx\n'+args.pptx_label,'office_oxide':'office_oxide\n0.1.16','undoc':'undoc\n0.27.3','python-pptx':'python-pptx\n1.0.2','markitdown':'MarkItDown\n0.1.9','pptxboss':'pptxboss-core\n2.3.0','betteroffice':'BetterOffice\n0.5.1','rustypptx':'rustypptx\n0.2.0'};labels=[names[e] for e in engines];summary=d['summary']['duke-pptx']
     scope=f"{summary['total']} attempted OOXML inputs; {summary['reference_total']} source-reference packages. Failed parses count as zero on reference-bearing features. Reference exclusions and unscored adapter dimensions remain explicit. This is the retained {d['phase']} phase, not a benchmark of later code."
     identity={k:(repo_relative(v) if k.endswith('_path') and isinstance(v,str) and Path(v).is_absolute() else v) for k,v in d['identity'].items()}
     matrix('pptx',args.pptx,args.output,PPTX,engines,labels,d['summary'],scope,{**identity,'display_scope':f"{summary['reference_total']} reference packages · {d['phase']} · measured "+datetime.fromtimestamp(d['identity']['start'],timezone.utc).strftime('%Y-%m-%d')},snapshot=args.snapshot)

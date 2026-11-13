@@ -23,7 +23,7 @@ def main():
             for name, value in parts.items():
                 info = zipfile.ZipInfo(name, (2000, 1, 1, 0, 0, 0)); info.compress_type = zipfile.ZIP_DEFLATED
                 archive.writestr(info, value)
-        result = invoke(run / 'candidate', 'rust-pptx', dict(path=str(path)), target / f'depth-{depth}.json.gz', 0)
+        result = invoke(run / 'candidate', 'duke-pptx', dict(path=str(path)), target / f'depth-{depth}.json.gz', 0)
         passed = result['status'] == expected and (expected == 'ok' or result.get('error') == 'resource limit exceeded: XML nesting depth')
         records.append(dict(depth=depth, expected=expected, passed=passed, input_sha256=hashlib.sha256(path.read_bytes()).hexdigest(), result=result))
     summary = dict(total=len(records), passed=sum(r['passed'] for r in records), records=records, candidate_sha256=hashlib.sha256((run / 'candidate').read_bytes()).hexdigest())

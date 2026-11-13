@@ -42,7 +42,7 @@ def main():
             assert digest(Path(row['path'])) == row['sha256']
             engines = list(binaries); rng.shuffle(engines)
             for label in engines:
-                record = invoke(binaries[label], 'rust-pptx', row, '-', 7)
+                record = invoke(binaries[label], 'duke-pptx', row, '-', 7)
                 assert record['status'] == 'ok'
                 record.update(id=row['id'], label=label, load=os.getloadavg()); records.append(record); stream.write(json.dumps(record) + '\n')
             print(row['id'], flush=True)

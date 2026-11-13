@@ -15,7 +15,7 @@ from peer_models import ENGINES as PEER_ENGINES
 
 ROOT=Path(__file__).resolve().parents[2]
 OUT=ROOT/'output/pptx-benchmark-20261106'
-ENGINES=['rust-pptx','office_oxide','undoc','python-pptx','markitdown']
+ENGINES=['duke-pptx','office_oxide','undoc','python-pptx','markitdown']
 
 if __name__=='__main__':
     ap=argparse.ArgumentParser();ap.add_argument('--phase',default='baseline');ap.add_argument('--repeats',type=int,default=5);ap.add_argument('--limit',type=int);ap.add_argument('--legacy',action='store_true');ap.add_argument('--binary',type=Path);ap.add_argument('--manifest',type=Path);ap.add_argument('--split',choices=['tuning','validation','all'],default='all');ap.add_argument('--containers');ap.add_argument('--engines');ap.add_argument('--peer-binary',type=Path);ap.add_argument('--deduplicate-phase');args=ap.parse_args()
@@ -54,7 +54,7 @@ if __name__=='__main__':
     identity['selected_engines']=selected_engines
     identity['selected_ids']=[r['id'] for r in reference]
     identity['rustc']=subprocess.check_output(['rustc','--version'],text=True).strip()
-    identity['source_sha256']={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for folder in ['crates/rust-pptx','crates/rust-office-art','crates/rust-office-charts'] for p in (ROOT/folder).rglob('*.rs')}
+    identity['source_sha256']={str(p.relative_to(ROOT)):hashlib.sha256(p.read_bytes()).hexdigest() for folder in ['crates/duke-pptx','crates/duke-office-art','crates/duke-office-charts'] for p in (ROOT/folder).rglob('*.rs')}
     identity['harness_sha256']={p.name:hashlib.sha256(p.read_bytes()).hexdigest() for p in Path(__file__).parent.iterdir() if p.suffix in ['.py','.toml','.lock','.txt']}
     identity['harness_sha256']['src/main.rs']=hashlib.sha256((Path(__file__).parent/'src/main.rs').read_bytes()).hexdigest()
     if args.peer_binary:

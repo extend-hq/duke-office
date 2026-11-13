@@ -1,6 +1,6 @@
 # OpenDocument font and long-label measurements — 2026-11-13
 
-This round compares unpublished shared Rust changes against commit `e2dc6eea39b529d078395def1540c07a46371fa3`. Runtime changes are confined to `rust-office-charts`; `rust-odf`, `rust-office-art`, and the document adapters consume the shared behavior without downstream patches. No React packages or Rust crates were published.
+This round compares unpublished shared Rust changes against commit `e2dc6eea39b529d078395def1540c07a46371fa3`. Runtime changes are confined to `duke-office-charts`; `duke-odf`, `duke-office-art`, and the document adapters consume the shared behavior without downstream patches. No React packages or Rust crates were published.
 
 ## Changes and scope
 

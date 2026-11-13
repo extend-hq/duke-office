@@ -3,7 +3,7 @@
 `extract_presentation_blocks(&document, &options)` returns a `StructuredPresentation` containing nested blocks and source references. The JavaScript binding is `extract_presentation_blocks(document, options)`; React PPTX exports the asynchronous `extractPresentationBlocks(document, options)` wrapper.
 
 ```rust
-use rust_pptx::{extract_presentation_blocks, ExtractPresentationBlocksOptions};
+use duke_pptx::{extract_presentation_blocks, ExtractPresentationBlocksOptions};
 
 let structured = extract_presentation_blocks(
     &document,
@@ -27,4 +27,4 @@ The geometry resolver distinguishes rendered, partially rendered, unmounted, inv
 
 The WASM extractor deserializes only the identity and text projection. It does not copy image payloads, generated SVG, chart caches or theme data back into WASM.
 
-The block and source-reference API is introduced in rust-pptx and rust-pptx-wasm 0.2.0.
+The block and source-reference API is introduced in duke-pptx and duke-pptx-wasm 0.2.0.

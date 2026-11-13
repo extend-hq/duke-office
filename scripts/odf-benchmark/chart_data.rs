@@ -1,4 +1,4 @@
-use rust_odf::{Body, Limits, OdfDocument};
+use duke_odf::{Body, Limits, OdfDocument};
 use std::{hint::black_box, time::Instant};
 
 fn best<T>(mut f: impl FnMut() -> T) -> f64 {
@@ -16,10 +16,10 @@ fn visit(doc: &OdfDocument, totals: &mut [f64; 3], depth: usize) {
         return;
     }
     if let Body::Chart(chart) = &doc.body {
-        let direct = || rust_office_charts::odf::extract_chart_data(black_box(chart));
+        let direct = || duke_office_charts::odf::extract_chart_data(black_box(chart));
         let roundtrip = || {
-            rust_office_charts::odf::chart_xml(black_box(chart))
-                .and_then(|xml| rust_office_charts::parse_chart_xml(&xml))
+            duke_office_charts::odf::chart_xml(black_box(chart))
+                .and_then(|xml| duke_office_charts::parse_chart_xml(&xml))
         };
         assert_eq!(direct(), roundtrip());
         let a = best(roundtrip);

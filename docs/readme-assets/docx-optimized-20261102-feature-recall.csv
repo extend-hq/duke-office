@@ -1,4 +1,4 @@
-feature,expected_units,"rust-docx
+feature,expected_units,"duke-docx
 Nov 2 build","docx-rs
 0.4.22","office_oxide
 0.1.15","undoc
