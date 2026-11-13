@@ -5,7 +5,7 @@ use roxmltree::Node;
 use super::chart_colors::ChartColors;
 use super::chart_svg::{
     date_label, font_family, font_size, format_value, line, number, on, text, text_props,
-    text_width, text_width_for, val,
+    text_width, val,
 };
 use crate::chart::{chart_node, child, ChartData};
 
@@ -18,12 +18,12 @@ struct Bounds {
 }
 
 fn fit_radar_labels(
-    mut available: Bounds,
+    available: Bounds,
     canvas: Bounds,
     labels: &[(f64, f64, f64)],
-    size: f64,
+    metrics: (f64, f64),
     gap: f64,
-) -> Bounds {
+) -> (Bounds, Bounds) {
     let extent = |radius: f64| {
         let mut b = Bounds {
             left: -radius,
@@ -33,15 +33,7 @@ fn fit_radar_labels(
         };
         for &(dx, dy, width) in labels {
             let x = dx * (radius + gap);
-            let y = dy * (radius + gap)
-                + size
-                    * if dy < -0.1 {
-                        -0.2
-                    } else if dy > 0.1 {
-                        0.65
-                    } else {
-                        0.3
-                    };
+            let y = dy * (radius + gap) + polar_baseline(dy, metrics);
             let left = x - if dx < -0.1 {
                 width
             } else if dx > 0.1 {
@@ -51,23 +43,15 @@ fn fit_radar_labels(
             };
             b.left = b.left.min(left);
             b.right = b.right.max(left + width);
-            b.top = b.top.min(y - size * 0.8);
-            b.bottom = b.bottom.max(y + size * 0.2);
+            b.top = b.top.min(y - metrics.0);
+            b.bottom = b.bottom.max(y + metrics.1);
         }
         b
     };
-    let minimum = extent(0.);
-    if minimum.right - minimum.left > available.right - available.left {
-        available.left = canvas.left;
-        available.right = canvas.right;
-    }
-    if minimum.bottom - minimum.top > available.bottom - available.top {
-        available.top = canvas.top;
-        available.bottom = canvas.bottom;
-    }
     let width = (available.right - available.left).max(0.);
     let height = (available.bottom - available.top).max(0.);
-    let (mut low, mut high) = (0., width.min(height) / 2.);
+    let minimum_radius = width.min(height) / 6.;
+    let (mut low, mut high) = (minimum_radius, width.min(height) / 2.);
     for _ in 0..20 {
         let middle = (low + high) / 2.;
         let e = extent(middle);
@@ -78,23 +62,66 @@ fn fit_radar_labels(
         }
     }
     let e = extent(low);
-    let cx = (available.left + available.right - e.left - e.right) / 2.;
+    let preferred = (available.left + available.right - e.left - e.right) / 2.;
+    let first = canvas.left + (canvas.right - canvas.left) * 0.02 - e.left;
+    let last = canvas.right - (canvas.right - canvas.left) * 0.02 - e.right;
+    let cx = if first <= last {
+        preferred.clamp(first, last)
+    } else {
+        let (mut lo, mut hi) = (preferred.min(last), preferred.max(first));
+        for _ in 0..20 {
+            let mid = (lo + hi) / 2.;
+            let gradient = (mid + e.left - canvas.left).min(0.)
+                + (mid + e.right - canvas.right).max(0.)
+                + (mid - preferred) * 0.5;
+            if gradient > 0. {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        (lo + hi) / 2.
+    };
     let cy = (available.top + available.bottom - e.top - e.bottom) / 2.;
-    Bounds {
+    let plot = Bounds {
         left: cx - low,
         right: cx + low,
         top: cy - low,
         bottom: cy + low,
+    };
+    let view = Bounds {
+        left: canvas.left.min(cx + e.left),
+        right: canvas.right.max(cx + e.right),
+        top: canvas.top.min(cy + e.top),
+        bottom: canvas.bottom.max(cy + e.bottom),
+    };
+    (plot, view)
+}
+
+fn polar_baseline(dy: f64, (ascent, descent): (f64, f64)) -> f64 {
+    if dy < -0.1 {
+        -descent
+    } else if dy > 0.1 {
+        ascent
+    } else {
+        (ascent - descent) / 2.
     }
 }
 
-fn odf_radar_text_width(label: &str, size: f64, family: &str) -> f64 {
-    let family = if family.eq_ignore_ascii_case("Liberation Sans") {
+fn odf_radar_text_width(label: &str, size: f64, family: &str, bold: bool, italic: bool) -> f64 {
+    let primary = family
+        .split(',')
+        .next()
+        .unwrap_or(family)
+        .trim()
+        .trim_matches(['\'', '"']);
+    let family = if primary.eq_ignore_ascii_case("Liberation Sans") {
         "Arimo"
     } else {
         family
     };
-    text_width_for(label, size, family)
+    super::font_metrics::width(label, size.round(), family, bold, italic)
+        .unwrap_or_else(|| text_width(label, size.round()))
 }
 
 fn radar_category_label(category: Option<Node>, label: &str) -> String {
@@ -326,6 +353,8 @@ struct AxisText {
     size: f64,
     family: String,
     ink: Option<String>,
+    bold: bool,
+    italic: bool,
 }
 
 impl AxisText {
@@ -345,13 +374,38 @@ impl AxisText {
             size: font_size(props, size),
             family: font_family(props, face),
             ink: text_ink(props, colors),
+            bold: colors.opendocument_defaults && on(props.and_then(|p| p.attribute("b"))),
+            italic: colors.opendocument_defaults && on(props.and_then(|p| p.attribute("i"))),
         }
+    }
+    fn vertical_metrics(&self) -> (f64, f64) {
+        let (ascent, descent) = super::odf_text::vertical_metrics(&self.family);
+        (ascent * self.size, descent * self.size)
+    }
+
+    fn begin(&self, svg: &mut String) {
+        begin_ink(svg, &self.ink);
+        if self.bold {
+            svg.push_str(r#"<g font-weight="bold">"#);
+        }
+        if self.italic {
+            svg.push_str(r#"<g font-style="italic">"#);
+        }
+    }
+
+    fn end(&self, svg: &mut String) {
+        if self.italic {
+            svg.push_str("</g>");
+        }
+        if self.bold {
+            svg.push_str("</g>");
+        }
+        end_ink(svg, &self.ink);
     }
 }
 
 fn text_ink(props: Option<Node>, colors: &ChartColors) -> Option<String> {
-    colors
-        .spreadsheet_defaults
+    (colors.spreadsheet_defaults || colors.opendocument_defaults)
         .then(|| colors.shape_fill(props?))
         .flatten()
 }
@@ -538,7 +592,8 @@ struct StockRange {
 
 struct Plot<'a> {
     bounds: Bounds,
-    canvas_height: f64,
+    label_gap: f64,
+    automatic_labels: bool,
     series: Vec<Node<'a, 'a>>,
     group: Node<'a, 'a>,
     category: Option<Node<'a, 'a>>,
@@ -594,9 +649,20 @@ impl Plot<'_> {
         let grid = grid_stroke(self.value, colors);
         let grid_stride = self.count.div_ceil(4096);
         if let Some(stroke) = grid {
-            if colors.spreadsheet_defaults {
-                let width =
-                    line_width(self.value.and_then(|n| child(n, "majorGridlines")), 2. / 3.);
+            if colors.spreadsheet_defaults || colors.opendocument_defaults {
+                let width = line_width(
+                    self.value.and_then(|n| child(n, "majorGridlines")),
+                    if colors.opendocument_defaults {
+                        0.16
+                    } else {
+                        2. / 3.
+                    },
+                );
+                let width = if colors.opendocument_defaults && width <= 0.16 {
+                    1.
+                } else {
+                    width
+                };
                 write!(svg, r#"<g stroke-width="{width:.2}">"#).unwrap();
             }
             for tick in scale.ticks() {
@@ -611,13 +677,14 @@ impl Plot<'_> {
                 }
                 write!(svg, r#"<path d="{path}Z" fill="none" stroke="{stroke}"/>"#).unwrap();
             }
-            if colors.spreadsheet_defaults {
+            if colors.spreadsheet_defaults || colors.opendocument_defaults {
                 svg.push_str("</g>");
             }
         }
         if colors.opendocument_defaults && axis_visible(self.value, colors) {
             let (_, stroke) = paint(self.value, colors, "none", "#000000");
-            let width = line_width(self.value, 1.);
+            let width = line_width(self.value, 0.16);
+            let width = if width <= 0.16 { 1. } else { width };
             if stroke != "none" {
                 write!(svg, r#"<g stroke-width="{width:.2}">"#).unwrap();
                 for index in (0..self.count).step_by(grid_stride as usize).take(512) {
@@ -655,7 +722,7 @@ impl Plot<'_> {
         let foreground_grid = colors.legacy_defaults().then(|| svg.split_off(grid_start));
         if radial_labels {
             let font = self.value_text.size;
-            begin_ink(svg, &self.value_text.ink);
+            self.value_text.begin(svg);
             let tick_step = radius * scale.step / (scale.high - scale.low);
             let label_stride = if colors.opendocument_defaults {
                 (font * 1.4 / tick_step.max(1.)).ceil().clamp(1., 128.) as usize
@@ -682,10 +749,10 @@ impl Plot<'_> {
                     &axis_number(self.value, n),
                 );
             }
-            end_ink(svg, &self.value_text.ink);
+            self.value_text.end(svg);
         }
         if category_labels {
-            begin_ink(svg, &self.category_text.ink);
+            self.category_text.begin(svg);
             if let Some(first) = data.series.first() {
                 for p in first
                     .points
@@ -711,19 +778,22 @@ impl Plot<'_> {
                         let dx = (x - cx) / radius.max(1.);
                         let dy = (y - cy) / radius.max(1.);
                         if colors.opendocument_defaults {
-                            let gap = self.canvas_height / 15.;
+                            let gap = self.label_gap;
                             text(
                                 svg,
                                 x + dx * gap,
                                 y + dy * gap
-                                    + font
-                                        * if dy < -0.1 {
+                                    + if self.automatic_labels {
+                                        polar_baseline(dy, self.category_text.vertical_metrics())
+                                    } else {
+                                        font * if dy < -0.1 {
                                             -0.2
                                         } else if dy > 0.1 {
                                             0.65
                                         } else {
                                             0.3
-                                        },
+                                        }
+                                    },
                                 if dx > 0.1 {
                                     "start"
                                 } else if dx < -0.1 {
@@ -759,7 +829,7 @@ impl Plot<'_> {
                     }
                 }
             }
-            end_ink(svg, &self.category_text.ink);
+            self.category_text.end(svg);
         }
         let filled = val(Some(self.group), "radarStyle") == Some("filled");
         let foreground_axes =
@@ -923,7 +993,7 @@ impl Plot<'_> {
             }
             if axis_visible(self.value, colors) && val(self.value, "tickLblPos") != Some("none") {
                 let label = axis_number(self.value, n);
-                begin_ink(svg, &self.value_text.ink);
+                self.value_text.begin(svg);
                 text(
                     svg,
                     b.left
@@ -938,7 +1008,7 @@ impl Plot<'_> {
                     &self.value_text.family,
                     &label,
                 );
-                end_ink(svg, &self.value_text.ink);
+                self.value_text.end(svg);
             }
         }
         if colors.spreadsheet_defaults {
@@ -1010,7 +1080,7 @@ impl Plot<'_> {
                 .and_then(|axis| child(axis, "numFmt"))
                 .and_then(|node| node.attribute("formatCode"))
                 .filter(|code| colors.spreadsheet_defaults || !code.contains('\\'));
-            begin_ink(svg, &self.category_text.ink);
+            self.category_text.begin(svg);
             if let Some(first) = data.series.first() {
                 for p in &first.points {
                     if let Some(c) = p.categories.first() {
@@ -1048,7 +1118,7 @@ impl Plot<'_> {
                     }
                 }
             }
-            end_ink(svg, &self.category_text.ink);
+            self.category_text.end(svg);
         }
         let high_low = child(self.group, "hiLowLines");
         if let Some(node) = high_low {
@@ -1199,11 +1269,28 @@ pub(super) fn render(
     let side = matches!(position, "r" | "tr" | "l");
     let legend_props = text_props(legend, false).or(base);
     let legend_font = font_size(legend_props, font);
+    let legend_text = AxisText::new(legend, base, font, minor_latin.unwrap_or("Cambria"), colors);
     let filled = val(Some(group), "radarStyle") == Some("filled");
     let manual_plot = child(plot, "layout").and_then(|n| child(n, "manualLayout"));
     let odf_auto = colors.opendocument_defaults
         && !stock
         && (manual_plot.is_none() || val(manual_plot, "layoutTarget") == Some("outer"));
+    let title_family = font_family(title_props, minor_latin.unwrap_or("Cambria"));
+    let title_metrics = super::odf_text::vertical_metrics(&title_family);
+    let title_margin = height * 0.02 + 1.35 * 96. / 25.4;
+    let odf_title_lines = if odf_auto {
+        title_text.map(|label| {
+            super::chart_svg::title_lines_styled(
+                label,
+                title_font,
+                width * 0.8,
+                super::odf_text::metric_family(&title_family),
+                on(title_props.and_then(|p| p.attribute("b"))),
+            )
+        })
+    } else {
+        None
+    };
     let legend_face = font_family(legend_props, minor_latin.unwrap_or("Cambria"));
     let odf_text_gap = (96. / 25.4_f64).max(legend_font * 0.22);
 
@@ -1247,7 +1334,14 @@ pub(super) fn render(
                 .clone()
                 .unwrap_or_else(|| format!("Series {}", i + 1));
             let length = if odf_auto {
-                key + odf_text_gap + odf_radar_text_width(&name, legend_font, &legend_face)
+                key + odf_text_gap
+                    + odf_radar_text_width(
+                        &name,
+                        legend_font,
+                        &legend_face,
+                        legend_text.bold,
+                        legend_text.italic,
+                    )
             } else {
                 key + 2.7 + text_width(&name, legend_font)
             };
@@ -1328,11 +1422,16 @@ pub(super) fn render(
         }
     });
     if title_reserved {
-        bounds.top += if stock && colors.spreadsheet_defaults {
-            14.
+        bounds.top += if let Some(lines) = &odf_title_lines {
+            title_margin
+                + title_font * (0.6 + (title_metrics.0 + title_metrics.1) * lines.len() as f64)
         } else {
-            12.
-        } + 1.16 * title_font;
+            (if stock && colors.spreadsheet_defaults {
+                14.
+            } else {
+                12.
+            }) + 1.16 * title_font
+        };
     }
     if legend.is_some()
         && val(legend, "overlay").map_or(legacy || colors.spreadsheet_defaults, |v| {
@@ -1429,10 +1528,6 @@ pub(super) fn render(
     } else {
         40. / 3.
     };
-    let (bg, border) = paint(Some(root), colors, "white", "#868686");
-    let mut svg = format!(
-        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}"><rect width="100%" height="100%" rx="{rounded:.2}" fill="{bg}" stroke="{border}"/>"#
-    );
     let count = data
         .series
         .iter()
@@ -1449,6 +1544,17 @@ pub(super) fn render(
                 .max()
                 .unwrap_or(1),
         );
+    let label_gap = if odf_auto {
+        (bounds.bottom - bounds.top) / 15.
+    } else {
+        height / 15.
+    };
+    let mut view = Bounds {
+        left: 0.,
+        right: width,
+        top: 0.,
+        bottom: height,
+    };
     if odf_auto {
         let reverse =
             val(category.and_then(|n| child(n, "scaling")), "orientation") == Some("maxMin");
@@ -1466,28 +1572,44 @@ pub(super) fn render(
                                 &radar_category_label(category, &label.label),
                                 category_text.size,
                                 &category_text.family,
+                                category_text.bold,
+                                category_text.italic,
                             ),
                         ));
                     }
                 }
             }
         }
-        bounds = fit_radar_labels(
+        (bounds, view) = fit_radar_labels(
             bounds,
-            Bounds {
-                left: width * 0.02,
-                right: width * 0.98,
-                top: bounds.top,
-                bottom: bounds.bottom,
-            },
+            view,
             &labels,
-            category_text.size,
-            height / 15.,
+            category_text.vertical_metrics(),
+            label_gap,
         );
     }
+    let (bg, border) = paint(Some(root), colors, "white", "#868686");
+    let mut svg = if odf_auto {
+        format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="{} {} {} {}" preserveAspectRatio="none"><rect x="{}" y="{}" width="{}" height="{}" rx="{rounded:.2}" fill="{bg}" stroke="{border}"/>"#,
+            view.left,
+            view.top,
+            view.right - view.left,
+            view.bottom - view.top,
+            view.left,
+            view.top,
+            view.right - view.left,
+            view.bottom - view.top,
+        )
+    } else {
+        format!(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" viewBox="0 0 {width} {height}"><rect width="100%" height="100%" rx="{rounded:.2}" fill="{bg}" stroke="{border}"/>"#
+        )
+    };
     let spec = Plot {
         bounds,
-        canvas_height: height,
+        label_gap,
+        automatic_labels: odf_auto,
         group,
         series,
         category,
@@ -1549,29 +1671,47 @@ pub(super) fn render(
             width,
             height,
             title_font,
-            10.6 + title_font * 0.92,
+            if odf_auto {
+                title_margin + title_font * (title_metrics.0 + 0.3)
+            } else {
+                10.6 + title_font * 0.92
+            },
         );
-        text(
-            &mut svg,
-            title_x
-                + if legacy && shortened != label {
-                    title_font * 0.35
-                } else {
-                    0.
-                },
-            title_y,
-            anchor,
-            title_font,
-            &font_family(
-                title_props,
-                if automatic_font {
-                    "Arial"
-                } else {
-                    minor_latin.unwrap_or("Cambria")
-                },
-            ),
-            &shortened,
-        );
+        if let Some(lines) = &odf_title_lines {
+            for (index, line) in lines.iter().enumerate() {
+                text(
+                    &mut svg,
+                    title_x,
+                    title_y + index as f64 * title_font * (title_metrics.0 + title_metrics.1),
+                    anchor,
+                    title_font,
+                    &title_family,
+                    line,
+                );
+            }
+        } else {
+            text(
+                &mut svg,
+                title_x
+                    + if legacy && shortened != label {
+                        title_font * 0.35
+                    } else {
+                        0.
+                    },
+                title_y,
+                anchor,
+                title_font,
+                &font_family(
+                    title_props,
+                    if automatic_font {
+                        "Arial"
+                    } else {
+                        minor_latin.unwrap_or("Cambria")
+                    },
+                ),
+                &shortened,
+            );
+        }
         if bold {
             svg.push_str("</g>");
         }
@@ -1710,6 +1850,9 @@ pub(super) fn render(
                     &colors.marker_outline(i, None),
                 );
             }
+            if colors.opendocument_defaults {
+                legend_text.begin(&mut svg);
+            }
             text(
                 &mut svg,
                 x + key + odf_legend.as_ref().map_or(2.7, |l| l.text_gap),
@@ -1729,6 +1872,9 @@ pub(super) fn render(
                     &face,
                     &next,
                 );
+            }
+            if colors.opendocument_defaults {
+                legend_text.end(&mut svg);
             }
             colors.end_hit(&mut svg);
             if side {

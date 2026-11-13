@@ -11,6 +11,7 @@ mod chart_svg;
 mod chartex;
 mod colors;
 mod font_metrics;
+mod odf_text;
 #[cfg(feature = "extended-charts")]
 mod pie_chart;
 #[cfg(feature = "extended-charts")]
@@ -24,11 +25,22 @@ type ThemeColorMap = std::collections::HashMap<String, String>;
 
 /// Render a chart part. Returns `None` when the XML cannot be rendered.
 pub fn render_chart(xml: &str, options: &RenderOptions<'_>) -> Option<RenderedChart> {
+    render_chart_with_data(xml, options, None)
+}
+
+pub(crate) fn render_chart_with_data(
+    xml: &str,
+    options: &RenderOptions<'_>,
+    data: Option<crate::ChartData>,
+) -> Option<RenderedChart> {
     let document = roxmltree::Document::parse(xml).ok()?;
     let root = document.root_element();
-    let data = match options.data {
-        Some(data) => data.clone(),
-        None => crate::chart::chart_data_from_root(root)?,
+    let data = match data {
+        Some(data) => data,
+        None => match options.data {
+            Some(data) => data.clone(),
+            None => crate::chart::chart_data_from_root(root)?,
+        },
     };
     let colors = ChartColors::new(root, options, &data);
     let width = options
@@ -84,6 +96,9 @@ pub fn render_chart(xml: &str, options: &RenderOptions<'_>) -> Option<RenderedCh
     }?;
     let mut svg = art::expand_effects(colors.with_definitions(svg));
     chart_drawing::append(&mut svg, root, options, &colors, width, height);
+    if options.opendocument_defaults {
+        svg = odf_text::constrain_widths(svg);
+    }
     Some(RenderedChart { svg, data })
 }
 

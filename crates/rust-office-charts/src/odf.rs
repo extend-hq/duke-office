@@ -88,7 +88,7 @@ fn paint(out: &mut String, props: &Props, default: Option<&str>, chart: &Chart) 
         out,
         "<a:ln w=\"{}\">",
         p.stroke_width
-            .map_or(9525, |w| if w.0 <= 0 { 9525 } else { w.0 })
+            .map_or(1524, |w| if w.0 <= 0 { 1524 } else { w.0 })
     );
     if p.stroke == Some(Stroke::None) || (p.stroke.is_none() && p.stroke_color.is_none()) {
         out.push_str("<a:noFill/>");
@@ -176,7 +176,7 @@ fn title(
 ) {
     let _ = write!(out, "<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:t>{}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val=\"0\"/>", escaped(text));
     position_layout(out, position, chart);
-    text_properties(out, props, 14.0);
+    text_properties(out, props, 13.0);
     out.push_str("</c:title>");
 }
 
@@ -720,7 +720,8 @@ pub fn render_chart(chart: &Chart, width: f64, height: f64) -> Option<RenderedCh
         .map(|v| v.0 as f64 / 9525.0)
         .filter(|v| *v > 0.0 && *v <= 1_000_000.0)
         .unwrap_or(height);
-    crate::render_chart(
+    let data = extract_chart_data(chart)?;
+    crate::parse::render_chart_with_data(
         &xml,
         &RenderOptions {
             width: Some(width),
@@ -732,5 +733,6 @@ pub fn render_chart(chart: &Chart, width: f64, height: f64) -> Option<RenderedCh
             }),
             ..Default::default()
         },
+        Some(data),
     )
 }

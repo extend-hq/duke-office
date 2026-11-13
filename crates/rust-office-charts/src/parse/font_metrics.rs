@@ -24,6 +24,13 @@ pub(super) fn width(text: &str, size: f64, family: &str, bold: bool, italic: boo
     let mut advance = 0_u64;
     for character in text.chars() {
         let cp = character as u32;
+        if (32..=126).contains(&cp) {
+            let index = (cp - 30) as usize;
+            if index < count && codepoint(data, index) == cp {
+                advance += u64::from(u16_at(data, start + index * 2));
+                continue;
+            }
+        }
         let (mut low, mut high) = (0, count);
         while low < high {
             let mid = (low + high) / 2;
