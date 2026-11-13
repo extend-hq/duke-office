@@ -51,6 +51,7 @@ pub(crate) fn render_chart_with_data(
         .height
         .filter(|v| v.is_finite() && *v > 0.)
         .unwrap_or(360.);
+    let mut portable_polar_text = false;
     let svg = if root.has_tag_name((crate::chart::CHARTEX_NS, "chartSpace")) {
         #[cfg(feature = "extended-charts")]
         {
@@ -71,6 +72,7 @@ pub(crate) fn render_chart_with_data(
                 None
             }
         })?;
+        portable_polar_text = kind == "radar";
         let render = match kind {
             "bar" | "line" | "area" | "scatter" => cartesian_chart::render,
             #[cfg(feature = "extended-charts")]
@@ -97,7 +99,7 @@ pub(crate) fn render_chart_with_data(
     let mut svg = art::expand_effects(colors.with_definitions(svg));
     chart_drawing::append(&mut svg, root, options, &colors, width, height);
     if options.opendocument_defaults {
-        svg = odf_text::constrain_widths(svg);
+        svg = odf_text::constrain_widths(svg, portable_polar_text);
     }
     Some(RenderedChart { svg, data })
 }

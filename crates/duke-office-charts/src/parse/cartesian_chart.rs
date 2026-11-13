@@ -1601,7 +1601,44 @@ fn draw_legend(
     if entries.is_empty() {
         return;
     }
-    let key_width = legend_key_width(entries, size, colors.spreadsheet_defaults);
+    let odf_key = (colors.opendocument_defaults
+        && matches!(pos, "l" | "r")
+        && legend
+            .and_then(|n| child(n, "layout"))
+            .and_then(|n| child(n, "manualLayout"))
+            .is_none())
+    .then(|| {
+        if entries
+            .iter()
+            .any(|e| chart_node(e.group, "lineChart") || chart_node(e.group, "scatterChart"))
+        {
+            8. * 96. / 25.4
+        } else {
+            size * 0.6
+        }
+    })
+    .filter(|key| {
+        entries
+            .iter()
+            .all(|e| key + size * 0.22 + text_width_for(&e.label, size, face) <= width * 0.31)
+    });
+    let odf_side = odf_key.is_some();
+    let key_width =
+        odf_key.unwrap_or_else(|| legend_key_width(entries, size, colors.spreadsheet_defaults));
+    let odf_layout = odf_side.then(|| {
+        super::odf_text::LegendLayout::side(
+            width,
+            height,
+            size,
+            face,
+            key_width,
+            entries.iter().map(|e| {
+                super::odf_text::label_width(&e.label, size, face, false, false)
+                    .unwrap_or_else(|| text_width_for(&e.label, size, face))
+            }),
+            pos == "l",
+        )
+    });
     let extents = entries
         .iter()
         .map(|e| key_width + size * 0.22 + text_width_for(&e.label, size, face))
@@ -1660,6 +1697,9 @@ fn draw_legend(
             .unwrap_or_else(|| "none".into());
         write!(svg, r#"<rect x="{x:.2}" y="{y:.2}" width="{w:.2}" height="{h:.2}" fill="{fill}" stroke="{stroke}"/>"#).unwrap();
     }
+    if let Some(l) = &odf_layout {
+        l.frame(svg, legend, colors);
+    }
     for (j, e) in entries.iter().enumerate() {
         write!(svg, r#"<g data-docx-series="{}""#, e.index).unwrap();
         if colors.interactive {
@@ -1713,6 +1753,10 @@ fn draw_legend(
                     0.
                 };
         }
+        if let Some(l) = &odf_layout {
+            x = l.left + l.padding_x;
+            y = l.top + l.padding_y + l.line_height / 2. + j as f64 * l.step;
+        }
         let is_line = chart_node(e.group, "lineChart") || chart_node(e.group, "scatterChart");
         let paint = marks::legend_color(e.group, e.ser, e.index, e.point, e.value, colors, is_line);
         if let Some(trendline) = e.trendline {
@@ -1726,7 +1770,15 @@ fn draw_legend(
                 false,
             );
         } else if is_line {
-            write!(svg,r#"<path d="M{x:.2} {y:.2}h{key_width:.2}" fill="none" stroke="{paint}" stroke-width="3"/>"#).unwrap();
+            let line_width = if odf_side {
+                child(e.ser, "spPr")
+                    .and_then(|n| child(n, "ln"))
+                    .and_then(|n| number(n.attribute("w")))
+                    .map_or(1., |v| v / 9525.)
+            } else {
+                3.
+            };
+            write!(svg,r#"<path d="M{x:.2} {y:.2}h{key_width:.2}" fill="none" stroke="{paint}" stroke-width="{line_width:.2}"/>"#).unwrap();
             let style = val(Some(e.group), "scatterStyle").unwrap_or("");
             let glyph_index = e.point.map_or_else(
                 || {
@@ -1748,7 +1800,7 @@ fn draw_legend(
                 super::chart_svg::marker(svg, (mid, y), &default_marker, r, &fill, &outline, 1.);
             }
         } else {
-            let h = size * 0.528;
+            let h = size * if odf_side { 0.6 } else { 0.528 };
             let border = colors.outline(e.index, e.point).unwrap_or_else(|| {
                 if chart_node(e.group, "barChart")
                     && e.value.is_some_and(|v| v < 0.)
@@ -1764,8 +1816,12 @@ fn draw_legend(
         for (k, label) in lines[j].iter().enumerate() {
             text(
                 svg,
-                x + key_width + size * 0.22,
-                y + size * (0.3 + 1.22 * k as f64),
+                x + key_width + odf_layout.as_ref().map_or(size * 0.22, |l| l.text_gap),
+                y + odf_layout
+                    .as_ref()
+                    .map_or(size * (0.3 + 1.22 * k as f64), |l| {
+                        l.ascent - l.line_height / 2.
+                    }),
                 "start",
                 size,
                 face,

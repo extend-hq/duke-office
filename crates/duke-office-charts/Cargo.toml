@@ -19,6 +19,7 @@ duke-odf = { version = "=0.2.1", path = "../duke-odf" }
 base64 = { version = "0.22", optional = true }
 miniz_oxide = { version = "0.8", optional = true }
 roxmltree = "0.20"
+quick-xml.workspace = true
 duke-office-art = { version = "=0.1.10", path = "../duke-office-art" }
 svgtypes = { version = "0.16.1", default-features = false, features = ["libm"] }
 kurbo = { version = "0.13", default-features = false, features = ["libm"] }

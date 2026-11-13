@@ -65,7 +65,7 @@ fn fit_radar_labels(
     let preferred = (available.left + available.right - e.left - e.right) / 2.;
     let first = canvas.left + (canvas.right - canvas.left) * 0.02 - e.left;
     let last = canvas.right - (canvas.right - canvas.left) * 0.02 - e.right;
-    let cx = if first <= last {
+    let cx = if first <= last && e.right - e.left + gap <= canvas.right - canvas.left {
         preferred.clamp(first, last)
     } else {
         let (mut lo, mut hi) = (preferred.min(last), preferred.max(first));

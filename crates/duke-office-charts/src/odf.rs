@@ -106,20 +106,27 @@ fn paint(out: &mut String, props: &Props, default: Option<&str>, chart: &Chart) 
     out.push_str("</a:ln></c:spPr>");
 }
 
-fn numbers(out: &mut String, role: &str, values: &[Option<f64>], raw: &[Option<String>]) {
+fn numbers<const INCLUDE_POINTS: bool>(
+    out: &mut String,
+    role: &str,
+    values: &[Option<f64>],
+    raw: &[Option<String>],
+) {
     let _ = write!(
         out,
         "<c:{role}><c:numLit><c:formatCode>General</c:formatCode><c:ptCount val=\"{}\"/>",
         values.len()
     );
-    for (i, value) in values.iter().enumerate() {
-        if let Some(v) = value.filter(|v| v.is_finite()) {
-            let v = raw
-                .get(i)
-                .and_then(Option::as_deref)
-                .map(escaped)
-                .unwrap_or_else(|| v.to_string());
-            let _ = write!(out, "<c:pt idx=\"{i}\"><c:v>{v}</c:v></c:pt>");
+    if INCLUDE_POINTS {
+        for (i, value) in values.iter().enumerate() {
+            if let Some(v) = value.filter(|v| v.is_finite()) {
+                let v = raw
+                    .get(i)
+                    .and_then(Option::as_deref)
+                    .map(escaped)
+                    .unwrap_or_else(|| v.to_string());
+                let _ = write!(out, "<c:pt idx=\"{i}\"><c:v>{v}</c:v></c:pt>");
+            }
         }
     }
     let _ = write!(out, "</c:numLit></c:{role}>");
@@ -183,6 +190,10 @@ fn title(
 /// Builds the shared renderer's input, without converting the host document.
 /// Stored data remains available even when native artwork is unsupported.
 pub fn chart_xml(chart: &Chart) -> Option<String> {
+    chart_xml_impl::<true>(chart)
+}
+
+fn chart_xml_impl<const INCLUDE_POINTS: bool>(chart: &Chart) -> Option<String> {
     let main_kind = kind(&chart.class)?;
     if chart.series.is_empty() {
         return None;
@@ -361,8 +372,8 @@ pub fn chart_xml(chart: &Chart) -> Option<String> {
                     .get(usize::from(k == "bubble"))
                     .map(Vec::as_slice)
                     .unwrap_or(&[]);
-                numbers(&mut out, "xVal", x.unwrap_or(&automatic), raw_x);
-                numbers(
+                numbers::<INCLUDE_POINTS>(&mut out, "xVal", x.unwrap_or(&automatic), raw_x);
+                numbers::<INCLUDE_POINTS>(
                     &mut out,
                     "yVal",
                     if k == "bubble" {
@@ -377,7 +388,12 @@ pub fn chart_xml(chart: &Chart) -> Option<String> {
                     },
                 );
                 if k == "bubble" {
-                    numbers(&mut out, "bubbleSize", &series.values, &series.raw_values);
+                    numbers::<INCLUDE_POINTS>(
+                        &mut out,
+                        "bubbleSize",
+                        &series.values,
+                        &series.raw_values,
+                    );
                 }
             } else {
                 let _ = write!(
@@ -385,15 +401,17 @@ pub fn chart_xml(chart: &Chart) -> Option<String> {
                     "<c:cat><c:strLit><c:ptCount val=\"{}\"/>",
                     chart.categories.len()
                 );
-                for (i, category) in chart.categories.iter().enumerate() {
-                    let _ = write!(
-                        out,
-                        "<c:pt idx=\"{i}\"><c:v>{}</c:v></c:pt>",
-                        escaped(category)
-                    );
+                if INCLUDE_POINTS {
+                    for (i, category) in chart.categories.iter().enumerate() {
+                        let _ = write!(
+                            out,
+                            "<c:pt idx=\"{i}\"><c:v>{}</c:v></c:pt>",
+                            escaped(category)
+                        );
+                    }
                 }
                 out.push_str("</c:strLit></c:cat>");
-                numbers(&mut out, "val", &series.values, &series.raw_values);
+                numbers::<INCLUDE_POINTS>(&mut out, "val", &series.values, &series.raw_values);
             }
             let _ = write!(
                 out,
@@ -709,7 +727,7 @@ pub fn render_chart(chart: &Chart, width: f64, height: f64) -> Option<RenderedCh
     {
         return None;
     }
-    let xml = chart_xml(chart)?;
+    let xml = chart_xml_impl::<false>(chart)?;
     let width = chart
         .width
         .map(|v| v.0 as f64 / 9525.0)
