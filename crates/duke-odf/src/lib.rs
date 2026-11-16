@@ -16,6 +16,7 @@ mod package;
 pub mod style;
 pub mod text;
 pub mod units;
+pub mod vector_text;
 mod xml;
 
 pub use document::{Body, EmbeddedObject, Metadata, OdfDocument, Page};

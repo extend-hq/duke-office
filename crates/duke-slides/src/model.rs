@@ -276,6 +276,18 @@ pub enum SlideNode {
 }
 
 impl SlideNode {
+    pub fn text_content(&self) -> Option<&ObjectText> {
+        match self {
+            Self::Shape { metadata, .. }
+            | Self::Image { metadata, .. }
+            | Self::Group { metadata, .. }
+            | Self::Table { metadata, .. }
+            | Self::Chart { metadata, .. }
+            | Self::Media { metadata, .. }
+            | Self::Unknown { metadata, .. } => metadata.as_ref()?.text_content.as_deref(),
+        }
+    }
+
     pub fn metadata_mut(&mut self) -> &mut NodeMetadata {
         match self {
             Self::Shape { metadata, .. }
@@ -303,6 +315,9 @@ pub struct InkContent {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeMetadata {
+    /// Text recovered from object content, separate from accessibility descriptions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_content: Option<Box<ObjectText>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub editing: Option<Box<ObjectEditing>>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -325,6 +340,16 @@ pub struct NodeMetadata {
     pub hover_action: Option<Box<ObjectAction>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_part: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ObjectText {
+    pub text: String,
+    pub source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_part: Option<String>,
+    pub partial: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

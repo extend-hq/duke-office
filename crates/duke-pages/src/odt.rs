@@ -436,11 +436,16 @@ struct SectionLayout {
 
 /// Receives the blocks of a story: the body, a note or a table cell.
 trait Sink {
+    fn with_capacity(capacity: usize) -> Self;
     fn paragraph(&mut self, node: ParagraphNode);
     fn table(&mut self, node: TableNode);
 }
 
 impl Sink for Vec<DocNode> {
+    fn with_capacity(capacity: usize) -> Self {
+        Vec::with_capacity(capacity)
+    }
+
     fn paragraph(&mut self, node: ParagraphNode) {
         self.push(DocNode::Paragraph(node));
     }
@@ -451,6 +456,10 @@ impl Sink for Vec<DocNode> {
 }
 
 impl Sink for Vec<TableCellContentNode> {
+    fn with_capacity(capacity: usize) -> Self {
+        Vec::with_capacity(capacity)
+    }
+
     fn paragraph(&mut self, node: ParagraphNode) {
         self.push(TableCellContentNode::Paragraph(node));
     }
@@ -507,7 +516,7 @@ fn plain_text(nodes: &[DocNode], lines: &mut Vec<String>) {
         let mut line = String::new();
         for child in &node.children {
             if let ParagraphChildNode::Text(run) = child {
-                line.push_str(&run.text);
+                line.push_str(run.text_with_note_label());
             }
         }
         lines.push(line);
@@ -810,11 +819,18 @@ impl<'a> Builder<'a> {
         Some(id)
     }
 
-    fn new_num(&mut self, abstract_id: i64, start: Option<(u8, u32)>) -> i64 {
+    fn new_num(
+        &mut self,
+        abstract_id: i64,
+        start: Option<(u8, u32)>,
+        consecutive_list_id: Option<i64>,
+    ) -> i64 {
         let num_id = self.instances.len() as i64 + 1;
         self.instances.push(NumberingInstanceDefinition {
             num_id,
             abstract_num_id: abstract_id,
+            consecutive_list_id: (self.abstracts[abstract_id as usize].consecutive_numbering == Some(true))
+                .then(|| consecutive_list_id.unwrap_or(num_id)),
             level_start_overrides: start
                 .map(|(level, start)| HashMap::from([(level.to_string(), i64::from(start))])),
             level_overrides: None,
@@ -836,7 +852,16 @@ impl<'a> Builder<'a> {
                     .then(|| self.last_num_by_abstract.get(&abstract_id).copied())
                     .flatten()
             });
-        let num_id = continued.unwrap_or_else(|| self.new_num(abstract_id, None));
+        let num_id = continued.unwrap_or_else(|| {
+            let start = self.abstracts[abstract_id as usize]
+                .levels
+                .iter()
+                .find(|level| level.ilvl == 0)
+                .and_then(|level| level.start)
+                .and_then(|start| u32::try_from(start).ok())
+                .unwrap_or(1);
+            self.new_num(abstract_id, Some((0, start)), None)
+        });
         if let Some(id) = &list.id {
             self.num_by_list_id.insert(id.clone(), num_id);
         }
@@ -861,7 +886,7 @@ impl<'a> Builder<'a> {
                 if let Some(name) = list.style.as_deref().filter(|name| parent.style.as_deref() != Some(*name)) {
                     if let Some(abstract_id) = self.abstract_num(scope, name) {
                         state.abstract_id = abstract_id;
-                        state.num_id = self.new_num(abstract_id, None);
+                        state.num_id = self.new_num(abstract_id, None, None);
                         state.style = Some(name.to_owned());
                     }
                 }
@@ -886,8 +911,15 @@ impl<'a> Builder<'a> {
             level.and_then(|level| level.text_indent),
         );
         for item in list.items {
-            if let Some(start) = item.start_value.filter(|start| *start <= 32_767) {
-                state.num_id = self.new_num(state.abstract_id, Some((state.level.min(8), start)));
+            if let Some(start) = item.start_value.filter(|start| {
+                *start <= 32_767 && list_item_has_paragraph(&item.blocks)
+            }) {
+                let consecutive_list_id = self.instances[state.num_id as usize - 1].consecutive_list_id;
+                state.num_id = self.new_num(
+                    state.abstract_id,
+                    Some((state.level.min(8), start)),
+                    consecutive_list_id,
+                );
             }
             state.label_pending = !item.header;
             self.blocks(item.blocks, scope, Some(&mut state), out);
@@ -908,7 +940,7 @@ impl<'a> Builder<'a> {
             None => {
                 let abstract_id = self.abstracts.len() as i64;
                 self.abstracts.push(abstract_definition(abstract_id, outline, false));
-                let num_id = self.new_num(abstract_id, None);
+                let num_id = self.new_num(abstract_id, None, None);
                 self.outline_num = Some(num_id);
                 num_id
             }
@@ -920,11 +952,11 @@ impl<'a> Builder<'a> {
 
     /// Converts block content that is a story of its own: a cell, a note, a
     /// comment, a text box, a header or a footer.
-    fn story<S: Sink + Default>(&mut self, blocks: Vec<Block>, scope: Scope) -> S {
+    fn story<S: Sink>(&mut self, blocks: Vec<Block>, scope: Scope) -> S {
         let pending = std::mem::take(&mut self.pending);
         let open = std::mem::take(&mut self.open_comments);
         let break_next = std::mem::take(&mut self.break_next);
-        let mut out = S::default();
+        let mut out = S::with_capacity(blocks.len());
         self.blocks(blocks, scope, None, &mut out);
         self.flush_pending(scope, &mut out);
         self.pending = pending;
@@ -998,7 +1030,8 @@ impl<'a> Builder<'a> {
         }
         let style = self.variant(&format, variant);
         let mut children = std::mem::take(&mut self.pending);
-        children.reserve(paragraph.inlines.len());
+        let additional = if children.is_empty() { paragraph.inlines.len().max(1) } else { paragraph.inlines.len() };
+        children.reserve_exact(additional);
         let mut ranges = Ranges::open(&self.open_comments);
         self.inlines(paragraph.inlines, scope, &format.run, None, &mut children, &mut ranges);
         if children.is_empty() {
@@ -1112,6 +1145,7 @@ impl<'a> Builder<'a> {
             note_reference: Some(NoteReference {
                 kind: if note.endnote { NoteReferenceKind::Endnote } else { NoteReferenceKind::Footnote },
                 id,
+                label: Some(note.citation),
             }),
             field_instruction: None,
         }));
@@ -2048,6 +2082,35 @@ fn level_indent(ilvl: u8, margin_left: Option<Length>, text_indent: Option<Lengt
     )
 }
 
+fn label_format(pattern: &str) -> Option<String> {
+    let mut result = String::with_capacity(pattern.len());
+    let mut rest = pattern;
+    while let Some(start) = rest.find('%') {
+        result.push_str(&rest[..start]);
+        rest = &rest[start + 1..];
+        result.push('%');
+        if rest.as_bytes().first().is_some_and(u8::is_ascii_digit) {
+            let end = rest.find('%')?;
+            let level = rest[..end].parse::<u8>().ok()?;
+            if !(1..=9).contains(&level) {
+                return None;
+            }
+            result.push(char::from(b'0' + level));
+            rest = &rest[end + 1..];
+        }
+    }
+    result.push_str(rest);
+    Some(result)
+}
+
+fn list_item_has_paragraph(blocks: &[Block]) -> bool {
+    blocks.iter().any(|block| match block {
+        Block::Paragraph(_) => true,
+        Block::Section(section) => list_item_has_paragraph(&section.blocks),
+        _ => false,
+    })
+}
+
 /// A list style as a numbering definition. `indent_by_default` gives levels
 /// that state no indent the usual list indent; headings numbered by the
 /// outline style keep theirs.
@@ -2056,6 +2119,16 @@ fn abstract_definition(id: i64, list: &ListStyle, indent_by_default: bool) -> Nu
     for ilvl in 0u8..9 {
         let Some(level) = list.levels.get(&(ilvl + 1)) else {
             continue;
+        };
+        let minimum_digits = match &level.label {
+            ListLabel::Number { format, .. } => match format.as_str() {
+                "01, 02, 03, ..." => Some(2),
+                "001, 002, 003, ..." => Some(3),
+                "0001, 0002, 0003, ..." => Some(4),
+                "00001, 00002, 00003, ..." => Some(5),
+                _ => None,
+            },
+            _ => None,
         };
         let (format, text, start) = match &level.label {
             ListLabel::Bullet(bullet) => ("bullet", bullet.clone(), 1),
@@ -2071,6 +2144,7 @@ fn abstract_definition(id: i64, list: &ListStyle, indent_by_default: bool) -> Nu
                     "A" => "upperLetter",
                     "i" => "lowerRoman",
                     "I" => "upperRoman",
+                    "01, 02, 03, ..." => "decimalZero",
                     _ => "decimal",
                 };
                 let mut text = level.prefix.clone();
@@ -2080,11 +2154,19 @@ fn abstract_definition(id: i64, list: &ListStyle, indent_by_default: bool) -> Nu
                         if number > first {
                             text.push('.');
                         }
-                        text.push('%');
-                        text.push(char::from(b'0' + number));
+                        if !matches!(
+                            list.levels.get(&number).map(|level| &level.label),
+                            Some(ListLabel::Bullet(_) | ListLabel::Image(_))
+                        ) {
+                            text.push('%');
+                            text.push(char::from(b'0' + number));
+                        }
                     }
                 }
                 text.push_str(&level.suffix);
+                if let Some(custom) = level.label_format.as_deref().and_then(label_format) {
+                    text = custom;
+                }
                 // Lists number up to 32767; LibreOffice shows 1 for a larger start.
                 (number_format, text, if *start > 32_767 { 1 } else { *start })
             }
@@ -2103,10 +2185,11 @@ fn abstract_definition(id: i64, list: &ListStyle, indent_by_default: bool) -> Nu
             ilvl: i64::from(ilvl),
             start: Some(i64::from(start)),
             format: Some(format.into()),
+            minimum_digits,
             text: Some(text),
             suffix: None,
             lvl_restart: None,
-            is_lgl: None,
+            is_lgl: level.is_legal.then_some(true),
             indent,
             run_style: text_style(&level.text),
             bullet_font_family: level.text.font.clone().filter(|_| bullet),
@@ -2118,6 +2201,7 @@ fn abstract_definition(id: i64, list: &ListStyle, indent_by_default: bool) -> Nu
     NumberingAbstractDefinition {
         abstract_num_id: id,
         levels,
+        consecutive_numbering: list.consecutive_numbering.then_some(true),
     }
 }
 

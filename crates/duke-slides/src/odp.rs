@@ -10,7 +10,7 @@ use duke_odf::draw::{normalize_path, polygon_path, Shape, ShapeKind};
 use duke_odf::media::{image_content_type, image_extension};
 use duke_odf::style::{
     Align, Border, Family, Fill, GraphicProps, LineHeight, ListLabel, ListLevel, ListStyle, Props,
-    Scope, Stroke, StyleSheet, TabKind, VerticalAlign,
+    Scope, Stroke, StyleSheet, TabKind, TextProps, VerticalAlign,
 };
 use duke_odf::text::{plain_text, Block, Inline, Table};
 use duke_odf::chart::Chart;
@@ -127,8 +127,25 @@ fn chart_node(
     metadata: Option<Box<NodeMetadata>>,
     name: String,
     transform: Transform,
+    text_content: Option<Box<crate::ObjectText>>,
 ) -> SlideNode {
-    let chart_svg = (render && !defer_artwork).then(|| duke_office_charts::odf::render_chart(chart, transform.width as f64 / 9525.0, transform.height as f64 / 9525.0)).flatten().map(|r| r.svg);
+    let rendered = (render && !defer_artwork || text_content.is_none())
+        .then(|| duke_office_charts::odf::render_chart(chart, transform.width as f64 / 9525.0, transform.height as f64 / 9525.0))
+        .flatten();
+    let text_content = text_content.or_else(|| {
+        let text = duke_odf::vector_text::svg(&rendered.as_ref()?.svg)?;
+        (!text.text.is_empty()).then(|| Box::new(crate::ObjectText {
+            text: text.text,
+            source: "chart-rendering".into(),
+            source_part: part.clone(),
+            partial: text.partial,
+        }))
+    });
+    let mut metadata = metadata;
+    if text_content.is_some() {
+        metadata.get_or_insert_with(Default::default).text_content = text_content;
+    }
+    let chart_svg = rendered.filter(|_| render && !defer_artwork).map(|r| r.svg);
     let categories: Vec<serde_json::Value> = chart
         .categories
         .iter()
@@ -253,6 +270,50 @@ fn bullet(level: &ListLevel) -> Option<TextBullet> {
     })
 }
 
+// Resolve fields after master nodes are cloned into their destination slide.
+fn resolve_slide_fields(
+    nodes: &mut [SlideNode],
+    number: usize,
+    count: usize,
+    name: Option<&str>,
+    footer: Option<&str>,
+    date_time: Option<&str>,
+) {
+    let paragraphs = |paragraphs: &mut [TextParagraph]| {
+        for paragraph in paragraphs {
+            for run in &mut paragraph.runs {
+                let Some(field) = run.field.as_mut() else {
+                    continue;
+                };
+                let value = match field.field_type.as_deref() {
+                    Some("odf:page-number") => number.to_string(),
+                    Some("odf:page-count") => count.to_string(),
+                    Some("odf:page-name") => name.map(str::to_owned).unwrap_or_else(|| run.text.clone()),
+                    Some("odf:footer") => footer.unwrap_or_default().to_owned(),
+                    Some("odf:date-time") => date_time.unwrap_or_default().to_owned(),
+                    _ => continue,
+                };
+                run.text = value;
+                field.has_cached_text = true;
+            }
+        }
+    };
+    for node in nodes {
+        match node {
+            SlideNode::Shape { paragraphs: text, .. } => paragraphs(text),
+            SlideNode::Table { rows, .. } => {
+                for cell in rows.iter_mut().flatten() {
+                    paragraphs(&mut cell.paragraphs);
+                }
+            }
+            SlideNode::Group { children, .. } => {
+                resolve_slide_fields(children, number, count, name, footer, date_time);
+            }
+            _ => {}
+        }
+    }
+}
+
 /// What a shape's text inherits before paragraph and span styles apply.
 struct TextContext<'s> {
     scope: Scope,
@@ -282,6 +343,8 @@ struct Builder<'a> {
     defer_artwork: bool,
     assets: BTreeMap<String, PresentationAsset>,
     asset_ids: BTreeMap<String, Option<String>>,
+    text_cache: BTreeMap<String, Option<Box<crate::ObjectText>>>,
+    page_size: Option<(f64, f64)>,
     warnings: Vec<PresentationWarning>,
     next_node: usize,
     /// Footer and date text of the slide being built.
@@ -298,6 +361,8 @@ impl<'a> Builder<'a> {
             defer_artwork,
             assets: BTreeMap::new(),
             asset_ids: BTreeMap::new(),
+            text_cache: BTreeMap::new(),
+            page_size: None,
             warnings: Vec::new(),
             next_node: 0,
             footer: None,
@@ -339,6 +404,37 @@ impl<'a> Builder<'a> {
         });
         self.asset_ids.insert(href.to_owned(), id.clone());
         id
+    }
+
+    fn vector_text(&mut self, href: &str, transform: &Transform) -> Option<Box<crate::ObjectText>> {
+        let clip = self.page_size.and_then(|(page_width, page_height)| {
+            let (x, y, w, h) = (
+                transform.x as f64, transform.y as f64,
+                transform.width as f64, transform.height as f64,
+            );
+            if w <= 0. || h <= 0. || transform.rotation.is_some_and(|r| r != 0.) {
+                return None;
+            }
+            (x < 0. || y < 0. || x + w > page_width || y + h > page_height).then(|| [
+                (-x / w).clamp(0., 1.), (-y / h).clamp(0., 1.),
+                ((page_width - x) / w).clamp(0., 1.), ((page_height - y) / h).clamp(0., 1.),
+            ])
+        });
+        let key = format!("{href}:{clip:?}");
+        if let Some(text) = self.text_cache.get(&key) {
+            return text.clone();
+        }
+        let text = self.document.binaries.get(href)
+            .and_then(|bytes| duke_odf::vector_text::extract_clipped(bytes, href, clip))
+            .filter(|text| !text.text.is_empty())
+            .map(|text| Box::new(crate::ObjectText {
+                text: text.text,
+                source: "vector-records".into(),
+                source_part: Some(href.into()),
+                partial: text.partial,
+            }));
+        self.text_cache.insert(key, text.clone());
+        text
     }
 
     fn fill(&mut self, props: &GraphicProps) -> Option<FillStyle> {
@@ -443,8 +539,7 @@ impl<'a> Builder<'a> {
         }
     }
 
-    fn run(&self, text: String, props: &Props, link: Option<&str>) -> TextRun {
-        let text_props = &props.text;
+    fn run(&self, text: String, text_props: &TextProps, link: Option<&str>) -> TextRun {
         TextRun {
             text,
             font_family: text_props.font.clone(),
@@ -468,7 +563,7 @@ impl<'a> Builder<'a> {
         &self,
         inlines: &[Inline],
         context: &TextContext<'_>,
-        props: &Props,
+        props: &TextProps,
         link: Option<&str>,
         out: &mut Vec<TextRun>,
     ) {
@@ -477,8 +572,8 @@ impl<'a> Builder<'a> {
                 Inline::Text(text) => out.push(self.run(text.clone(), props, link)),
                 Inline::Span { style, children } => match style {
                     Some(name) => {
-                        let mut inner = self.styles.inherited(context.scope, Family::Text, name);
-                        inner.inherit(props);
+                        let mut inner = self.styles.inherited_text(context.scope, Family::Text, name);
+                        inner.inherit_resolving_size(props);
                         self.runs(children, context, &inner, link, out);
                     }
                     None => self.runs(children, context, props, link, out),
@@ -498,8 +593,26 @@ impl<'a> Builder<'a> {
                         "header" => String::new(),
                         _ => text.clone(),
                     };
-                    if !text.is_empty() {
-                        out.push(self.run(text, props, link));
+                    let dynamic = matches!(&self.document.body, Body::Pages(_))
+                        && matches!(kind.as_str(), "page-number" | "page-count" | "page-name" | "footer" | "date-time");
+                    if !text.is_empty() || dynamic {
+                        let mut run = self.run(text, props, link);
+                        if dynamic {
+                            run.field = Some(Box::new(crate::TextField {
+                                id: None,
+                                field_type: Some(format!("odf:{kind}")),
+                                has_cached_text: !run.text.is_empty(),
+                                paragraph_properties: None,
+                                source_part: Some(
+                                    match context.scope {
+                                        Scope::Content => "content.xml",
+                                        Scope::Styles => "styles.xml",
+                                    }.into(),
+                                ),
+                                source_xml: String::new(),
+                            }));
+                        }
+                        out.push(run);
                     }
                 }
                 _ => {}
@@ -549,7 +662,7 @@ impl<'a> Builder<'a> {
                         })
                     };
                     let mut runs = Vec::new();
-                    self.runs(&paragraph.inlines, context, &props, None, &mut runs);
+                    self.runs(&paragraph.inlines, context, &props.text, None, &mut runs);
                     out.push(TextParagraph {
                         runs,
                         alignment: paragraph_props.align.map(|align| {
@@ -658,7 +771,7 @@ impl<'a> Builder<'a> {
             Some(name) => (Family::Presentation, Some(name)),
             None => (Family::Graphic, shape.style.as_deref()),
         };
-        let props = self.styles.resolve(scope, family, style_name).graphic;
+        let props = self.styles.resolve_graphic(scope, family, style_name);
 
         let image = |builder: &mut Self, href: &str, fallback: Option<&String>| {
             let asset_id = builder.asset(href)?;
@@ -677,7 +790,7 @@ impl<'a> Builder<'a> {
                 let context = self.text_context(shape, scope, slide_index.map_or(0, |index| index + 1));
                 let caption = self.shape_paragraphs(&shape.text, &context);
                 let captioned = caption.iter().any(|paragraph| !paragraph.runs.is_empty());
-                let picture = SlideNode::Image {
+                let mut picture = SlideNode::Image {
                     metadata,
                     model_3d: None,
                     ink: None,
@@ -695,6 +808,9 @@ impl<'a> Builder<'a> {
                     paint_bounds: None,
                     source_xml: None,
                 };
+                if let Some(text) = self.vector_text(href, &transform).or_else(|| fallback.as_deref().and_then(|href| self.vector_text(href, &transform))) {
+                    picture.metadata_mut().text_content = Some(text);
+                }
                 if !captioned {
                     return Some(picture);
                 }
@@ -742,6 +858,7 @@ impl<'a> Builder<'a> {
                 });
             }
             ShapeKind::Object { href, replacement, .. } => {
+                let preview_text = replacement.as_deref().and_then(|href| self.vector_text(href, &transform));
                 let preview = replacement
                     .as_deref()
                     .and_then(|href| image(self, href, None))
@@ -780,7 +897,7 @@ impl<'a> Builder<'a> {
                 match embedded.as_ref().map(|embedded| (embedded, &embedded.body)) {
                     Some((_, Body::Chart(chart))) => {
                         let part = href.as_ref().map(|directory| format!("{directory}/content.xml"));
-                        let data = chart_node(chart, !drawable, self.defer_artwork, part, metadata.clone(), name.clone(), transform.clone());
+                        let data = chart_node(chart, !drawable, self.defer_artwork, part, metadata.clone(), name.clone(), transform.clone(), preview_text);
                         if !drawable && !self.defer_artwork && matches!(&data, SlideNode::Chart { chart_svg: None, .. }) {
                             self.warn("chart-artwork-unavailable", "The chart data is retained but its native artwork is unsupported", slide_index);
                         }
@@ -833,7 +950,7 @@ impl<'a> Builder<'a> {
                     "An embedded object is imported as its preview image, or not at all when it has none",
                     slide_index,
                 );
-                return Some(match preview {
+                let mut object = match preview {
                     Some(asset_id) => picture(asset_id, id, metadata),
                     None => SlideNode::Unknown {
                         metadata,
@@ -842,7 +959,28 @@ impl<'a> Builder<'a> {
                         transform,
                         feature: "embedded-object".into(),
                     },
+                };
+                let text = preview_text.or_else(|| {
+                    let embedded = embedded.as_ref()?;
+                    let text = match &embedded.body {
+                        Body::Text(blocks) => plain_text(blocks),
+                        Body::Spreadsheet(tables) => tables.iter().map(Table::trimmed)
+                            .filter(|table| table.rows.len() <= 200 && table.columns.len() <= 50)
+                            .flat_map(|table| table.rows.into_iter().flat_map(|row| row.cells))
+                            .filter(|cell| !cell.covered)
+                            .map(|cell| plain_text(&cell.blocks))
+                            .collect::<Vec<_>>().join("\n"),
+                        _ => return None,
+                    };
+                    (!text.trim().is_empty()).then(|| Box::new(crate::ObjectText {
+                        text,
+                        source: "embedded-content".into(),
+                        source_part: href.as_ref().map(|href| format!("{href}/content.xml")),
+                        partial: true,
+                    }))
                 });
+                if text.is_some() { object.metadata_mut().text_content = text; }
+                return Some(object);
             }
             ShapeKind::Table(table) => {
                 return Some(self.table(table, scope, metadata, id, name, transform, slide_index));
@@ -1083,8 +1221,7 @@ impl<'a> Builder<'a> {
         let mut column_widths: Vec<Option<i64>> = Vec::new();
         for column in &table.columns {
             let width = styles
-                .resolve(scope, Family::TableColumn, column.style.as_deref())
-                .table
+                .resolve_table(scope, Family::TableColumn, column.style.as_deref())
                 .column_width
                 .map(|width| width.0);
             for _ in 0..column.repeated.min(MAX_REPEAT) {
@@ -1110,7 +1247,7 @@ impl<'a> Builder<'a> {
             text_rotation: None,
         };
         'rows: for row in &table.rows {
-            let row_props = styles.resolve(scope, Family::TableRow, row.style.as_deref()).table;
+            let row_props = styles.resolve_table(scope, Family::TableRow, row.style.as_deref());
             for _ in 0..row.repeated.min(MAX_REPEAT) {
                 if rows.len() >= MAX_REPEAT as usize {
                     self.warn("table-truncated", "A table was truncated at the row limit", slide_index);
@@ -1245,16 +1382,14 @@ impl<'a> Builder<'a> {
     ) -> PresentationSlide {
         let styles = self.styles;
         let page_props = styles
-            .resolve(Scope::Content, Family::DrawingPage, page.style.as_deref())
-            .graphic;
+            .resolve_graphic(Scope::Content, Family::DrawingPage, page.style.as_deref());
         let master = page.master_page.as_deref().and_then(|name| styles.master_page(name));
         let master_props = styles
-            .resolve(
+            .resolve_graphic(
                 Scope::Styles,
                 Family::DrawingPage,
                 master.and_then(|master| master.style.as_deref()),
-            )
-            .graphic;
+            );
         let own_background = matches!(page_props.fill, Some(fill) if fill != Fill::None);
         let background = if own_background {
             self.fill(&page_props)
@@ -1263,6 +1398,12 @@ impl<'a> Builder<'a> {
         }
         .filter(|fill| !matches!(fill, FillStyle::None));
 
+        self.footer = page.footer_name.as_ref().and_then(|name| self.document.footers.get(name)).cloned();
+        self.date_time = page
+            .date_time_name
+            .as_ref()
+            .and_then(|name| self.document.date_times.get(name))
+            .cloned();
         let mut nodes = Vec::new();
         if page_props.background_objects_visible != Some(false) {
             if let Some(inherited) = master.and_then(|master| master_nodes.get(&master.name)) {
@@ -1281,12 +1422,6 @@ impl<'a> Builder<'a> {
         // The master's footer, slide-number and date fields appear on slides that
         // ask for them. They follow the slide's own objects, as footer
         // placeholders do in a PowerPoint slide, so reading order ends with them.
-        self.footer = page.footer_name.as_ref().and_then(|name| self.document.footers.get(name)).cloned();
-        self.date_time = page
-            .date_time_name
-            .as_ref()
-            .and_then(|name| self.document.date_times.get(name))
-            .cloned();
         for shape in master.map(|master| master.shapes.as_slice()).unwrap_or_default() {
             let shown = match shape.class.as_deref() {
                 Some("footer") => page_props.display_footer == Some(true) && self.footer.is_some(),
@@ -1300,6 +1435,18 @@ impl<'a> Builder<'a> {
                 nodes.extend(field);
             }
         }
+        let page_count = match &self.document.body {
+            Body::Pages(pages) => pages.len(),
+            _ => 0,
+        };
+        resolve_slide_fields(
+            &mut nodes,
+            index + 1,
+            page_count,
+            page.name.as_deref(),
+            self.footer.as_deref(),
+            self.date_time.as_deref(),
+        );
         self.footer = None;
         self.date_time = None;
         let notes = page
@@ -1356,6 +1503,7 @@ impl<'a> Builder<'a> {
             width_emu: dimension(layout.and_then(|layout| layout.width), DEFAULT_SIZE.0),
             height_emu: dimension(layout.and_then(|layout| layout.height), DEFAULT_SIZE.1),
         };
+        self.page_size = Some((size.width_emu as f64, size.height_emu as f64));
 
         // Decorative master shapes are shown on every slide; placeholders are not.
         let mut master_nodes: BTreeMap<String, Vec<SlideNode>> = BTreeMap::new();

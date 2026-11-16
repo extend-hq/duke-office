@@ -107,6 +107,9 @@ pub(crate) fn validate_model(
     }
     while let Some((node, depth)) = pending.pop() {
         budget.block(depth)?;
+        if let Some(text) = node.text_content() {
+            budget.text(&text.text, depth)?;
+        }
         match node {
             SlideNode::Group { children, .. } => {
                 pending.extend(children.iter().map(|child| (child, depth + 1)))
@@ -177,6 +180,9 @@ pub(crate) fn validate_input(
     }
     while let Some((node, depth)) = pending.pop() {
         budget.block(depth)?;
+        if let Some(text) = &node.text_content {
+            budget.text(&text.text, depth)?;
+        }
         for paragraph in &node.paragraphs {
             budget.block(depth + 1)?;
             for run in &paragraph.runs {

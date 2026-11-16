@@ -23,6 +23,7 @@ pub struct BlockSlideInput {
 #[derive(Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct BlockNodeInput {
+    pub text_content: Option<Box<crate::ObjectText>>,
     pub id: String,
     pub r#type: String,
     pub source_part: Option<String>,
@@ -89,6 +90,7 @@ fn input_nodes(nodes: &[SlideNode]) -> Vec<BlockNodeInput> {
                 | SlideNode::Unknown { id, metadata, .. } => (id, metadata.as_deref()),
             };
             let mut out = BlockNodeInput {
+                text_content: metadata.and_then(|m| m.text_content.clone()),
                 id: id.clone(),
                 source_part: metadata.and_then(|m| m.source_part.clone()),
                 source_id: metadata.and_then(|m| m.source_id.clone()),
@@ -324,6 +326,12 @@ fn nodes(
             "media" => { result.details = json!({"kind": "media"}); }
             _ => { result.details = json!({"kind": "unknown", "feature": node.feature}); }
         }
+        if let Some(text) = &node.text_content {
+            if matches!(node.r#type.as_str(), "image" | "chart" | "unknown" | "media") {
+                result.content = text.text.clone();
+            }
+            result.details["textContent"] = serde_json::to_value(text).map_err(|e| e.to_string())?;
+        }
         Ok(result)
     }).collect()
 }
@@ -448,5 +456,14 @@ pub fn extract_presentation_blocks_with_limits(
             })
             .collect(),
     };
-    extract_presentation_block_input_with_limits(&input, options, limits)
+    let mut result = extract_presentation_block_input_with_limits(&input, options, limits)?;
+    if document.format == crate::PresentationFormat::Odp {
+        let mut offset = 0;
+        for slide in &document.slides {
+            let end = offset + slide.nodes.len();
+            crate::reading_order::reorder_blocks(&mut result.blocks[offset..end], &slide.nodes);
+            offset = end + if options.include_notes { slide.notes.len() } else { 0 };
+        }
+    }
+    Ok(result)
 }

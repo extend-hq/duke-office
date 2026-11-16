@@ -8,6 +8,7 @@ mod legacy_cfb;
 mod model;
 mod odp;
 mod pptx;
+mod reading_order;
 mod semantic;
 mod structured;
 
@@ -18,6 +19,7 @@ pub use chart::{extract_chart_data, ChartCategory, ChartData, ChartPoint};
 pub use export::*;
 pub use extraction_limits::ExtractionLimits;
 pub use model::*;
+pub use reading_order::presentation_node_reading_order;
 pub use semantic::{ParagraphDetails, ParagraphInline};
 pub use structured::*;
 pub use duke_office_art::ParseOptions;

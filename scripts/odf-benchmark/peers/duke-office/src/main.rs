@@ -45,7 +45,7 @@ fn document_text(bytes: &[u8]) -> Result<String, String> {
     Ok(out)
 }
 
-/// Text of every slide object in drawing order, without speaker notes.
+/// Text of every slide object in extraction order, without speaker notes.
 fn presentation_text(bytes: &[u8]) -> Result<String, String> {
     fn paragraphs(paragraphs: &[TextParagraph], out: &mut String) {
         for paragraph in paragraphs {
@@ -55,11 +55,20 @@ fn presentation_text(bytes: &[u8]) -> Result<String, String> {
             out.push('\n');
         }
     }
-    fn nodes(list: &[SlideNode], out: &mut String) {
-        for node in list {
+    fn nodes(list: &[SlideNode], out: &mut String, geometric_order: bool) {
+        let order = if geometric_order { duke_slides::presentation_node_reading_order(list) } else { (0..list.len()).collect() };
+        for index in order {
+            let node = &list[index];
+            if let Some(text) = node.text_content() {
+                if matches!(node, SlideNode::Chart { .. } | SlideNode::Image { .. } | SlideNode::Unknown { .. } | SlideNode::Media { .. }) {
+                    out.push_str(&text.text);
+                    out.push('\n');
+                    continue;
+                }
+            }
             match node {
                 SlideNode::Shape { paragraphs: text, .. } => paragraphs(text, out),
-                SlideNode::Group { children, .. } => nodes(children, out),
+                SlideNode::Group { children, .. } => nodes(children, out, geometric_order),
                 // A chart's title, categories and series names are text on the slide.
                 SlideNode::Chart { title, series, .. } => {
                     out.extend(title.iter().map(String::as_str));
@@ -89,7 +98,7 @@ fn presentation_text(bytes: &[u8]) -> Result<String, String> {
         duke_slides::parse_presentation(bytes, &ParseLimits::server()).map_err(|error| error.to_string())?;
     let mut out = String::new();
     for slide in &document.slides {
-        nodes(&slide.nodes, &mut out);
+        nodes(&slide.nodes, &mut out, document.format == duke_slides::PresentationFormat::Odp);
     }
     Ok(out)
 }

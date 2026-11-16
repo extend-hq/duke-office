@@ -373,6 +373,7 @@ fn parse_active_run_text_tokens(normalized_run_xml: &str) -> Vec<ParsedRunTextTo
                     note_reference: Some(NoteReference {
                         kind: NoteReferenceKind::Footnote,
                         id: reference_id,
+                        label: None,
                     }),
                 });
             }
@@ -387,6 +388,7 @@ fn parse_active_run_text_tokens(normalized_run_xml: &str) -> Vec<ParsedRunTextTo
                     note_reference: Some(NoteReference {
                         kind: NoteReferenceKind::Endnote,
                         id: reference_id,
+                        label: None,
                     }),
                 });
             }
@@ -572,6 +574,7 @@ fn stream_run_text_tokens(xml: &str) -> Option<Vec<ParsedRunTextToken>> {
                                         NoteReferenceKind::Endnote
                                     },
                                     id,
+                                    label: None,
                                 }),
                             });
                         }

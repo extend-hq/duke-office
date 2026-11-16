@@ -336,6 +336,9 @@ impl std::ops::DerefMut for SharedTextStyle {
 pub struct NoteReference {
     pub kind: NoteReferenceKind,
     pub id: i64,
+    /// Stored citation label, when the source supplies one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 /// Mirrors TypeScript `TextRunNode.noteReference.kind`.
@@ -362,6 +365,19 @@ pub struct TextRunNode {
     pub note_reference: Option<NoteReference>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub field_instruction: Option<String>,
+}
+
+impl TextRunNode {
+    pub(crate) fn text_with_note_label(&self) -> &str {
+        if self.text.is_empty() {
+            self.note_reference
+                .as_ref()
+                .and_then(|reference| reference.label.as_deref())
+                .unwrap_or_default()
+        } else {
+            &self.text
+        }
+    }
 }
 
 /// Discriminator for `TextRunNode`.
@@ -1559,6 +1575,9 @@ pub struct NumberingLevelDefinition {
     pub start: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub format: Option<String>,
+    /// Minimum decimal digits for positive values in an imported numbering style.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub minimum_digits: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub text: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -1592,6 +1611,9 @@ pub struct NumberingLevelDefinition {
 pub struct NumberingAbstractDefinition {
     pub abstract_num_id: i64,
     pub levels: Vec<NumberingLevelDefinition>,
+    /// Uses one sequence across all list levels.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub consecutive_numbering: Option<bool>,
 }
 
 /// Mirrors TypeScript `NumberingInstanceDefinition`.
@@ -1600,6 +1622,9 @@ pub struct NumberingAbstractDefinition {
 pub struct NumberingInstanceDefinition {
     pub num_id: i64,
     pub abstract_num_id: i64,
+    /// Groups explicit restarts with their enclosing consecutive list.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub consecutive_list_id: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub level_start_overrides: Option<HashMap<String, i64>>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -1,6 +1,6 @@
 {
   "name": "@extend-ai/duke-office-charts",
-  "version": "0.3.7",
+  "version": "0.3.8",
   "description": "Render Office Open XML charts to SVG with WebAssembly",
   "type": "module",
   "license": "MIT AND Apache-2.0 AND OFL-1.1",

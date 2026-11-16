@@ -470,12 +470,24 @@ pub fn assign_source_ids(model: &mut DocModel, document_id: &str) {
 }
 
 fn joined_block_content(blocks: &[DocumentBlock], separator: &str) -> String {
-    let capacity = blocks.iter().map(|block| block.content.len()).sum::<usize>()
+    fn label(block: &DocumentBlock) -> Option<&str> {
+        match &block.details {
+            BlockDetails::Paragraph(details) => details.list_label.as_deref(),
+            _ => None,
+        }
+    }
+    let capacity = blocks.iter().map(|block| {
+        block.content.len() + label(block).map_or(0, |label| label.len() + 1)
+    }).sum::<usize>()
         + separator.len() * blocks.len().saturating_sub(1);
     let mut content = String::with_capacity(capacity);
     for (index, block) in blocks.iter().enumerate() {
         if index > 0 {
             content.push_str(separator);
+        }
+        if let Some(label) = label(block) {
+            content.push_str(label);
+            content.push(' ');
         }
         content.push_str(&block.content);
     }
@@ -712,7 +724,7 @@ impl Extractor<'_> {
             p.children
                 .iter()
                 .map(|child| match child {
-                    ParagraphChildNode::Text(run) => run.text.len(),
+                    ParagraphChildNode::Text(run) => run.text_with_note_label().len(),
                     _ => 0,
                 })
                 .sum(),
@@ -723,13 +735,14 @@ impl Extractor<'_> {
         for (index, child) in p.children.iter().enumerate() {
             match child {
                 ParagraphChildNode::Text(run) => {
+                    let text = run.text_with_note_label();
                     let start = text_offset;
-                    text_offset += utf16_len(&run.text);
-                    content.push_str(&run.text);
+                    text_offset += utf16_len(text);
+                    content.push_str(text);
                     inline.push(ParagraphInline::Text {
                         start,
                         end: text_offset,
-                        text: run.text.clone(),
+                        text: text.to_owned(),
                         style: run.style.clone(),
                         link: run.link.clone(),
                         note_reference: run.note_reference.clone(),

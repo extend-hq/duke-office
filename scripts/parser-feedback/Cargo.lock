@@ -183,9 +183,10 @@ dependencies = [
 
 [[package]]
 name = "duke-odf"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "base64",
+ "encoding_rs",
  "memchr",
  "miniz_oxide 0.8.9",
  "quick-xml 0.37.5",
@@ -194,7 +195,7 @@ dependencies = [
 
 [[package]]
 name = "duke-office-art"
-version = "0.1.10"
+version = "0.2.0"
 dependencies = [
  "base64",
  "duke-odf",
@@ -211,13 +212,14 @@ dependencies = [
 
 [[package]]
 name = "duke-office-charts"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "base64",
  "duke-odf",
  "duke-office-art",
  "kurbo",
  "miniz_oxide 0.8.9",
+ "quick-xml 0.37.5",
  "roxmltree",
  "serde",
  "svgtypes",
@@ -225,7 +227,7 @@ dependencies = [
 
 [[package]]
 name = "duke-pages"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "arc-swap",
  "base64",
@@ -255,6 +257,15 @@ name = "either"
 version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e9c71c2167ca323c882b99918929403426e2373ea17242ff5653e0d5e1058be"
+
+[[package]]
+name = "encoding_rs"
+version = "0.8.35"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75030f3c4f45dafd7586dd6780965a8c7e8e285a5ecb86713e63a79c5b2766f3"
+dependencies = [
+ "cfg-if",
+]
 
 [[package]]
 name = "euclid"

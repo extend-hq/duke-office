@@ -382,6 +382,8 @@ pub enum ListLabel {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ListLevel {
     pub label: ListLabel,
+    pub label_format: Option<String>,
+    pub is_legal: bool,
     pub prefix: String,
     pub suffix: String,
     /// A text-family style for the label.
@@ -398,6 +400,7 @@ pub struct ListLevel {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ListStyle {
     pub name: String,
+    pub consecutive_numbering: bool,
     /// Keyed by level, starting at 1.
     pub levels: BTreeMap<u8, ListLevel>,
 }
@@ -917,61 +920,102 @@ impl StyleSheet {
     }
 
     fn text_props(&self, node: Node<'_, '_>) -> TextProps {
-        let font = |attribute: &str, fallback: Option<&str>| {
-            attr(node, STYLE, attribute)
+        #[derive(Clone, Copy)]
+        enum Key {
+            Font, FontAsian, FontComplex, FontFamily, Size, Weight, Slant,
+            Underline, Strike, Color, Background, Transform, Variant, Position,
+            Spacing, Language, Country, LanguageAsian, CountryAsian,
+            LanguageComplex, CountryComplex, Display,
+        }
+        use Key::*;
+        let mut values = [None; Display as usize + 1];
+        for attribute in node.attributes() {
+            let key = match (attribute.namespace, attribute.name) {
+                (Some(STYLE), "font-name") => Font,
+                (Some(STYLE), "font-name-asian") => FontAsian,
+                (Some(STYLE), "font-name-complex") => FontComplex,
+                (Some(FO), "font-family") => FontFamily,
+                (Some(FO), "font-size") => Size,
+                (Some(FO), "font-weight") => Weight,
+                (Some(FO), "font-style") => Slant,
+                (Some(STYLE), "text-underline-style") => Underline,
+                (Some(STYLE), "text-line-through-style") => Strike,
+                (Some(FO), "color") => Color,
+                (Some(FO), "background-color") => Background,
+                (Some(FO), "text-transform") => Transform,
+                (Some(FO), "font-variant") => Variant,
+                (Some(STYLE), "text-position") => Position,
+                (Some(FO), "letter-spacing") => Spacing,
+                (Some(FO), "language") => Language,
+                (Some(FO), "country") => Country,
+                (Some(STYLE), "language-asian") => LanguageAsian,
+                (Some(STYLE), "country-asian") => CountryAsian,
+                (Some(STYLE), "language-complex") => LanguageComplex,
+                (Some(STYLE), "country-complex") => CountryComplex,
+                (Some(TEXT), "display") => Display,
+                _ => continue,
+            };
+            values[key as usize].get_or_insert(attribute.value.as_ref());
+        }
+        let get = |key: Key| values[key as usize];
+        let font = |key, fallback: Option<Key>| {
+            get(key)
                 .map(|name| self.fonts.get(name).cloned().unwrap_or_else(|| name.to_owned()))
-                .or_else(|| fallback.and_then(|name| attr(node, FO, name)).map(unquote))
+                .or_else(|| fallback.and_then(get).map(unquote))
                 .filter(|family| !family.is_empty())
         };
         let on_off = |value: Option<&str>, off: &str| value.map(|value| value != off);
-        let language = |namespace: crate::xml::Ns, language: &str, country: &str| {
-            attr(node, namespace, language)
+        let language = |language, country| {
+            get(language)
                 .filter(|language| !matches!(*language, "none" | "zxx" | ""))
                 .map(|language| {
-                    match attr(node, namespace, country).filter(|country| !matches!(*country, "none" | "")) {
+                    match get(country).filter(|country| !matches!(*country, "none" | "")) {
                         Some(country) => format!("{language}-{country}"),
                         None => language.to_owned(),
                     }
                 })
         };
         TextProps {
-            font: font("font-name", Some("font-family")),
-            font_asian: font("font-name-asian", None),
-            font_complex: font("font-name-complex", None),
-            size: attr(node, FO, "font-size").and_then(|value| {
+            font: font(Font, Some(FontFamily)),
+            font_asian: font(FontAsian, None),
+            font_complex: font(FontComplex, None),
+            size: get(Size).and_then(|value| {
                 parse_length(value)
                     .map(|length| FontSize::Points(length.points()))
                     .or_else(|| parse_percent(value).map(FontSize::Percent))
             }),
-            bold: attr(node, FO, "font-weight").map(|weight| {
+            bold: get(Weight).map(|weight| {
                 weight == "bold" || weight.parse::<u32>().is_ok_and(|weight| weight >= 600)
             }),
-            italic: attr(node, FO, "font-style").map(|style| style != "normal"),
-            underline: on_off(attr(node, STYLE, "text-underline-style"), "none"),
-            strike: on_off(attr(node, STYLE, "text-line-through-style"), "none"),
-            color: attr(node, FO, "color").and_then(parse_color),
-            background: background(node),
-            uppercase: attr(node, FO, "text-transform").map(|value| value == "uppercase"),
-            small_caps: attr(node, FO, "font-variant").map(|value| value == "small-caps"),
-            position: attr(node, STYLE, "text-position").and_then(|value| {
+            italic: get(Slant).map(|style| style != "normal"),
+            underline: on_off(get(Underline), "none"),
+            strike: on_off(get(Strike), "none"),
+            color: get(Color).and_then(parse_color),
+            background: get(Background).map(|value| parse_color(value).unwrap_or_default()),
+            uppercase: get(Transform).map(|value| value == "uppercase"),
+            small_caps: get(Variant).map(|value| value == "small-caps"),
+            position: get(Position).and_then(|value| {
                 match value.split_whitespace().next()? {
                     "super" => Some(33.0),
                     "sub" => Some(-33.0),
                     shift => parse_percent(shift),
                 }
             }),
-            letter_spacing: attr(node, FO, "letter-spacing")
+            letter_spacing: get(Spacing)
                 .map(|value| parse_length(value).unwrap_or_default()),
-            language: language(FO, "language", "country"),
-            language_asian: language(STYLE, "language-asian", "country-asian"),
-            language_complex: language(STYLE, "language-complex", "country-complex"),
-            hidden: attr(node, TEXT, "display").map(|value| value == "none"),
+            language: language(Language, Country),
+            language_asian: language(LanguageAsian, CountryAsian),
+            language_complex: language(LanguageComplex, CountryComplex),
+            hidden: get(Display).map(|value| value == "none"),
         }
     }
 
     fn read_list_style(&self, node: Node<'_, '_>, ctx: &mut Ctx<'_>) -> ListStyle {
         let mut list = ListStyle {
             name: attr(node, STYLE, "name").unwrap_or_default().to_owned(),
+            consecutive_numbering: attr(node, TEXT, "consecutive-numbering")
+                .and_then(parse_bool)
+                .unwrap_or(false),
             levels: BTreeMap::new(),
         };
         for level in elements(node).filter(|child| child.tag_name().namespace() == Some(TEXT)) {
@@ -1019,6 +1063,10 @@ impl StyleSheet {
                 number,
                 ListLevel {
                     label,
+                    label_format: attr(level, STYLE, "num-list-format")
+                        .or_else(|| attr(level, LO_EXT, "num-list-format"))
+                        .map(str::to_owned),
+                    is_legal: attr(level, LO_EXT, "is-legal").is_some_and(|value| matches!(value, "true" | "1")),
                     prefix: attr(level, STYLE, "num-prefix").unwrap_or_default().to_owned(),
                     suffix: attr(level, STYLE, "num-suffix").unwrap_or_default().to_owned(),
                     text_style: owned(level, TEXT, "style-name"),

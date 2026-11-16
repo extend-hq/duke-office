@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0
+
+- Recover text from OpenDocument chart previews, vector images and embedded objects, including modern SVM, SVG, WMF and EMF text records, with bounded extraction and source metadata.
+- Order extracted OpenDocument objects geometrically without changing drawing order, object identity or source paths; tolerate sub-point edge overlaps and preserve ambiguous regions.
+- Resolve cached slide fields and transparent text wrappers, and avoid resolving unused style properties.
+- Add `ObjectText`, `NodeMetadata.text_content`, `BlockNodeInput.text_content`, and `presentation_node_reading_order`; Rust struct literals must initialize the new fields. Older serialized models remain readable.
+- Update the shared OpenDocument, artwork and chart dependencies and the WebAssembly bindings.
+
 ## 0.4.1
 
 - Render supported OpenDocument charts and enhanced drawing geometry, retain chart styles and scatter/bubble domains, and expose cached chart data through existing extraction APIs.

@@ -18,7 +18,7 @@ Native builds enable `native-deflate` by default, using libdeflate for whole-buf
 
 ```toml
 [dependencies]
-duke-pages = { version = "0.3", default-features = false }
+duke-pages = { version = "0.4", default-features = false }
 ```
 
 ## Usage

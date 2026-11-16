@@ -225,7 +225,7 @@ fn builds_the_model_directly_from_text_structure() {
             (&BlockType::Text, "Nested", Some("◦".into())),
             (&BlockType::Text, "One", Some("1.".into())),
             (&BlockType::Text, "Two", Some("2.".into())),
-            (&BlockType::Text, "Noted", None),
+            (&BlockType::Text, "Noted1", None),
             (&BlockType::Text, "Footnote text", None),
         ]
     );

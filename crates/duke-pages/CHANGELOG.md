@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- Preserve OpenDocument note citations, padded and custom list labels, legal numbering, consecutive numbering across levels, and labels in table-cell aggregate text.
+- Correct fresh-list starts and nested labels, and reduce allocations while building OpenDocument stories and text runs.
+- Add optional Rust model fields `NoteReference.label`, `NumberingLevelDefinition.minimum_digits`, `NumberingAbstractDefinition.consecutive_numbering`, and `NumberingInstanceDefinition.consecutive_list_id`; struct literals must initialize them. Older serialized models remain readable.
+- Update the shared OpenDocument, artwork and chart dependencies; release matching `duke-pages-wasm` bindings.
+
 ## 0.3.1
 
 - Render supported OpenDocument charts and enhanced drawing geometry, preserve cached chart data in extraction bundles independently of artwork, and retain exact numeric strings and sparse indices.

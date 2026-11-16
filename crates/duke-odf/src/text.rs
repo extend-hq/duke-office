@@ -261,10 +261,10 @@ impl<'l> Ctx<'l> {
 
 /// Reads the block content of a body, cell, text box, note, header or shape.
 pub(crate) fn parse_blocks(parent: Node<'_, '_>, ctx: &mut Ctx<'_>) -> Vec<Block> {
-    let mut blocks = Vec::new();
     if !ctx.enter() {
-        return blocks;
+        return Vec::new();
     }
+    let mut blocks = Vec::with_capacity(elements(parent).take(4).count());
     for node in elements(parent) {
         if !ctx.count() {
             break;
@@ -300,6 +300,7 @@ pub(crate) fn parse_blocks(parent: Node<'_, '_>, ctx: &mut Ctx<'_>) -> Vec<Block
                     blocks.push(Block::Shape(Box::new(shape)));
                 }
             }
+            None => blocks.extend(parse_blocks(node, ctx)),
             Some(namespace) if is_foreign(namespace) => blocks.extend(parse_blocks(node, ctx)),
             _ => {}
         }
@@ -315,7 +316,7 @@ fn is_foreign(namespace: Ns) -> bool {
 }
 
 fn parse_paragraph(node: Node<'_, '_>, ctx: &mut Ctx<'_>) -> Paragraph {
-    let mut inlines = Vec::new();
+    let mut inlines = Vec::with_capacity(node.children().take(4).count());
     let mut after_space = true;
     parse_inlines(node, ctx, &mut inlines, &mut after_space);
     Paragraph {
@@ -395,7 +396,7 @@ fn parse_inlines(
         match node.tag_name().namespace() {
             Some(TEXT) => match name {
                 "span" => {
-                    let mut children = Vec::new();
+                    let mut children = Vec::with_capacity(node.children().take(4).count());
                     parse_inlines(node, ctx, &mut children, after_space);
                     if !children.is_empty() {
                         out.push(Inline::Span {
@@ -405,7 +406,7 @@ fn parse_inlines(
                     }
                 }
                 "a" => {
-                    let mut children = Vec::new();
+                    let mut children = Vec::with_capacity(node.children().take(4).count());
                     parse_inlines(node, ctx, &mut children, after_space);
                     out.push(Inline::Link {
                         href: attr(node, XLINK, "href").unwrap_or_default().to_owned(),
@@ -493,6 +494,13 @@ fn parse_inlines(
                     text: text_content(node),
                 });
             }
+            Some(crate::xml::LO_EXT) if name == "page-name" => {
+                out.push(Inline::Field {
+                    kind: name.to_owned(),
+                    text: text_content(node),
+                });
+            }
+            None => parse_inlines(node, ctx, out, after_space),
             Some(namespace) if is_foreign(namespace) => parse_inlines(node, ctx, out, after_space),
             _ => {}
         }
