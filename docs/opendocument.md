@@ -61,6 +61,8 @@ Imported: paragraphs and headings with named and automatic styles, character for
 How it appears in the model:
 
 - **Formatting is resolved.** Every paragraph and run carries its final formatting, worked out through the automatic style, its named ancestors and the document defaults. Named paragraph styles are also listed as style definitions with the same inheritance. `Standard` is the default style `Normal`; `Heading 1` to `Heading 9`, and styles with an outline level, are headings, so heading classification in structured blocks works as it does for DOCX.
+- **Numbered labels** retain supported custom templates, legal numbering and decimal padding through optional `minimumDigits` metadata. New top-level lists start from their style's starting value; explicit continuations retain their numbering. Aggregate table text includes the existing paragraph labels.
+- **Note citations** retain their stored display label in optional `noteReference.label` metadata. Structured text includes the label with UTF-16 inline offsets. The underlying run text remains empty; viewers that generate their own note numbers need to consume this metadata to display custom labels. Empty source citations stay empty.
 - **No Word markup.** `source_xml` is absent on every paragraph, table and image. Two things the Word path reads from that markup are stated as data instead: a field's instruction is on its run (`fieldInstruction`), and a comment's anchor is a list of child ranges on the paragraph (`commentRanges`).
 - **Images** carry their bytes, content type and the package path they came from. A text frame is an image node whose content is a story of its own (`contentNodes`); no picture of the frame is generated.
 - **Sources are named after OpenDocument parts.** Blocks of the body, notes and comments report `content.xml`; headers and footers report `styles.xml/header1`, `styles.xml/footer1` and so on. The document identity is the SHA-256 of the file.
@@ -75,7 +77,9 @@ Not imported, each reported in the model's `warnings`:
 
 A table row carrying a spreadsheet repeat count (`table:number-rows-repeated`) is shown once, as LibreOffice Writer shows it. A list start value above 32767 is treated as 1, which is also what LibreOffice displays. A page break after a paragraph is stored as a page break before the next one.
 
-An OpenDocument file cannot be saved as DOCX or back to OpenDocument: serialization writes a Word package from Word source markup, and this path has neither.
+Consecutive numbering across list levels is preserved in optional `consecutiveNumbering` and `consecutiveListId` metadata. Structured extraction shares the counter across nested levels and explicit restarts, while independent lists retain separate counters. Bulleted ancestors no longer suppress a descendant's numeric label. A restart on an item containing only sublists does not restart a later visible paragraph.
+
+Numbering style overrides, some continuations of ordinary hierarchical lists and levels beyond the common model's nine-level limit remain incomplete. Lossless round-trip export to OpenDocument is not implemented. Imported OpenDocument features are not guaranteed to round-trip through the generic Word serializer; image paint, custom citation labels and consecutive numbering need separate handling.
 
 ## Presentations and drawings
 
@@ -85,17 +89,25 @@ Master-page decorations appear on every slide with a `master:` id prefix, as inh
 
 Text typed onto a picture becomes a text shape grouped with the picture in the same frame.
 
+Text stored in WMF/EMF records, modern SVM/StarView records and SVG text elements is retained as optional `textContent` metadata on image and object nodes. Chart nodes carry visible labels recovered from their vector preview or the native chart renderer, including generated axis ticks, data labels and chart tables. Structured blocks and bundles expose this text as the object's content and retain its source in `details.textContent`. The image or chart remains the drawable object; no duplicate text shape is added. This is stored-text recovery, not OCR or full vector rendering.
+
+Structured extraction of presentations separates text regions at clear horizontal or vertical gaps and reads complete rectangular grids by row. A bounded tolerance permits edge overlaps of up to half a point, capped at 1% of the object's dimension. Larger ambiguous overlaps and unsupported geometry retain source order. Groups retain their boundaries, and block IDs and source node paths remain stable. Drawing node arrays retain their original order. Drawings keep their existing extraction order; text within a single frame is not reflowed or split into columns.
+
 Shapes carry typed geometry, fill and line, as legacy `.ppt` shapes do; `shapeSvg` is not generated. Not yet imported:
 
 - Custom shapes whose outline needs formula evaluation are drawn as rectangles, with a `shape-geometry-approximated` warning.
-- An embedded chart becomes a chart node with its title, categories, series names and values, grouped with its preview image when that image is in a format a browser draws. No chart picture is generated, so a chart without such a preview carries data but draws nothing.
-- An embedded text document or spreadsheet is represented by its preview image when a browser can draw it. Otherwise its own content is used: the text as a text shape, the spreadsheet's used cells as a table (up to 200 rows and 50 columns). Other embedded objects become their preview image or an `unknown` node.
+- Embedded charts retain native data and use a saved preview or generated artwork for supported chart types. Unsupported artwork retains the chart data.
+- An embedded text document or spreadsheet is represented by its preview image when a browser can draw it, with recovered preview text or native text retained in `textContent`. Otherwise its own content is used: the text as a text shape, the spreadsheet's used cells as a table (up to 200 rows and 50 columns). Other embedded objects become their preview image or an `unknown` node; a supported vector preview can supply text, but their binary document payload is not decoded.
+- Raster text, arbitrary outlined glyphs, legacy `SVGD` streams and complete vector clipping/occlusion are not decoded. Vector spans use geometric reading order within each object; modern SVM joins explicitly drawn contiguous ranges of the same string within text-shape and paragraph boundaries. Chart legends and table rows can still interleave.
+- List-label metadata is retained for rendering, but slide text extraction omits generated labels. Impress numbering differs from the text-document path, including some restart and continuation behavior.
 - Audio and video become `unknown` nodes. Animations, transitions and slide comments are not read.
 - Image cropping and hatch fills are ignored.
 
 ## Limits
 
 `duke-odf::Limits` bounds input size, ZIP entry count, per-entry and total inflated size, XML nodes per part, content nesting depth and content element count. `duke-slides` maps its `ParseLimits` onto them. Table repeat counts are stored as counts by `duke-odf` and expanded by the adapters under their own caps, so a few bytes cannot declare millions of cells.
+
+Vector text recovery additionally limits each input to 32 MiB, recovered text to 1 MiB, records/nodes to 250,000 and nesting to 128 SVG levels, 32 nested SVM drawings or 256 saved drawing states. Recovered object text counts against structured-extraction text budgets. Presentation reading-order inference stops at 64 levels or 4096 siblings and retains source order beyond those limits.
 
 ## Validation
 
@@ -109,7 +121,15 @@ November 12, 2026, LibreOffice 26.2 as the converter. These are import-parity ch
 
 A comparison with other Rust crates and general-purpose parsers on 764 files, with accuracy and timings, is in [OpenDocument benchmarks](opendocument-benchmarks.md).
 
+The [November 16 presentation text investigation](opendocument-text-accuracy-20261116.md) separates reading-order and reference-export differences from parser defects, fixes slide-scoped fields and foreign-wrapper text loss, and records a fresh baseline/candidate benchmark.
+
+The [November 16 chart and vector text follow-up](opendocument-visual-text-20261116.md) adds object text recovery and measures accuracy and extraction cost against that corrected baseline.
+
+The [November 16 reading-order and SVM follow-up](opendocument-order-svm-20261116.md) adds presentation extraction order and modern StarView text recovery, with a fresh comparison against the object-text parser.
+
+The [continuing F1 and latency log](opendocument-hillclimb-20261116.md) records subsequent measured improvements for text documents and presentations.
+
 ## Adopting it downstream
 
-- **Viewers:** accept the new extensions and, for presentations, the `odp` and `odg` format values, then rebuild the WebAssembly bundle against the new crate versions. Presentations need no rendering changes. For text documents the model is the same, with three things to handle: the package beside it is empty, a text frame is drawn from its `contentNodes` because it has no generated picture, and saving is not available.
+- **Viewers:** accept the new extensions and, for presentations, the `odp` and `odg` format values, then rebuild the WebAssembly bundle against the new crate versions. Presentations need no rendering changes. Text documents have an empty package beside the model, and text frames retain their `contentNodes`. Consume `noteReference.label` and `minimumDigits` to reproduce imported citation and numbered labels. OpenDocument round-trip saving is not supported.
 - **Hosts:** route the media types above to the Word or presentation path, and call an entry point that returns a model or blocks, not `parse_document_bytes`. Block and bundle shapes are unchanged, so existing mappers apply. Highlighting that matches server block IDs against the viewer's own parse needs both sides on the same crate version.

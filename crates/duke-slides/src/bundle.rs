@@ -313,8 +313,10 @@ fn enrich_node(
             ..
         } => {
             block.details["childTransform"] = json!(child_transform);
-            for (child, node) in block.children.iter_mut().zip(children) {
-                enrich_node(child, node, assets, charts, warnings)?;
+            for child in &mut block.children {
+                if let Some(node) = child.source_refs.first().and_then(|s| s.node_path.last()).and_then(|i| children.get(*i)) {
+                    enrich_node(child, node, assets, charts, warnings)?;
+                }
             }
         }
         SlideNode::Table {

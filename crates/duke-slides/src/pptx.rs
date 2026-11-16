@@ -1340,6 +1340,7 @@ fn node_metadata(
     let description = properties.attr("descr").map(str::to_owned);
     let title = properties.attr("title").map(str::to_owned);
     Some(crate::NodeMetadata {
+        text_content: None,
         editing: nonvisual_properties(node).and_then(|properties| {
             properties.children().iter().filter_map(|child| child.source_xml())
                 .find_map(|xml| context.editing_cache.borrow_mut().parse(xml))

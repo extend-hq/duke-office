@@ -18,6 +18,8 @@ pub fn image_extension(bytes: &[u8], name: &str) -> Option<&'static str> {
         Some("emf")
     } else if head.starts_with(b"\xd7\xcd\xc6\x9a") || head.starts_with(b"\x01\x00\x09\x00") {
         Some("wmf")
+    } else if head.starts_with(b"VCLMTF") {
+        Some("svm")
     } else if head.starts_with(b"RIFF") && head.get(8..12) == Some(b"WEBP") {
         Some("webp")
     } else if String::from_utf8_lossy(head).contains("<svg") {
@@ -32,6 +34,7 @@ pub fn image_extension(bytes: &[u8], name: &str) -> Option<&'static str> {
             Some("emf") => Some("emf"),
             Some("wmf") => Some("wmf"),
             Some("svg") => Some("svg"),
+            Some("svm") => Some("svm"),
             Some("webp") => Some("webp"),
             _ => None,
         }
@@ -48,6 +51,7 @@ pub fn image_content_type(extension: &str) -> &'static str {
         "tiff" => "image/tiff",
         "emf" => "image/x-emf",
         "wmf" => "image/x-wmf",
+        "svm" => "application/x-openoffice-gdimetafile",
         "webp" => "image/webp",
         _ => "image/svg+xml",
     }

@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::fmt::Write;
 
 use crate::model::{
-    NumberingDefinitionSet, NumberingInstanceDefinition, NumberingLevelDefinition,
-    ParagraphChildNode, ParagraphNode, ParagraphStyleDefinition, TextStyle,
+    NumberingAbstractDefinition, NumberingDefinitionSet, NumberingInstanceDefinition,
+    NumberingLevelDefinition, ParagraphChildNode, ParagraphNode, ParagraphStyleDefinition, TextStyle,
 };
 
 const LEVELS: usize = 9;
@@ -11,7 +11,7 @@ const LEVEL_KEYS: [&str; LEVELS] = ["0", "1", "2", "3", "4", "5", "6", "7", "8"]
 const MAX_LABEL_BYTES: usize = 4096;
 
 pub(super) struct ListDefinitions<'a> {
-    abstracts: HashMap<i64, &'a [NumberingLevelDefinition]>,
+    abstracts: HashMap<i64, &'a NumberingAbstractDefinition>,
     instances: HashMap<i64, &'a NumberingInstanceDefinition>,
     paragraph_run_styles: HashMap<&'a str, &'a TextStyle>,
 }
@@ -34,7 +34,7 @@ impl<'a> ListDefinitions<'a> {
                 definitions
                     .abstracts
                     .iter()
-                    .map(|a| (a.abstract_num_id, a.levels.as_slice())),
+                    .map(|a| (a.abstract_num_id, a)),
             );
             result
                 .instances
@@ -57,6 +57,7 @@ impl<'a> ListDefinitions<'a> {
             .or_else(|| {
                 self.abstracts
                     .get(&instance.abstract_num_id)?
+                    .levels
                     .iter()
                     .find(|l| l.ilvl == key)
             })
@@ -101,6 +102,7 @@ pub(super) struct StoryLists {
     counters: HashMap<i64, [Option<u64>; LEVELS]>,
     initialized_levels: HashMap<i64, [bool; LEVELS]>,
     abstract_counters: HashMap<i64, [Option<u64>; LEVELS]>,
+    consecutive_counters: HashMap<i64, u64>,
     follows_separator: bool,
 }
 
@@ -129,11 +131,16 @@ impl StoryLists {
         let index = usize::try_from(num.ilvl).ok().filter(|&i| i < LEVELS)?;
         let instance = definitions.instances.get(&num.num_id)?;
         let level = definitions.level(instance, index)?;
-        let counters = self.counters.entry(num.num_id).or_default();
-        let shared = self
-            .abstract_counters
-            .entry(instance.abstract_num_id)
-            .or_default();
+        let consecutive = definitions
+            .abstracts
+            .get(&instance.abstract_num_id)
+            .is_some_and(|definition| definition.consecutive_numbering == Some(true));
+        let counter_id = if consecutive {
+            instance.consecutive_list_id.unwrap_or(num.num_id)
+        } else {
+            num.num_id
+        };
+        let counters = self.counters.entry(counter_id).or_default();
         let initialized = self.initialized_levels.entry(num.num_id).or_default();
         let start = |i: usize, include_override: bool| {
             include_override
@@ -148,51 +155,78 @@ impl StoryLists {
                 .and_then(|n| u64::try_from(n).ok())
                 .unwrap_or(1)
         };
-        let restart_trigger = |i: usize| {
-            definitions
-                .level(instance, i)
-                .and_then(|l| l.lvl_restart)
-                .filter(|&r| (0..=i as i64).contains(&r))
-                .unwrap_or(i as i64)
-        };
-        // Related instances share outline progress, but explicit starts apply on first use.
-        let mut parent_changed = false;
-        for (i, count) in counters[..index].iter_mut().enumerate() {
-            if let Some(value) = shared[i] {
-                parent_changed |= *count != Some(value) && (i as i64) < restart_trigger(index);
-                *count = Some(value);
-            } else {
+        if consecutive {
+            let first_use = !initialized.iter().any(|&value| value);
+            let restart = (num.num_id != counter_id && first_use)
+                .then(|| {
+                    let starts = instance.level_start_overrides.as_ref()?;
+                    LEVEL_KEYS.iter().find_map(|key| starts.get(*key).copied())
+                })
+                .flatten()
+                .and_then(|value| u64::try_from(value).ok());
+            let value = restart
+                .or_else(|| {
+                    self.consecutive_counters.get(&counter_id).map(|n| n.saturating_add(1))
+                })
+                .unwrap_or_else(|| start(0, true));
+            for (i, count) in counters[..index].iter_mut().enumerate() {
                 count.get_or_insert_with(|| start(i, true));
             }
-        }
-        let current = if parent_changed {
-            None
+            counters[index] = Some(value);
+            counters[index + 1..].fill(None);
+            initialized[index] = true;
+            self.consecutive_counters.insert(counter_id, value);
         } else {
-            counters[index]
-        };
-        let first_use = !initialized[index];
-        let has_start_override = instance
-            .level_start_overrides
-            .as_ref()
-            .is_some_and(|s| s.contains_key(LEVEL_KEYS[index]))
-            || instance
-                .level_overrides
-                .iter()
-                .flatten()
-                .any(|l| l.ilvl == num.ilvl && l.start.is_some());
-        let continued = if first_use && current.is_none() && has_start_override {
-            None
-        } else {
-            shared[index].or(current)
-        };
-        counters[index] =
-            Some(continued.map_or_else(|| start(index, first_use), |n| n.saturating_add(1)));
-        initialized[index] = true;
-        shared[..=index].copy_from_slice(&counters[..=index]);
-        for (i, count) in counters.iter_mut().enumerate().skip(index + 1) {
-            if (index as i64) < restart_trigger(i) {
-                *count = None;
-                shared[i] = None;
+            let shared = self
+                .abstract_counters
+                .entry(instance.abstract_num_id)
+                .or_default();
+            let restart_trigger = |i: usize| {
+                definitions
+                    .level(instance, i)
+                    .and_then(|l| l.lvl_restart)
+                    .filter(|&r| (0..=i as i64).contains(&r))
+                    .unwrap_or(i as i64)
+            };
+            // Related instances share outline progress, but explicit starts apply on first use.
+            let mut parent_changed = false;
+            for (i, count) in counters[..index].iter_mut().enumerate() {
+                if let Some(value) = shared[i] {
+                    parent_changed |= *count != Some(value) && (i as i64) < restart_trigger(index);
+                    *count = Some(value);
+                } else {
+                    count.get_or_insert_with(|| start(i, true));
+                }
+            }
+            let current = if parent_changed {
+                None
+            } else {
+                counters[index]
+            };
+            let first_use = !initialized[index];
+            let has_start_override = instance
+                .level_start_overrides
+                .as_ref()
+                .is_some_and(|s| s.contains_key(LEVEL_KEYS[index]))
+                || instance
+                    .level_overrides
+                    .iter()
+                    .flatten()
+                    .any(|l| l.ilvl == num.ilvl && l.start.is_some());
+            let continued = if first_use && current.is_none() && has_start_override {
+                None
+            } else {
+                shared[index].or(current)
+            };
+            counters[index] =
+                Some(continued.map_or_else(|| start(index, first_use), |n| n.saturating_add(1)));
+            initialized[index] = true;
+            shared[..=index].copy_from_slice(&counters[..=index]);
+            for (i, count) in counters.iter_mut().enumerate().skip(index + 1) {
+                if (index as i64) < restart_trigger(i) {
+                    *count = None;
+                    shared[i] = None;
+                }
             }
         }
         // A style separator joins the next paragraph to this one. Both advance
@@ -210,12 +244,13 @@ impl StoryLists {
             if ch == '%' && chars.peek().is_some_and(|c| matches!(c, '1'..='9')) {
                 let i = chars.next()? as usize - '1' as usize;
                 if i <= index {
+                    let referenced = definitions.level(instance, i)?;
                     let fmt = if level.is_lgl == Some(true) {
                         Some("decimal")
                     } else {
-                        definitions.level(instance, i)?.format.as_deref()
+                        referenced.format.as_deref()
                     };
-                    write_counter(&mut label, counters[i]?, fmt)?;
+                    write_counter(&mut label, counters[i]?, fmt, referenced.minimum_digits)?;
                 }
             } else {
                 label.push(match (level.format.as_deref(), ch) {
@@ -234,10 +269,15 @@ impl StoryLists {
     }
 }
 
-fn write_counter(out: &mut String, n: u64, format: Option<&str>) -> Option<()> {
+fn write_counter(out: &mut String, n: u64, format: Option<&str>, minimum_digits: Option<u8>) -> Option<()> {
+    if n == 0 && minimum_digits.is_some() && matches!(format, None | Some("decimal" | "decimalZero")) {
+        out.push('0');
+        return Some(());
+    }
+    let width = usize::from(minimum_digits.unwrap_or(0));
     match format.unwrap_or("decimal") {
-        "decimal" => write!(out, "{n}").ok()?,
-        "decimalZero" => write!(out, "{n:02}").ok()?,
+        "decimal" => write!(out, "{n:0width$}").ok()?,
+        "decimalZero" => write!(out, "{n:0width$}", width = width.max(2)).ok()?,
         "lowerLetter" | "upperLetter" if n > 0 => {
             let base = if format == Some("lowerLetter") {
                 b'a'

@@ -231,6 +231,7 @@ pub fn parse_numbering_level_definition(
             )
         }),
         format: num_fmt_tag.as_deref().and_then(|tag| get_attribute(tag, "w:val")),
+        minimum_digits: None,
         text: lvl_text_tag
             .as_deref()
             .and_then(|tag| get_attribute(tag, "w:val"))
@@ -334,6 +335,7 @@ fn parse_numbering_xml(
             NumberingAbstractDefinition {
                 abstract_num_id: abstract_definition.abstract_num_id,
                 levels: linked_levels,
+                consecutive_numbering: None,
             }
         })
         .collect();
@@ -387,6 +389,7 @@ fn parse_numbering_xml(
                 Some(NumberingInstanceDefinition {
                     num_id: num_id.round() as i64,
                     abstract_num_id: abstract_num_id.round() as i64,
+                    consecutive_list_id: None,
                     level_start_overrides: if level_start_overrides.is_empty() {
                         None
                     } else {
