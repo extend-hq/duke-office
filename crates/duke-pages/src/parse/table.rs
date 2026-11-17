@@ -318,6 +318,7 @@ fn parse_table_cell_properties(source: Option<&str>) -> ParsedTableCellResult {
         || borders.is_some();
     ParsedTableCellResult {
         cell: TableCellNode {
+            native_value: None,
             r#type: TableCellNodeType::TableCell,
             style: if has_cell_style {
                 Some(TableCellStyle {

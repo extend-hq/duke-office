@@ -165,6 +165,8 @@ pub struct TableCellDetails {
     pub row_index: usize,
     pub column_index: i64,
     pub cell_index: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_value: Option<Box<NativeCellValue>>,
     pub column_span: i64,
     pub row_span: i64,
     pub is_header: bool,
@@ -568,9 +570,24 @@ impl Extractor<'_> {
         let block_id = &block.id;
         let content = &block.content;
         let length = utf16_len(content);
+        let mut boundaries = Vec::new();
+        if let BlockDetails::Paragraph(paragraph) = &block.details {
+            let mut byte = 0;
+            for inline in &paragraph.inlines {
+                match inline {
+                    ParagraphInline::Text { text, .. } | ParagraphInline::FormField { text, .. } => byte += text.len(),
+                    ParagraphInline::Block { .. } => boundaries.push(byte),
+                }
+            }
+        }
         let mut offset = 0;
-        content
-            .split_word_bounds()
+        let mut previous = 0;
+        boundaries.into_iter().chain(std::iter::once(content.len()))
+            .flat_map(|end| {
+                let section = &content[previous..end];
+                previous = end;
+                section.split_word_bounds()
+            })
             .filter_map(|word| {
                 let start = offset;
                 offset += utf16_len(word);
@@ -607,8 +624,8 @@ impl Extractor<'_> {
             .collect()
     }
 
-    fn story_block(&mut self, nodes: &[DocNode], kind: BlockType) -> DocumentBlock {
-        let id = format!("docx:{}/{}/story", self.document_id, self.part_name);
+    fn story_block(&mut self, nodes: &[DocNode], kind: BlockType, story_key: &str) -> DocumentBlock {
+        let id = format!("docx:{}/{story_key}/story", self.document_id);
         let children = self.story_nodes(nodes, Some(&id));
         let content = joined_block_content(&children, "\n");
         let refs = children
@@ -849,14 +866,18 @@ impl Extractor<'_> {
                             details["imageUrl"] = Value::String(url);
                         }
                     }
-                    children.push(self.block(
+                    let mut object = self.block(
                         image_id.to_string(),
                         kind,
                         text,
                         details,
                         nested,
                         Some(id),
-                    ));
+                    );
+                    if self.include_words && object.r#type == BlockType::Formula {
+                        object.words = Some(self.words(&object));
+                    }
+                    children.push(object);
                 }
             }
         }
@@ -950,6 +971,7 @@ impl Extractor<'_> {
                         row_index: ri,
                         column_index,
                         cell_index: ci,
+                        native_value: cell.native_value.clone(),
                         column_span: cell.style.as_ref().and_then(|s| s.grid_span).unwrap_or(1),
                         row_span: cell.style.as_ref().and_then(|s| s.row_span).unwrap_or(1),
                         is_header,
@@ -1017,7 +1039,9 @@ fn without_empty_blocks(
         if block.parent_block_id.as_deref() != parent {
             block.parent_block_id = parent.map(str::to_string);
         }
-        if anchors.contains(block.id.as_str()) || block_has_visible_text(block) || matches!(block.r#type,
+        let grid_cell = matches!(&block.details, BlockDetails::TableCell(cell)
+            if !cell.style.as_ref().is_some_and(|style| style.v_merge_continuation == Some(true)));
+        if grid_cell || anchors.contains(block.id.as_str()) || block_has_visible_text(block) || matches!(block.r#type,
             BlockType::Figure | BlockType::Formula | BlockType::Barcode
                 | BlockType::Watermark | BlockType::KeyValue)
         {
@@ -1112,6 +1136,8 @@ fn extract(
             review.final_section(section, source);
         }
     }
+    let story_part = |key: &String| model.metadata.source_part_names.as_ref()
+        .and_then(|names| names.get(key)).unwrap_or(key).clone();
     let mut seen = HashSet::new();
     let headers = model.metadata.header_sections.iter().chain(
         model
@@ -1125,9 +1151,9 @@ fn extract(
         if !seen.insert(header.part_name.clone()) {
             continue;
         }
-        extractor.part_name = header.part_name.clone();
+        extractor.part_name = story_part(&header.part_name);
         extractor.story = "header".into();
-        blocks.push(extractor.story_block(&header.nodes, BlockType::Header));
+        blocks.push(extractor.story_block(&header.nodes, BlockType::Header, &header.part_name));
     }
     let footers = model.metadata.footer_sections.iter().chain(
         model
@@ -1141,9 +1167,9 @@ fn extract(
         if !seen.insert(footer.part_name.clone()) {
             continue;
         }
-        extractor.part_name = footer.part_name.clone();
+        extractor.part_name = story_part(&footer.part_name);
         extractor.story = "footer".into();
-        blocks.push(extractor.story_block(&footer.nodes, BlockType::Footer));
+        blocks.push(extractor.story_block(&footer.nodes, BlockType::Footer, &footer.part_name));
     }
     for (kind, notes) in [
         ("footnote", &model.metadata.footnotes),

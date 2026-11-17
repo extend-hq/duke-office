@@ -276,7 +276,7 @@ fn carries_no_word_markup() {
     assert!(blocks.iter().all(|block| block
         .source_refs
         .iter()
-        .all(|source| source.part_name == "content.xml" || source.part_name.starts_with("styles.xml/"))));
+        .all(|source| source.part_name == "content.xml" || source.part_name == "styles.xml")));
     assert!(blocks.iter().any(|block| block.content == "End" && block.source_refs[0].story == "endnote"));
     assert!(blocks
         .iter()
@@ -288,7 +288,7 @@ fn imports_tables_with_merged_cells() {
     let bytes = text_document(concat!(
         r#"<table:table table:name="T"><table:table-column table:number-columns-repeated="3"/>"#,
         r#"<table:table-header-rows><table:table-row><table:table-cell><text:p>A</text:p></table:table-cell><table:table-cell><text:p>B</text:p></table:table-cell><table:table-cell><text:p>C</text:p></table:table-cell></table:table-row></table:table-header-rows>"#,
-        r#"<table:table-row><table:table-cell table:number-columns-spanned="2"><text:p>Wide</text:p></table:table-cell><table:covered-table-cell/><table:table-cell table:number-rows-spanned="2"><text:p>Tall</text:p></table:table-cell></table:table-row>"#,
+        r#"<table:table-row><table:table-cell table:number-columns-spanned="2" office:value-type="float" office:value="2" table:formula="of:=1+1"><text:p>Wide</text:p></table:table-cell><table:covered-table-cell/><table:table-cell table:number-rows-spanned="2"><text:p>Tall</text:p></table:table-cell></table:table-row>"#,
         r#"<table:table-row><table:table-cell><text:p>Left</text:p></table:table-cell><table:table-cell><text:p>Middle</text:p></table:table-cell><table:covered-table-cell/></table:table-row>"#,
         r#"</table:table><text:p>After</text:p>"#,
     ));
@@ -298,6 +298,9 @@ fn imports_tables_with_merged_cells() {
     assert_eq!(table.rows[0].style.as_ref().unwrap().is_header, Some(true));
     let wide = table.rows[1].cells[0].style.as_ref().unwrap();
     assert_eq!(wide.grid_span, Some(2));
+    let native = table.rows[1].cells[0].native_value.as_ref().unwrap();
+    assert_eq!(native.value.as_deref(), Some("2"));
+    assert_eq!(native.formula.as_deref(), Some("of:=1+1"));
     // The merged cell counts the rows it covers; the cell below continues it.
     let tall = table.rows[1].cells[1].style.as_ref().unwrap();
     assert_eq!(tall.row_span, Some(2));
@@ -501,7 +504,7 @@ fn formulas_keep_their_mathml() {
     let structured = extract_document_blocks(&model);
     let mut blocks = Vec::new();
     flatten(&structured.blocks, &mut blocks);
-    assert!(blocks.iter().any(|block| block.r#type == BlockType::Formula));
+    assert!(blocks.iter().any(|block| block.r#type == BlockType::Formula && block.content == "r"));
 }
 
 #[test]

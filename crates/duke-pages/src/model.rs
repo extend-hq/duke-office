@@ -1260,6 +1260,17 @@ pub enum TableCellContentNode {
     Table(Box<TableNode>),
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NativeCellValue {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value_type: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub value: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub formula: Option<String>,
+}
+
 /// Mirrors TypeScript `TableCellNode`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -1267,6 +1278,8 @@ pub struct TableCellNode {
     #[serde(default = "default_table_cell_node_type", rename = "type")]
     pub r#type: TableCellNodeType,
     pub nodes: Vec<TableCellContentNode>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub native_value: Option<Box<NativeCellValue>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub style: Option<TableCellStyle>,
 }
