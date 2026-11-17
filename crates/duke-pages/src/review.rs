@@ -525,7 +525,7 @@ fn collect(model: &DocModel, revisions: bool) -> DocumentReview {
             if seen.insert(section.part_name.clone()) {
                 collector.story(
                     &section.nodes,
-                    &section.part_name,
+                    crate::structured::story_source_part(model, &section.part_name),
                     kind,
                     &format!("{root}/{}", section.part_name),
                 );
@@ -543,7 +543,7 @@ fn collect(model: &DocModel, revisions: bool) -> DocumentReview {
         if seen.insert(section.part_name.clone()) {
             collector.story(
                 &section.nodes,
-                &section.part_name,
+                crate::structured::story_source_part(model, &section.part_name),
                 "footer",
                 &format!("{root}/{}", section.part_name),
             );

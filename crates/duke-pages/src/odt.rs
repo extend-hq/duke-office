@@ -95,26 +95,6 @@ fn build_model(bytes: &[u8]) -> Result<DocModel, String> {
     Ok(Builder::new(&document, binaries, masters).build(body))
 }
 
-fn formula_text(math: &str) -> Option<String> {
-    use quick_xml::{events::Event, Reader};
-    let mut reader = Reader::from_str(math);
-    let mut text = String::new();
-    loop {
-        match reader.read_event().ok()? {
-            Event::Start(tag) => match tag.local_name().as_ref() {
-                "mi" | "mn" | "mo" | "ms" | "mtext" => {
-                    let value = reader.read_text(tag.name()).ok()?;
-                    text.push_str(&crate::xml::decode_xml_entities(&value));
-                }
-                "annotation" | "annotation-xml" => { reader.read_to_end(tag.name()).ok()?; }
-                _ => {}
-            },
-            Event::Eof => return (!text.is_empty()).then_some(text),
-            _ => {}
-        }
-    }
-}
-
 fn pixels(length: Length) -> f64 {
     length.0 as f64 / EMU_PER_PIXEL
 }
@@ -1514,9 +1494,6 @@ impl<'a> Builder<'a> {
                         out.push(ParagraphChildNode::Image(Box::new(image)));
                     }
                     if let Some(ParagraphChildNode::Image(image)) = out.get_mut(before) {
-                        if let Some(text) = formula_text(&math) {
-                            image.text_box_text = Some(text);
-                        }
                         image.math_ml = Some(math);
                         image.semantic_kind = Some("formula".into());
                     }

@@ -193,7 +193,7 @@ fn frame_kind(node: Node<'_, '_>, ctx: &mut Ctx<'_>, text: &mut Vec<Block>) -> S
                             }
                         }
                     }
-                    let math = child(content, MATHML, "math").map(|math| math.source().to_owned());
+                    let math = child(content, MATHML, "math").map(|math| math.standalone_source());
                     return ShapeKind::Object {
                         href,
                         replacement: images.next().and_then(|image| image_reference(image, ctx)),

@@ -491,8 +491,8 @@ fn comments_keep_the_text_they_are_anchored_to() {
 #[test]
 fn formulas_keep_their_mathml() {
     let bytes = text_document(concat!(
-        r#"<text:p>Area <draw:frame text:anchor-type="as-char" svg:width="1in" svg:height="0.25in"><draw:object>"#,
-        r#"<math:math xmlns:math="http://www.w3.org/1998/Math/MathML"><math:mi>r</math:mi></math:math>"#,
+        r#"<text:p>Area <draw:frame text:anchor-type="as-char" svg:width="1in" svg:height="0.25in" xmlns:math="http://www.w3.org/1998/Math/MathML"><draw:object>"#,
+        r#"<math:math><math:mi>r</math:mi></math:math>"#,
         r#"</draw:object></draw:frame></text:p>"#,
     ));
     let model = parse_odt(&bytes).unwrap();

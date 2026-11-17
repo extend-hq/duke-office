@@ -377,6 +377,25 @@ fn source_part(model: &DocModel, kind: &str) -> String {
         .unwrap_or_else(|| format!("word/{kind}.xml"))
 }
 
+pub(crate) fn story_source_part<'a>(model: &'a DocModel, key: &'a str) -> &'a str {
+    model.metadata.source_part_names.as_ref()
+        .and_then(|names| names.get(key)).map(String::as_str).unwrap_or(key)
+}
+
+fn formula_text(math: &str) -> Option<String> {
+    const MATH: &str = "http://www.w3.org/1998/Math/MathML";
+    let document = roxmltree::Document::parse(math).ok()?;
+    let mut text = String::new();
+    for token in document.descendants().filter(|node| node.tag_name().namespace() == Some(MATH)
+        && matches!(node.tag_name().name(), "mi" | "mn" | "mo" | "ms" | "mtext"))
+    {
+        if !token.ancestors().any(|node| node.has_tag_name((MATH, "annotation-xml"))) {
+            text.extend(token.children().filter(|n| n.is_text()).filter_map(|n| n.text()));
+        }
+    }
+    (!text.is_empty()).then_some(text)
+}
+
 fn indexed_path<const N: usize>(prefix: &str, components: [(&str, usize); N]) -> String {
     let mut buffers: [itoa::Buffer; N] = std::array::from_fn(|_| itoa::Buffer::new());
     let mut numbers = [""; N];
@@ -824,7 +843,9 @@ impl Extractor<'_> {
                         .as_ref()
                         .map(|nodes| self.story_nodes(nodes, Some(image_id)))
                         .unwrap_or_default();
-                    let text = if nested.is_empty() {
+                    let text = if kind == BlockType::Formula && image.source_xml.is_none() {
+                        image.math_ml.as_deref().and_then(formula_text).or_else(|| image.alt.clone()).unwrap_or_default()
+                    } else if nested.is_empty() {
                         image
                             .text_box_text
                             .clone()
@@ -1136,8 +1157,6 @@ fn extract(
             review.final_section(section, source);
         }
     }
-    let story_part = |key: &String| model.metadata.source_part_names.as_ref()
-        .and_then(|names| names.get(key)).unwrap_or(key).clone();
     let mut seen = HashSet::new();
     let headers = model.metadata.header_sections.iter().chain(
         model
@@ -1151,7 +1170,7 @@ fn extract(
         if !seen.insert(header.part_name.clone()) {
             continue;
         }
-        extractor.part_name = story_part(&header.part_name);
+        extractor.part_name = story_source_part(model, &header.part_name).to_owned();
         extractor.story = "header".into();
         blocks.push(extractor.story_block(&header.nodes, BlockType::Header, &header.part_name));
     }
@@ -1167,7 +1186,7 @@ fn extract(
         if !seen.insert(footer.part_name.clone()) {
             continue;
         }
-        extractor.part_name = story_part(&footer.part_name);
+        extractor.part_name = story_source_part(model, &footer.part_name).to_owned();
         extractor.story = "footer".into();
         blocks.push(extractor.story_block(&footer.nodes, BlockType::Footer, &footer.part_name));
     }
