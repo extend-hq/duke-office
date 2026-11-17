@@ -1,12 +1,12 @@
 [package]
 name = "duke-pages"
-version = "0.4.0"
+version = "0.5.0"
 edition.workspace = true
 license.workspace = true
-description = "Rust parser, document model, and serializer for DOCX and legacy Word documents"
+description = "Native DOCX, DOC and ODT parsing with a shared document model and DOCX serialization"
 repository = "https://github.com/extend-hq/duke-office"
 documentation = "https://docs.rs/duke-pages"
-keywords = ["docx", "doc", "ooxml", "parser", "wasm"]
+keywords = ["docx", "doc", "odt", "parser", "wasm"]
 categories = ["parser-implementations", "text-processing"]
 readme = "README.md"
 include = ["src/**", "tests/*.rs", "examples/*.rs", "README.md", "CHANGELOG.md", "third-party/**", "LICENSE", "Cargo.toml"]
@@ -16,9 +16,9 @@ default = ["native-deflate"]
 native-deflate = ["dep:libdeflater"]
 
 [dependencies]
-duke-office-art = { version = "=0.2.0", path = "../duke-office-art" }
-duke-office-charts = { version = "=0.3.0", path = "../duke-office-charts" }
-duke-odf = { version = "=0.3.0", path = "../duke-odf" }
+duke-office-art = { version = "=0.2.1", path = "../duke-office-art" }
+duke-office-charts = { version = "=0.3.1", path = "../duke-office-charts" }
+duke-odf = { version = "=0.3.1", path = "../duke-odf" }
 itoa = "1"
 serde = { workspace = true, features = ["rc"] }
 serde_json.workspace = true

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0
+
+- Preserve stored OpenDocument table values and formulas, empty grid cells, and the physical source parts for headers and footers.
+- Keep word spans in source order around inline objects and expose equation words and standalone MathML.
+- Add the optional `native_value` field to `TableCellNode` and `TableCellDetails`. Rust struct literals must initialize the field. Earlier serialized models remain readable.
+
 ## 0.4.0
 
 - Preserve OpenDocument note citations, padded and custom list labels, legal numbering, consecutive numbering across levels, and labels in table-cell aggregate text.

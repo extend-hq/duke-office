@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1
+
+- Update the shared OpenDocument, artwork and chart dependencies.
+
 ## 0.5.0
 
 - Recover text from OpenDocument chart previews, vector images and embedded objects, including modern SVM, SVG, WMF and EMF text records, with bounded extraction and source metadata.
