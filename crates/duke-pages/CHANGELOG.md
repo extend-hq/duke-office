@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.2
+
+- Expose plain main-story text with source numbering on the structured document.
+
 ## 0.5.1
 
 - Preserve embedded HEIC, HEIF and AVIF figures in ODT, including extensionless and inline images.

@@ -279,6 +279,9 @@ fn enrich_node(
     };
     block.details["transform"] = json!(transform);
     if let Some(metadata) = metadata {
+        if let Some(kind) = &metadata.placeholder_type {
+            block.details["placeholderType"] = json!(kind);
+        }
         block.details["hidden"] = json!(metadata.hidden);
         block.details["decorative"] = json!(metadata.decorative);
         block.details["alt"] = json!(metadata.alt_text);

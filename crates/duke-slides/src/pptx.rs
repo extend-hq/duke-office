@@ -1339,7 +1339,13 @@ fn node_metadata(
         .map(|action| Box::new(object_action(action, context.rels)));
     let description = properties.attr("descr").map(str::to_owned);
     let title = properties.attr("title").map(str::to_owned);
+    let placeholder = nonvisual_properties(node)?.child("nvPr").and_then(|p| p.child("ph"));
+    let placeholder_type = placeholder.and_then(|p| p.attr("type").or_else(|| {
+        let layout = find_placeholder(context.layout_root?, node)?;
+        nonvisual_properties(layout)?.child("nvPr")?.child("ph")?.attr("type")
+    }));
     Some(crate::NodeMetadata {
+        placeholder_type: placeholder_type.map(str::to_owned),
         text_content: None,
         editing: nonvisual_properties(node).and_then(|properties| {
             properties.children().iter().filter_map(|child| child.source_xml())

@@ -254,6 +254,35 @@ pub struct StructuredDocument {
     pub geometry_status: String,
 }
 
+impl StructuredDocument {
+    /// Plain text of the main story in reading order, including native numbering.
+    pub fn body_text(&self) -> String {
+        let mut text = String::new();
+        for block in &self.blocks {
+            if block
+                .source_refs
+                .first()
+                .is_some_and(|source| source.story != "body")
+                || matches!(
+                    block.r#type,
+                    BlockType::Header | BlockType::Footer | BlockType::Figure | BlockType::Formula
+                )
+            {
+                continue;
+            }
+            if let BlockDetails::Paragraph(paragraph) = &block.details {
+                if let Some(label) = &paragraph.list_label {
+                    text.push_str(label);
+                    text.push(' ');
+                }
+            }
+            text.push_str(&block.content);
+            text.push('\n');
+        }
+        text
+    }
+}
+
 pub fn package_identity(package: &OoxmlPackage) -> String {
     let mut hash = Sha256::new();
     let mut parts: Vec<_> = package.parts.iter().collect();

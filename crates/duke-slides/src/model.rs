@@ -315,6 +315,8 @@ pub struct InkContent {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NodeMetadata {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub placeholder_type: Option<String>,
     /// Text recovered from object content, separate from accessibility descriptions.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub text_content: Option<Box<ObjectText>>,
@@ -1176,4 +1178,83 @@ pub struct PresentationDocument {
     pub warnings: Vec<PresentationWarning>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub metadata: Option<PresentationMetadata>,
+}
+
+impl PresentationDocument {
+    /// Plain text of slide objects in reading order, including chart labels.
+    pub fn body_text(&self) -> String {
+        let mut text = String::new();
+        for slide in &self.slides {
+            append_node_text(
+                &slide.nodes,
+                &mut text,
+                self.format == PresentationFormat::Odp,
+            );
+        }
+        text
+    }
+}
+
+fn append_paragraph_text(paragraphs: &[TextParagraph], out: &mut String) {
+    for paragraph in paragraphs {
+        for run in &paragraph.runs {
+            out.push_str(&run.text);
+        }
+        out.push('\n');
+    }
+}
+
+fn append_node_text(list: &[SlideNode], out: &mut String, geometric_order: bool) {
+    let order = if geometric_order {
+        crate::presentation_node_reading_order(list)
+    } else {
+        (0..list.len()).collect()
+    };
+    for index in order {
+        let node = &list[index];
+        if let Some(text) = node.text_content() {
+            if matches!(
+                node,
+                SlideNode::Chart { .. }
+                    | SlideNode::Image { .. }
+                    | SlideNode::Unknown { .. }
+                    | SlideNode::Media { .. }
+            ) {
+                out.push_str(&text.text);
+                out.push('\n');
+                continue;
+            }
+        }
+        match node {
+            SlideNode::Shape {
+                paragraphs: text, ..
+            } => append_paragraph_text(text, out),
+            SlideNode::Group { children, .. } => append_node_text(children, out, geometric_order),
+            SlideNode::Chart { title, series, .. } => {
+                out.extend(title.iter().map(String::as_str));
+                out.push('\n');
+                let categories = series.first().and_then(|series| series.categories.as_ref());
+                for category in categories
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|category| category.as_str())
+                {
+                    out.push_str(category);
+                    out.push('\n');
+                }
+                for name in series.iter().filter_map(|series| series.name.as_deref()) {
+                    out.push_str(name);
+                    out.push('\n');
+                }
+            }
+            SlideNode::Table { rows, .. } => {
+                for row in rows {
+                    for cell in row {
+                        append_paragraph_text(&cell.paragraphs, out);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
 }

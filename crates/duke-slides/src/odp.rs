@@ -759,8 +759,9 @@ impl<'a> Builder<'a> {
         let name = shape.name.clone().unwrap_or_default();
         let mut transform = transform_of(shape);
         let alt_text = shape.description.clone().or_else(|| shape.title.clone());
-        let metadata = (alt_text.is_some() || shape.link.is_some()).then(|| {
+        let metadata = (alt_text.is_some() || shape.link.is_some() || shape.class.is_some()).then(|| {
             Box::new(NodeMetadata {
+                placeholder_type: shape.class.clone(),
                 alt_text,
                 accessibility_title: shape.title.clone(),
                 hyperlink: shape.link.clone(),

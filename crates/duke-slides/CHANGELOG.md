@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.3
+
+- Expose slide text in native reading order and retain declared title placeholders in structured blocks.
+
 ## 0.5.2
 
 - Update the shared OpenDocument media reader and its dependent crates.

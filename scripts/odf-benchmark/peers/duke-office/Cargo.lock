@@ -287,7 +287,7 @@ dependencies = [
 
 [[package]]
 name = "duke-pages"
-version = "0.5.1"
+version = "0.5.2"
 dependencies = [
  "arc-swap",
  "base64",
@@ -314,7 +314,7 @@ dependencies = [
 
 [[package]]
 name = "duke-slides"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "base64",
  "base64-simd",
