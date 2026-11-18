@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1
+
+- Preserve embedded HEIC, HEIF and AVIF figures in ODT, including extensionless and inline images.
+
 ## 0.5.0
 
 - Preserve stored OpenDocument table values and formulas, empty grid cells, and the physical source parts for headers and footers.

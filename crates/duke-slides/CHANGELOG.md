@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.2
+
+- Update the shared OpenDocument media reader and its dependent crates.
+
 ## 0.5.1
 
 - Update the shared OpenDocument, artwork and chart dependencies.

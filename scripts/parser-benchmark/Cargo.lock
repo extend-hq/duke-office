@@ -238,7 +238,7 @@ dependencies = [
 
 [[package]]
 name = "duke-odf"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "base64",
  "encoding_rs",
@@ -250,7 +250,7 @@ dependencies = [
 
 [[package]]
 name = "duke-office-art"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "base64",
  "duke-odf",
@@ -267,7 +267,7 @@ dependencies = [
 
 [[package]]
 name = "duke-office-charts"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "base64",
  "duke-odf",
@@ -282,7 +282,7 @@ dependencies = [
 
 [[package]]
 name = "duke-pages"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "arc-swap",
  "base64",
