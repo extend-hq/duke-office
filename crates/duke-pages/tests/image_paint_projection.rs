@@ -7,7 +7,8 @@ use serde_json::{json, Value};
 fn model(paint_bounds: Option<Value>) -> DocModel {
     let mut image = json!({
         "type": "image", "src": "data:image/svg+xml,%3Csvg%2F%3E",
-        "widthPx": 360.0, "heightPx": 140.0, "alt": "image"
+        "widthPx": 360.0, "heightPx": 140.0, "alt": "image", "partName": "media/image.png",
+        "sourceXml": r#"<wp:docPr name="image"/><pic:cNvPr descr="A &amp; B"/>"#
     });
     if let Some(bounds) = paint_bounds {
         image["paintBounds"] = bounds;
@@ -38,6 +39,8 @@ fn paint_bounds_survive_model_and_structured_round_trips() {
     let blocks = extract_document_blocks(&restored);
     let value = serde_json::to_value(&blocks).unwrap();
     let details = &value["blocks"][0]["children"][0]["details"];
+    assert_eq!(details["alt"], "image");
+    assert_eq!(details["description"], "A & B");
     assert_eq!(details["width"], 360.0);
     assert_eq!(details["height"], 140.0);
     assert_eq!(details["paintBounds"], bounds());

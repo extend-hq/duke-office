@@ -50,7 +50,7 @@ let options = duke_pages::ExtractDocumentBlocksOptions { include_words: true, ..
 let blocks = duke_pages::parse_document_blocks_with_options(&bytes, options)?;
 ```
 
-Rust callers that only need image paths and descriptions can use `extract_document_blocks_with_image_mode(&model, options, ImageDataMode::ReferencesOnly)`. Each figure keeps its part metadata, while the extractor skips inline image encoding.
+Rust callers that only need image paths and descriptions can use `extract_document_blocks_with_image_mode(&model, options, ImageDataMode::ReferencesOnly)`. Each figure keeps its part metadata, while the extractor skips inline image encoding. Named pictures also expose an authored description in `details.description`. A null value identifies a picture without alternate text or a title. `details.alt` retains the model’s display label.
 
 Use `extract_document_blocks_with_options(&model, options)` for an existing model, or add `--include-words` to the CLI. The TypeScript equivalent is `extractDocumentBlocks(model, { includeWords: true })`. Existing calls omit word data.
 

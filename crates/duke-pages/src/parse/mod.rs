@@ -74,6 +74,7 @@ pub use relationships::{
     parse_part_relationships, parse_relationships_from_parts, relationship_part_name_for_part,
     resolve_part_path,
 };
+pub(crate) use scan::find_tag_token_ref;
 pub use scan::{contains_tag, find_tag_token};
 pub(crate) use style::parse_character_scale_percent_value;
 pub use style::{

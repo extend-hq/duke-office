@@ -311,6 +311,20 @@ pub fn package_identity(package: &OoxmlPackage) -> String {
     format!("{:x}", hash.finalize())
 }
 
+fn picture_description(image: &ImageRunNode) -> Option<String> {
+    let Some(xml) = image.source_xml.as_deref() else { return image.alt.clone() };
+    let properties = ["wp:docPr", "pic:cNvPr", "v:imagedata"]
+        .map(|name| crate::parse::find_tag_token_ref(xml, name));
+    if properties.iter().all(Option::is_none) {
+        return image.alt.clone();
+    }
+    ["descr", "title", "o:title"].into_iter()
+        .find_map(|attribute| properties.iter().flatten().find_map(|tag| {
+            crate::xml::get_attribute_ref(tag, attribute).filter(|value| !value.trim().is_empty())
+        }))
+        .map(crate::xml::decode_xml_entities)
+}
+
 fn image_url(image: &ImageRunNode) -> Option<String> {
     if let Some(src) = image.src.as_ref().filter(|src| !src.trim().is_empty()) {
         return Some(src.clone());
@@ -896,6 +910,9 @@ impl Extractor<'_> {
                             .join("\n")
                     };
                     let mut details = json!({"kind":image.semantic_kind.as_deref().unwrap_or(if image.synthetic_text_box == Some(true) {"text_box"} else {"image"}), "mathMl":image.math_ml, "asset":image.part_name, "alt":image.alt, "contentType":image.content_type, "width":image.width_px, "height":image.height_px, "floating":image.floating});
+                    if image.part_name.is_some() && image.chart_part_name.is_none() && image.semantic_kind.is_none() {
+                        details["description"] = json!(picture_description(image));
+                    }
                     if let Some(part_name) = &image.chart_part_name {
                         details["chartPartName"] = json!(part_name);
                     }

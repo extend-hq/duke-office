@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.4
+
+- Expose authored picture descriptions separately from drawing names in structured output.
+
+## 0.5.3
+
+- Support extraction with image references and decode XML entities in drawing descriptions.
+
 ## 0.5.2
 
 - Expose plain main-story text with source numbering on the structured document.
