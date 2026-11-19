@@ -305,7 +305,7 @@ dependencies = [
 
 [[package]]
 name = "duke-pages"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "arc-swap",
  "base64",
@@ -332,7 +332,7 @@ dependencies = [
 
 [[package]]
 name = "duke-pages-wasm"
-version = "0.5.2"
+version = "0.5.3"
 dependencies = [
  "duke-pages",
  "js-sys",

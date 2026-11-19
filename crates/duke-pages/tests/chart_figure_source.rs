@@ -69,6 +69,13 @@ fn figure_chart(
     assert_eq!(figure.r#type, BlockType::Figure);
     let details = figure.details.to_json_value();
     assert_eq!(details["imageUrl"], source);
+    let references = duke_pages::extract_document_blocks_with_image_mode(
+        &model, Default::default(), duke_pages::ImageDataMode::ReferencesOnly,
+    );
+    let metadata = references.blocks[0].details.to_json_value();
+    assert!(metadata.get("imageUrl").is_none() && metadata.get("sourceImageUrl").is_none());
+    assert_eq!(metadata["chartPartName"], details["chartPartName"]);
+    assert_eq!(references.blocks[0].source_refs, figure.source_refs);
     extract_chart_data(&package, details["chartPartName"].as_str().unwrap()).unwrap()
 }
 

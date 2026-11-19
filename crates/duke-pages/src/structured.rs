@@ -57,6 +57,13 @@ pub struct ExtractDocumentBlocksOptions {
     pub include_3d_models: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ImageDataMode {
+    #[default]
+    Inline,
+    ReferencesOnly,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DocumentWord {
@@ -579,6 +586,7 @@ struct Extractor<'a> {
     story: String,
     include_words: bool,
     include_3d_models: bool,
+    image_data: ImageDataMode,
     review: Option<RevisionCollector>,
     body_section_starts: HashSet<usize>,
 }
@@ -906,7 +914,11 @@ impl Extractor<'_> {
                         details.as_object_mut().unwrap()
                             .insert("presentation".into(), json!(presentation));
                     }
-                    if let Some(url) = image_url(image) {
+                    let url = match self.image_data {
+                        ImageDataMode::Inline => image_url(image),
+                        ImageDataMode::ReferencesOnly => None,
+                    };
+                    if let Some(url) = url {
                         if let Some((rendered, presentation)) = presented_image_url(image, &url) {
                             details["sourceImageUrl"] = Value::String(url);
                             details["imageUrl"] = Value::String(rendered);
@@ -1133,7 +1145,16 @@ pub fn extract_document_blocks_with_options(
     model: &DocModel,
     options: ExtractDocumentBlocksOptions,
 ) -> StructuredDocument {
-    extract(model, options, false).document
+    extract_document_blocks_with_image_mode(model, options, ImageDataMode::Inline)
+}
+
+/// Select whether image details carry inline data or only their part references and metadata.
+pub fn extract_document_blocks_with_image_mode(
+    model: &DocModel,
+    options: ExtractDocumentBlocksOptions,
+    image_data: ImageDataMode,
+) -> StructuredDocument {
+    extract(model, options, false, image_data).document
 }
 
 /// Extract the current document and the tracked edits present in its Word source.
@@ -1142,13 +1163,14 @@ pub fn extract_document_blocks_with_revisions(
     model: &DocModel,
     options: ExtractDocumentBlocksOptions,
 ) -> ReviewedDocument {
-    extract(model, options, true)
+    extract(model, options, true, ImageDataMode::Inline)
 }
 
 fn extract(
     model: &DocModel,
     options: ExtractDocumentBlocksOptions,
     include_revisions: bool,
+    image_data: ImageDataMode,
 ) -> ReviewedDocument {
     let document_id = model
         .metadata
@@ -1168,6 +1190,7 @@ fn extract(
         story: "body".into(),
         include_words: options.include_words,
         include_3d_models: options.include_3d_models,
+        image_data,
         review: include_revisions.then(RevisionCollector::default),
         body_section_starts: model.metadata.sections.iter().flatten()
             .filter_map(|section| usize::try_from(section.start_node_index).ok())
@@ -1394,7 +1417,7 @@ mod inplace_block_cleanup_tests {
             lists: ListDefinitions::new(None, &[]),
             non_heading_styles: HashSet::new(),
             document_id: "document".into(), part_name: "part".into(),
-            story: "body".into(), include_words: false, include_3d_models: false, review: None,
+            story: "body".into(), include_words: false, include_3d_models: false, image_data: super::ImageDataMode::Inline, review: None,
         };
         let figure = extractor.block("figure".into(), BlockType::Figure, String::new(),
             json!({}), Vec::new(), Some("container"));

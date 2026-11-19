@@ -576,10 +576,9 @@ fn resolve_run_image_layout(run_xml: &str) -> (Option<f64>, Option<f64>, Option<
 
 fn resolve_doc_pr_alt(run_xml: &str) -> Option<String> {
     let doc_pr_tag = regex_capture_tag(run_xml, r"(?i)<(?:wp:docPr|pic:cNvPr|v:imagedata)\b[^>]*>")?;
-    get_attribute(&doc_pr_tag, "descr")
-        .or_else(|| get_attribute(&doc_pr_tag, "title"))
-        .or_else(|| get_attribute(&doc_pr_tag, "o:title"))
-        .or_else(|| get_attribute(&doc_pr_tag, "name"))
+    ["descr", "title", "o:title", "name"].into_iter()
+        .find_map(|name| get_attribute_ref(&doc_pr_tag, name))
+        .map(crate::xml::decode_xml_entities)
 }
 
 fn vml_finite(value: &str) -> Option<f64> {
