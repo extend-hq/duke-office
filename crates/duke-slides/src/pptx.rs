@@ -40,6 +40,8 @@ const DEFAULT_HEIGHT: u64 = 6_858_000;
 
 #[path = "pptx_editing.rs"]
 mod editing;
+#[path = "pptx_geometry.rs"]
+mod geometry;
 #[path = "pptx_xml.rs"]
 mod xml_tree;
 use xml_tree::{OwnedNode, RawAttribute, RawNode, StrRef, XmlDocument, XmlNode, NONE};
@@ -495,7 +497,7 @@ fn deobfuscate_embedded_font(path: &str, data: &mut [u8]) -> bool {
     font_magic(data).is_some()
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 struct XmlBudget {
     nodes: usize,
     attributes: usize,
@@ -694,6 +696,14 @@ fn image_extension_scope(
         (b"ext", ImageExtensionScope::List) => ImageExtensionScope::Extension,
         _ => return ImageExtensionScope::None,
     };
+    if drawing_namespace(start, namespaces) {
+        next
+    } else {
+        ImageExtensionScope::None
+    }
+}
+
+fn drawing_namespace(start: &BytesStart<'_>, namespaces: &[(usize, String, String)]) -> bool {
     let name = start.name();
     let prefix = name
         .as_ref()
@@ -705,17 +715,13 @@ fn image_extension_scope(
         .iter()
         .rev()
         .find(|(_, candidate, _)| candidate.as_bytes() == prefix);
-    if namespace.is_some_and(|(_, _, uri)| {
+    namespace.is_some_and(|(_, _, uri)| {
         matches!(
             uri.as_str(),
             "http://schemas.openxmlformats.org/drawingml/2006/main"
                 | "http://purl.oclc.org/ooxml/drawingml/main"
         )
-    }) {
-        next
-    } else {
-        ImageExtensionScope::None
-    }
+    })
 }
 
 /// Builds the flat node tables for one part while the part bytes are borrowed.
@@ -941,6 +947,15 @@ fn parse_xml_tree(
     limits: &ParseLimits,
     context: &str,
 ) -> Result<XmlDocument, ParseError> {
+    parse_part_tree(xml, limits, context, false)
+}
+
+fn parse_part_tree(
+    xml: Vec<u8>,
+    limits: &ParseLimits,
+    context: &str,
+    content_only: bool,
+) -> Result<XmlDocument, ParseError> {
     struct Frame {
         link: (u32, u32),
         image_extension_scope: ImageExtensionScope,
@@ -975,7 +990,9 @@ fn parse_xml_tree(
             .into_iter()
             .any(|needle| memchr::memmem::find(xml, needle).is_some()))
         || track_image_extensions;
-    let track_namespaces = track_existing_namespaces || track_editing;
+    let compact_geometry =
+        content_only && borrowable && memchr::memmem::find(xml, b"custGeom").is_some();
+    let track_namespaces = track_existing_namespaces || track_editing || compact_geometry;
     let mut namespaces = NamespaceDeclarations::default();
     let mut namespace_scopes = Vec::new();
     loop {
@@ -1034,11 +1051,26 @@ fn parse_xml_tree(
                         .then_some(source_start),
                 );
                 builder.link_child(stack.last_mut().map(|frame| &mut frame.link), index);
+                let drawing_geometry = compact_geometry
+                    && local == b"custGeom"
+                    && stack.last().is_some_and(|frame| {
+                        builder.resolve(builder.nodes[frame.link.0 as usize].name) == "spPr"
+                    })
+                    && drawing_namespace(&start, &namespaces.values);
                 stack.push(Frame {
                     link: (index, NONE),
                     image_extension_scope,
                     editing_scope,
                 });
+                if drawing_geometry {
+                    geometry::skip_children(
+                        &mut reader,
+                        qualified.as_ref(),
+                        stack.len(),
+                        &mut budget,
+                        limits,
+                    );
+                }
             }
             Ok(Event::Empty(start)) => {
                 let namespace_count = namespaces.len();
@@ -3278,6 +3310,7 @@ impl<'a> AssetView<'a> {
 
 #[derive(Clone, Copy)]
 struct NodeParseContext<'a, 'color> {
+    content_only: bool,
     artwork_target: Option<&'a crate::ArtworkTarget>,
     artwork_part: ArtworkPart<'a>,
     artwork_id_match: ArtworkIdMatch,
@@ -3421,10 +3454,18 @@ fn parse_shape_node(
         transform,
         shape_svg,
         paint_bounds,
-        source_xml: node.source_xml().map(str::to_owned),
+        source_xml: if context.content_only {
+            None
+        } else {
+            node.source_xml().map(str::to_owned)
+        },
         geometry: ShapeGeometry {
             preset: geometry,
-            path: custom_geometry_path(node),
+            path: if context.content_only {
+                None
+            } else {
+                custom_geometry_path(node)
+            },
         },
         fill,
         line,
@@ -6274,34 +6315,17 @@ fn parse_slide(
     {
         if let (Some(master), Some(master_rels)) = (context.master_root, context.master_rels) {
             let master_context = NodeParseContext {
-                artwork_target: context.artwork_target,
-                artwork_part: context.artwork_part,
                 artwork_id_match: ArtworkIdMatch::Prefixed("master"),
-                shape_cache: context.shape_cache,
-                editing_cache: context.editing_cache,
-                chart_padding: context.chart_padding,
                 source_part: context.layout_rels.and_then(|rels| {
                     rels.related("slideMaster", "ppt/slideMasters/")
                         .map(String::as_str)
                 }),
-                slide_index: context.slide_index,
-                paint_scale: context.paint_scale,
                 rels: master_rels,
-                related_parts: context.related_parts,
-                related_relationships: context.related_relationships,
-                assets: context.assets,
-                chart_companions: context.chart_companions,
-                legacy_chart_defaults: context.legacy_chart_defaults,
-                options: context.options,
-                limits: context.limits,
-                colors: context.colors,
-                diagnostics: context.diagnostics,
                 layout_root: None,
                 master_root: None,
                 layout_rels: None,
                 master_rels: None,
-                presentation_text_style: context.presentation_text_style,
-                table_styles: context.table_styles,
+                ..*context
             };
             let mut inherited = parse_decorative_part_nodes(master, &master_context)?;
             for node in &mut inherited {
@@ -6312,34 +6336,17 @@ fn parse_slide(
     }
     if let (Some(layout), Some(layout_rels)) = (context.layout_root, context.layout_rels) {
         let layout_context = NodeParseContext {
-            artwork_target: context.artwork_target,
-            artwork_part: context.artwork_part,
             artwork_id_match: ArtworkIdMatch::Prefixed("layout"),
-            shape_cache: context.shape_cache,
-            editing_cache: context.editing_cache,
-            chart_padding: context.chart_padding,
             source_part: context
                 .rels
                 .related("slideLayout", "ppt/slideLayouts/")
                 .map(String::as_str),
-            slide_index: context.slide_index,
-            paint_scale: context.paint_scale,
             rels: layout_rels,
-            related_parts: context.related_parts,
-            related_relationships: context.related_relationships,
-            assets: context.assets,
-            chart_companions: context.chart_companions,
-            legacy_chart_defaults: context.legacy_chart_defaults,
-            options: context.options,
-            limits: context.limits,
-            colors: context.colors,
-            diagnostics: context.diagnostics,
             layout_root: None,
             master_root: None,
             layout_rels: None,
             master_rels: None,
-            presentation_text_style: context.presentation_text_style,
-            table_styles: context.table_styles,
+            ..*context
         };
         let mut inherited = parse_decorative_part_nodes(layout, &layout_context)?;
         for node in &mut inherited {
@@ -6544,11 +6551,12 @@ fn load_xml_part(
     archive: &mut PptxPackage<'_>,
     path: &str,
     limits: &ParseLimits,
+    content_only: bool,
 ) -> Result<Option<ParsedXmlPart>, ParseError> {
     let Some(xml) = archive.take_part(path)? else {
         return Ok(None);
     };
-    let document = parse_xml_tree(xml, limits, path)?;
+    let document = parse_part_tree(xml, limits, path, content_only)?;
     let rels = match archive.take_part(&relationship_part_path(path))? {
         Some(xml) => relationships(&xml, path, limits.max_xml_depth)?,
         None => Relationships::default(),
@@ -6589,12 +6597,11 @@ fn missing_part_warning(path: &str, slide_index: Option<usize>) -> PresentationW
     warning
 }
 
-pub fn parse(
-    bytes: &[u8],
-    limits: &ParseLimits,
-    options: &ParseOptions,
-) -> Result<PresentationDocument, ParseError> {
-    parse_with_artwork_target(bytes, limits, options, None)
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ParsePurpose {
+    Model,
+    Retained,
+    Content,
 }
 
 /// Parses with artwork rendered only for `target` when one is given; without a
@@ -6607,7 +6614,8 @@ pub(crate) fn parse_with_artwork_target(
 ) -> Result<PresentationDocument, ParseError> {
     duke_office_art::with_cached_xml(|| {
         let package = PptxPackage::open(bytes, limits)?;
-        parse_cached(package, limits, options, target, false).map(|(document, _)| document)
+        parse_cached(package, limits, options, target, ParsePurpose::Model)
+            .map(|(document, _)| document)
     })
 }
 
@@ -6625,7 +6633,8 @@ pub(crate) fn parse_retained(
     };
     duke_office_art::with_cached_xml(|| {
         let package = PptxPackage::open(bytes, limits)?;
-        let (document, retained) = parse_cached(package, limits, &options, None, true)?;
+        let (document, retained) =
+            parse_cached(package, limits, &options, None, ParsePurpose::Retained)?;
         Ok((
             document,
             retained.expect("a retaining parse keeps its state"),
@@ -6638,8 +6647,10 @@ fn parse_cached(
     limits: &ParseLimits,
     options: &ParseOptions,
     artwork_target: Option<&crate::ArtworkTarget>,
-    retain: bool,
+    purpose: ParsePurpose,
 ) -> Result<(PresentationDocument, Option<RetainedParse>), ParseError> {
+    let retain = purpose == ParsePurpose::Retained;
+    let content_only = purpose == ParsePurpose::Content;
     let content_types = archive.take_part("[Content_Types].xml")?
         .map(|xml| parse_xml_tree(xml, limits, "[Content_Types].xml"))
         .transpose()?
@@ -6717,7 +6728,7 @@ fn parse_cached(
     for (index, slide_path) in slide_paths.iter().enumerate() {
         let xml = archive.take_part(slide_path)?
             .ok_or_else(|| ParseError::Corrupt(format!("missing {slide_path}")))?;
-        let slide_document = parse_xml_tree(xml, limits, slide_path)?;
+        let slide_document = parse_part_tree(xml, limits, slide_path, content_only)?;
         let slide_root = slide_document.root();
         let slide_relationship_xml =
             archive.take_part(&relationship_part_path(slide_path))?;
@@ -6729,9 +6740,11 @@ fn parse_cached(
         let layout_path = related_path(&slide_rels, "slideLayout", "ppt/slideLayouts/");
         if let Some(path) = layout_path.as_deref() {
             if !layout_parts.contains_key(path) {
-                match load_xml_part(&mut archive, path, limits)? {
+                match load_xml_part(&mut archive, path, limits, content_only)? {
                     Some(mut part) => {
-                        part.document.cache_geometry_paths();
+                        if !content_only {
+                            part.document.cache_geometry_paths();
+                        }
                         layout_parts.insert(path.to_owned(), part);
                     }
                     None => document_warnings.push(missing_part_warning(path, Some(index))),
@@ -6744,9 +6757,11 @@ fn parse_cached(
             .and_then(|part| related_path(&part.rels, "slideMaster", "ppt/slideMasters/"));
         if let Some(path) = master_path.as_deref() {
             if !master_parts.contains_key(path) {
-                match load_xml_part(&mut archive, path, limits)? {
+                match load_xml_part(&mut archive, path, limits, content_only)? {
                     Some(mut part) => {
-                        part.document.cache_geometry_paths();
+                        if !content_only {
+                            part.document.cache_geometry_paths();
+                        }
                         master_parts.insert(path.to_owned(), part);
                     }
                     None => document_warnings.push(missing_part_warning(path, Some(index))),
@@ -7010,6 +7025,7 @@ fn parse_cached(
                 paint_key: paint::ColorKey::new(theme, &slide_color_map),
             };
             let context = NodeParseContext {
+                content_only,
                 artwork_target,
                 artwork_part: ArtworkPart::Slide(index),
                 artwork_id_match: ArtworkIdMatch::Exact,
@@ -7084,7 +7100,7 @@ fn parse_cached(
         if master_parts.contains_key(&path) {
             continue;
         }
-        match load_xml_part(&mut archive, &path, limits)? {
+        match load_xml_part(&mut archive, &path, limits, content_only)? {
             Some(part) => {
                 master_parts.insert(path, part);
             }
@@ -7158,6 +7174,7 @@ fn parse_cached(
                 paint_key: paint::ColorKey::new(theme, &part_color_map),
             };
             let context = NodeParseContext {
+                content_only,
                 artwork_target,
                 artwork_part: ArtworkPart::Master(&part.path),
                 artwork_id_match: ArtworkIdMatch::Exact,
@@ -7199,19 +7216,21 @@ fn parse_cached(
                 ),
             );
         }
-        masters.push(crate::SlideMaster {
-            id: part.path.clone(),
-            name: part
-                .document
-                .root()
-                .child("cSld")
-                .and_then(|slide| slide.attr("name"))
-                .map(str::to_owned),
-            theme_id: theme_path,
-            transition,
-            timing,
-            nodes,
-        });
+        if !content_only {
+            masters.push(crate::SlideMaster {
+                id: part.path.clone(),
+                name: part
+                    .document
+                    .root()
+                    .child("cSld")
+                    .and_then(|slide| slide.attr("name"))
+                    .map(str::to_owned),
+                theme_id: theme_path,
+                transition,
+                timing,
+                nodes,
+            });
+        }
     }
 
     let layout_paths: std::collections::BTreeSet<_> = declared_layout_paths
@@ -7224,7 +7243,7 @@ fn parse_cached(
     for path in layout_paths {
         let part = if let Some(part) = layout_parts.remove(&path) {
             part
-        } else if let Some(part) = load_xml_part(&mut archive, &path, limits)? {
+        } else if let Some(part) = load_xml_part(&mut archive, &path, limits, content_only)? {
             let mut part_asset_paths = BTreeMap::new();
             for target in part.rels.asset_paths() {
                 part_asset_paths.insert(target.clone(), target.clone());
@@ -7264,6 +7283,7 @@ fn parse_cached(
                 paint_key: paint::ColorKey::new(theme, &part_color_map),
             };
             let context = NodeParseContext {
+                content_only,
                 artwork_target,
                 artwork_part: ArtworkPart::Layout(&part.path),
                 artwork_id_match: ArtworkIdMatch::Exact,
@@ -7296,19 +7316,21 @@ fn parse_cached(
             (nodes, transition, timing)
         };
         document_warnings.extend(diagnostics.take());
-        layouts.push(crate::SlideLayout {
-            id: part.path.clone(),
-            name: part
-                .document
-                .root()
-                .child("cSld")
-                .and_then(|slide| slide.attr("name"))
-                .map(str::to_owned),
-            master_id: master_path,
-            transition,
-            timing,
-            nodes,
-        });
+        if !content_only {
+            layouts.push(crate::SlideLayout {
+                id: part.path.clone(),
+                name: part
+                    .document
+                    .root()
+                    .child("cSld")
+                    .and_then(|slide| slide.attr("name"))
+                    .map(str::to_owned),
+                master_id: master_path,
+                transition,
+                timing,
+                nodes,
+            });
+        }
         if retain {
             retained_layouts.insert(
                 part.path.clone(),
@@ -7388,10 +7410,11 @@ fn parse_cached(
         slides,
         masters,
         layouts,
-        themes: theme_parts
-            .values()
-            .map(ThemeDataInternal::public)
-            .collect(),
+        themes: if content_only {
+            Vec::new()
+        } else {
+            theme_parts.values().map(ThemeDataInternal::public).collect()
+        },
         assets,
         embedded_fonts,
         warnings: document_warnings,
@@ -7557,6 +7580,7 @@ impl RetainedParse {
             paint_key: paint::ColorKey::new(theme, &slide.color_map),
         };
         let context = NodeParseContext {
+            content_only: false,
             artwork_target: Some(target),
             artwork_part: ArtworkPart::Slide(index),
             artwork_id_match: ArtworkIdMatch::Exact,
@@ -7608,6 +7632,7 @@ impl RetainedParse {
             paint_key: paint::ColorKey::new(theme, &master.color_map),
         };
         let context = NodeParseContext {
+            content_only: false,
             artwork_target: Some(target),
             artwork_part: ArtworkPart::Master(&master.part.path),
             artwork_id_match: ArtworkIdMatch::Exact,
@@ -7664,6 +7689,7 @@ impl RetainedParse {
             paint_key: paint::ColorKey::new(theme, &layout.color_map),
         };
         let context = NodeParseContext {
+            content_only: false,
             artwork_target: Some(target),
             artwork_part: ArtworkPart::Layout(&layout.part.path),
             artwork_id_match: ArtworkIdMatch::Exact,

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.8
+
+- Expose structured extraction with raw media and optional body text, including reuse of an inspected PowerPoint package.
+- Reduce the time and memory needed to extract content from presentations with custom drawings while preserving the full rendering model and XML limits.
+
 ## 0.5.7
 
 - Resolve embedded picture representations using the declared relationship mode, including relative external targets and SVG fallbacks.

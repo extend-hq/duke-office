@@ -1183,12 +1183,7 @@ pub struct PresentationDocument {
 impl PresentationDocument {
     /// Returns the lowercase SHA-256 of the original input when its source identity is available.
     pub fn source_sha256(&self) -> Option<&str> {
-        let hash = self
-            .document_id
-            .as_deref()?
-            .strip_prefix(crate::SOURCE_ID_PREFIX)?;
-        (hash.len() == 64 && hash.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
-            .then_some(hash)
+        crate::source_hash(self.document_id.as_deref()?)
     }
 
     /// Plain text of slide objects in reading order, including chart labels.

@@ -81,19 +81,94 @@ pub struct PresentationBundle {
     pub metadata: Option<PresentationMetadata>,
 }
 
+/// Structured content and original encoded assets, with optional native body text.
+pub struct PresentationContent {
+    pub bundle: PresentationBundle,
+    pub source_assets: BTreeMap<String, crate::PresentationAsset>,
+    pub body_text: Option<String>,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum PresentationContentError {
+    #[error(transparent)]
+    Parse(#[from] crate::ParseError),
+    #[error("{0}")]
+    Extraction(String),
+}
+
+impl ExtractPresentationBundleOptions {
+    fn parse_options(&self) -> ParseOptions {
+        ParseOptions {
+            defer_artwork: !self.include_artwork,
+            ..Default::default()
+        }
+    }
+
+    fn purpose(&self) -> crate::pptx::ParsePurpose {
+        if self.include_artwork {
+            crate::pptx::ParsePurpose::Model
+        } else {
+            crate::pptx::ParsePurpose::Content
+        }
+    }
+
+    fn parse_model(&self, bytes: &[u8]) -> Result<PresentationDocument, crate::ParseError> {
+        crate::parse_model(
+            bytes,
+            &self.parse_limits,
+            &self.parse_options(),
+            self.purpose(),
+        )
+    }
+}
+
+impl PresentationContent {
+    fn extract(
+        mut document: PresentationDocument,
+        options: ExtractPresentationBundleOptions,
+        include_body_text: bool,
+    ) -> Result<Self, PresentationContentError> {
+        let body_text = include_body_text.then(|| document.body_text());
+        let source_assets = std::mem::take(&mut document.assets);
+        let bundle = extract_presentation_bundle(&document, options)
+            .map_err(PresentationContentError::Extraction)?;
+        Ok(Self {
+            bundle,
+            source_assets,
+            body_text,
+        })
+    }
+}
+
+/// Extracts content with the original media bytes keyed by their source asset IDs.
+/// Source bytes use the parse limits. Bundle limits apply to the structured output
+/// and generated artwork. The raw sources are returned separately.
+pub fn parse_presentation_content(
+    bytes: &[u8],
+    options: ExtractPresentationBundleOptions,
+    include_body_text: bool,
+) -> Result<PresentationContent, PresentationContentError> {
+    PresentationContent::extract(options.parse_model(bytes)?, options, include_body_text)
+}
+
+impl crate::PptxPackage<'_> {
+    /// Extracts content from an inspected package using the limits set when it was opened.
+    pub fn extract_content(
+        self,
+        mut options: ExtractPresentationBundleOptions,
+        include_body_text: bool,
+    ) -> Result<PresentationContent, PresentationContentError> {
+        options.parse_limits = self.parse_limits();
+        let document = self.parse_model(&options.parse_options(), options.purpose())?;
+        PresentationContent::extract(document, options, include_body_text)
+    }
+}
+
 pub fn parse_presentation_bundle(
     bytes: &[u8],
     options: ExtractPresentationBundleOptions,
 ) -> Result<PresentationBundle, String> {
-    let document = crate::parse_presentation_with_options(
-        bytes,
-        &options.parse_limits,
-        &ParseOptions {
-            defer_artwork: !options.include_artwork,
-            ..Default::default()
-        },
-    )
-    .map_err(|error| match error {
+    let document = options.parse_model(bytes).map_err(|error| match error {
         crate::ParseError::InputLimit(_) | crate::ParseError::ResourceLimit(_) => {
             format!("LIMIT: {error}")
         }

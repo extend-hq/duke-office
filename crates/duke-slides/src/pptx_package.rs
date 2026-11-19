@@ -1,4 +1,4 @@
-use super::parse_cached;
+use super::{parse_cached, ParsePurpose};
 use crate::{ParseError, ParseLimits, ParseOptions, PresentationDocument};
 use std::{
     collections::{hash_map::Entry, HashMap},
@@ -67,10 +67,23 @@ impl<'a> PptxPackage<'a> {
 
     /// Consumes the package and parses the presentation with its original document identity.
     pub fn parse(self, options: &ParseOptions) -> Result<PresentationDocument, ParseError> {
+        self.parse_model(options, ParsePurpose::Model)
+    }
+
+    pub(crate) fn parse_limits(&self) -> ParseLimits {
+        self.limits
+    }
+
+    pub(crate) fn parse_model(
+        self,
+        options: &ParseOptions,
+        purpose: ParsePurpose,
+    ) -> Result<PresentationDocument, ParseError> {
         let source = self.source;
         let limits = self.limits;
-        let (mut document, _) =
-            duke_office_art::with_cached_xml(|| parse_cached(self, &limits, options, None, false))?;
+        let (mut document, _) = duke_office_art::with_cached_xml(|| {
+            parse_cached(self, &limits, options, None, purpose)
+        })?;
         document.document_id = Some(crate::presentation_identity(source));
         Ok(document)
     }

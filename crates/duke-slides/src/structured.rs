@@ -206,6 +206,13 @@ pub struct StructuredPresentation {
     pub geometry_status: String,
 }
 
+impl StructuredPresentation {
+    /// Returns the original input SHA-256 when the document carries a source identity.
+    pub fn source_sha256(&self) -> Option<&str> {
+        crate::source_hash(&self.document_id)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct ExtractPresentationBlocksOptions {

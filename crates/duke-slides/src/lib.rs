@@ -119,11 +119,22 @@ pub fn parse_presentation_with_options(
     limits: &ParseLimits,
     options: &ParseOptions,
 ) -> Result<PresentationDocument, ParseError> {
+    parse_model(bytes, limits, options, pptx::ParsePurpose::Model)
+}
+
+fn parse_model(
+    bytes: &[u8],
+    limits: &ParseLimits,
+    options: &ParseOptions,
+    purpose: pptx::ParsePurpose,
+) -> Result<PresentationDocument, ParseError> {
     if bytes.len() > limits.max_input_bytes {
         return Err(ParseError::InputLimit(limits.max_input_bytes));
     }
     let mut document = match detect_format(bytes)? {
-        PresentationFormat::Pptx => pptx::parse(bytes, limits, options)?,
+        PresentationFormat::Pptx => {
+            return PptxPackage::open(bytes, limits)?.parse_model(options, purpose);
+        }
         PresentationFormat::Ppt => legacy::parse(bytes, limits)?,
         format @ (PresentationFormat::Odp | PresentationFormat::Odg) => {
             odp::parse(bytes, limits, format, options)?
@@ -353,6 +364,12 @@ mod tests {
 }
 
 const SOURCE_ID_PREFIX: &str = "pptx-v1:sha256:";
+
+fn source_hash(identity: &str) -> Option<&str> {
+    let hash = identity.strip_prefix(SOURCE_ID_PREFIX)?;
+    (hash.len() == 64 && hash.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f')))
+        .then_some(hash)
+}
 
 fn presentation_identity(bytes: &[u8]) -> String {
     format!("{SOURCE_ID_PREFIX}{:x}", Sha256::digest(bytes))
