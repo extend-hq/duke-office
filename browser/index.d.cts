@@ -1,5 +1,6 @@
 export interface ChartPoint {
   index: number;
+  label?: string | null;
   categories?: ReadonlyArray<{ level: number; label: string }>;
   value?: string | null;
   x?: string | null;
@@ -9,6 +10,8 @@ export interface ChartPoint {
 
 export interface ChartData {
   title?: string | null;
+  subtitle?: string | null;
+  axisTitles?: ReadonlyArray<string>;
   series: ReadonlyArray<{
     chartType: string;
     name?: string | null;
