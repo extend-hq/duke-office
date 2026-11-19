@@ -1102,6 +1102,7 @@ pub fn merge_text_styles(
         italic: None,
         underline: None,
         strike: None,
+        double_strike: None,
         all_caps: None,
         small_caps: None,
         color: None,
@@ -1151,8 +1152,17 @@ pub fn merge_text_styles(
         if style.underline.is_some() {
             merged.underline = style.underline;
         }
-        if style.strike.is_some() {
-            merged.strike = style.strike;
+        if let Some(strike) = style.strike {
+            merged.strike = Some(strike);
+            if strike {
+                merged.double_strike = None;
+            }
+        }
+        if let Some(double) = style.double_strike {
+            merged.double_strike = Some(double);
+            if double {
+                merged.strike = None;
+            }
         }
         if style.all_caps.is_some() {
             merged.all_caps = style.all_caps;
@@ -1269,6 +1279,7 @@ pub fn merge_text_styles(
         || merged.italic.is_some()
         || merged.underline.is_some()
         || merged.strike.is_some()
+        || merged.double_strike.is_some()
         || merged.all_caps.is_some()
         || merged.small_caps.is_some()
         || merged.color.is_some()
@@ -1675,6 +1686,7 @@ pub(crate) fn parse_definition_style_uncached(
     let italic = parse_on_off_attribute(xml, "i");
     let underline = parse_underline_attribute(xml);
     let strike = parse_on_off_attribute(xml, "strike");
+    let double_strike = parse_on_off_attribute(xml, "dstrike");
     let all_caps = parse_on_off_attribute(xml, "caps");
     let small_caps = parse_on_off_attribute(xml, "smallCaps");
 
@@ -1722,6 +1734,7 @@ pub(crate) fn parse_definition_style_uncached(
         italic: None,
         underline: None,
         strike: None,
+        double_strike: None,
         all_caps: None,
         small_caps: None,
         color: None,
@@ -1767,6 +1780,7 @@ pub(crate) fn parse_definition_style_uncached(
     style.italic = italic;
     style.underline = underline;
     style.strike = strike;
+    style.double_strike = double_strike;
     style.all_caps = all_caps;
     style.small_caps = small_caps;
 
@@ -1927,6 +1941,7 @@ pub(crate) fn parse_definition_style_uncached(
     if let Some(vertical_align_value) = vertical_align_match.map(|value| value.to_ascii_lowercase())
     {
         style.vertical_align = match vertical_align_value.as_str() {
+            "baseline" => Some(VerticalAlign::Baseline),
             "superscript" => Some(VerticalAlign::Superscript),
             "subscript" => Some(VerticalAlign::Subscript),
             _ => None,

@@ -171,6 +171,7 @@ fn parse_text_style_with_scripts(
     let italic = parse_on_off_attribute(xml, "i");
     let underline = parse_underline_attribute(xml);
     let strike = parse_on_off_attribute(xml, "strike");
+    let double_strike = parse_on_off_attribute(xml, "dstrike");
     let all_caps = parse_on_off_attribute(xml, "caps");
     let small_caps = parse_on_off_attribute(xml, "smallCaps");
 
@@ -239,6 +240,7 @@ fn parse_text_style_with_scripts(
         italic: None,
         underline: None,
         strike: None,
+        double_strike: None,
         all_caps: None,
         small_caps: None,
         color: None,
@@ -293,6 +295,10 @@ fn parse_text_style_with_scripts(
     }
     if let Some(v) = strike {
         style.strike = Some(v);
+        has_any = true;
+    }
+    if double_strike.is_some() {
+        style.double_strike = double_strike;
         has_any = true;
     }
     if let Some(v) = all_caps {
@@ -517,6 +523,7 @@ fn parse_text_style_with_scripts(
 
     if let Some(value) = vertical_align_match.map(|v| v.to_ascii_lowercase()) {
         style.vertical_align = match value.as_str() {
+            "baseline" => Some(VerticalAlign::Baseline),
             "superscript" => Some(VerticalAlign::Superscript),
             "subscript" => Some(VerticalAlign::Subscript),
             _ => None,
@@ -1059,7 +1066,9 @@ fn resolve_run_style_with_scripts(
     let resolved = merged.map(|mut style| {
         style.bold = bold;
         style.italic = italic;
-        style.strike = strike;
+        if style.double_strike != Some(true) {
+            style.strike = strike;
+        }
         style.all_caps = all_caps;
         style.small_caps = small_caps;
         super::text_effects::resolve(&mut style, &context.styles().theme_colors);

@@ -239,6 +239,7 @@ pub(crate) fn merge_text_style_refs(styles: &[Option<&TextStyle>]) -> Option<Tex
         italic: None,
         underline: None,
         strike: None,
+        double_strike: None,
         all_caps: None,
         small_caps: None,
         color: None,
@@ -290,8 +291,11 @@ pub(crate) fn merge_text_style_refs(styles: &[Option<&TextStyle>]) -> Option<Tex
         if merged.underline.is_none() {
             merged.underline = style.underline;
         }
-        if merged.strike.is_none() {
+        if merged.strike.is_none() && merged.double_strike != Some(true) {
             merged.strike = style.strike;
+        }
+        if merged.double_strike.is_none() && merged.strike != Some(true) {
+            merged.double_strike = style.double_strike;
         }
         if merged.all_caps.is_none() {
             merged.all_caps = style.all_caps;

@@ -420,8 +420,12 @@ fn run_properties_xml(style: Option<&TextStyle>, state: &ImageSerializationState
     if style.underline == Some(true) {
         fragments.push(r#"<w:u w:val="single"/>"#.to_string());
     }
-    if style.strike == Some(true) {
+    if style.double_strike == Some(true) {
+        fragments.push("<w:dstrike/>".to_string());
+    } else if style.strike == Some(true) {
         fragments.push("<w:strike/>".to_string());
+    } else if style.double_strike == Some(false) {
+        fragments.push(on_off_element_xml("dstrike", Some(false)));
     }
     for (name, value) in [("caps", style.all_caps), ("smallCaps", style.small_caps)] {
         if value.is_some() {
@@ -584,6 +588,7 @@ fn run_properties_xml(style: Option<&TextStyle>, state: &ImageSerializationState
 
     if let Some(vertical_align) = style.vertical_align {
         let val = match vertical_align {
+            VerticalAlign::Baseline => "baseline",
             VerticalAlign::Superscript => "superscript",
             VerticalAlign::Subscript => "subscript",
         };
@@ -3573,7 +3578,7 @@ const MARK_PROPERTY_ORDER: &[&str] = &[
     "w:caps",
     "w:smallCaps",
     "w:strike",
-    "w:dStrike",
+    "w:dstrike",
     "w:outline",
     "w:shadow",
     "w:emboss",
@@ -3639,6 +3644,7 @@ const MARK_MANAGED_PROPERTIES: &[&str] = &[
     "w:i",
     "w:u",
     "w:strike",
+    "w:dstrike",
     "w:caps",
     "w:smallCaps",
     "w:color",
@@ -3808,7 +3814,7 @@ fn paragraph_mark_properties_xml(style: Option<&TextStyle>, state: &ImageSeriali
         for (name, value) in [
             ("b", style.bold),
             ("i", style.italic),
-            ("strike", style.strike),
+            ("strike", style.strike.filter(|_| style.double_strike.is_none())),
         ] {
             if value == Some(false) {
                 generated = insert_property_child(

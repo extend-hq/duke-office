@@ -106,6 +106,7 @@ pub struct TextRunBorderStyle {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum VerticalAlign {
+    Baseline,
     #[serde(rename = "superscript")]
     Superscript,
     #[serde(rename = "subscript")]
@@ -194,6 +195,8 @@ pub struct TextStyle {
     pub underline: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub strike: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub double_strike: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub all_caps: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]

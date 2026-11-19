@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.6
+
+- Retain double strikethrough and explicit baseline resets in Word run formatting, including inherited styles and serialization.
+
 ## 0.5.5
 
 - Preserve note-only paragraphs and ordinary note definitions, including empty definitions. Top-level definition blocks expose the note identifier alongside their source story.

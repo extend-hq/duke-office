@@ -105,6 +105,8 @@ The symbol-font Unicode mapping is derived from `dingbat-to-unicode` 1.0.1 by Mi
 
 Top-level footnote and endnote definition blocks carry a numeric `noteId`. Pair it with the source story to resolve a paragraph inline’s `noteReference`. A single definition can contain several blocks. The identifier is independent of the displayed citation number.
 
+Run formatting distinguishes `strike` and `doubleStrike`. An explicit `verticalAlign` of `baseline` can cancel an inherited superscript or subscript.
+
 ## Typed structured details in Rust
 
 `DocumentBlock.details` uses `structured::BlockDetails`. Generated paragraph details are `BlockDetails::Paragraph(Box<ParagraphDetails>)`, with a typed `ParagraphInline` sequence and shared, fully resolved text styles. Text, classification, field instructions, inline ordering, UTF-16 offsets, and formatting are computed eagerly during extraction. This avoids constructing a second generic JSON tree for every paragraph and run; it does not defer semantic parsing or style resolution.
