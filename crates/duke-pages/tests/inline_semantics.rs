@@ -233,6 +233,8 @@ fn field_link_scopes_can_change_inside_one_run() {
     let DocNode::Paragraph(p) = &model.nodes[0] else {
         panic!()
     };
+    assert!(matches!(&p.children[0], ParagraphChildNode::Text(run)
+        if run.note_reference.as_ref().is_some_and(|reference| reference.id == -1)));
     let links: Vec<_> = p
         .children
         .iter()
@@ -247,6 +249,7 @@ fn field_link_scopes_can_change_inside_one_run() {
     assert_eq!(
         links,
         vec![
+            None,
             None,
             Some("https://example.org/one"),
             Some("https://example.org/one"),

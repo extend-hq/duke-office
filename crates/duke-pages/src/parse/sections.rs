@@ -310,20 +310,16 @@ pub fn parse_document_notes_from_part(
     let mut notes = Vec::new();
     for note_xml in crate::xml::extract_balanced_tag_slices(notes_xml, tag_name) {
         let note_tag = find_opening_tag(&note_xml, tag_name).unwrap_or_default();
-        if get_attribute(&note_tag, "w:type").is_some() {
+        if get_attribute(&note_tag, "w:type").is_some_and(|kind| kind != "normal") {
             continue;
         }
 
-        let note_id = parse_integer_attribute(&note_tag, "w:id");
-        let Some(note_id) = note_id.filter(|id| *id >= 0) else {
+        let Some(note_id) = crate::xml::get_attribute_ref(&note_tag, "w:id").and_then(|v| v.parse().ok()) else {
             continue;
         };
 
         let parsed_nodes = parse_document_xml(&note_xml, &context);
         let text = note_text_from_nodes(&parsed_nodes);
-        if text.is_empty() {
-            continue;
-        }
 
         notes.push(DocumentNoteDefinition {
             id: note_id,

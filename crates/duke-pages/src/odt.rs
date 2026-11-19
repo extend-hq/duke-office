@@ -1129,14 +1129,8 @@ impl<'a> Builder<'a> {
         let mut lines = Vec::new();
         plain_text(&nodes, &mut lines);
         let text = lines.join("\n").trim().to_owned();
-        if !text.is_empty() {
-            let notes = if note.endnote { &mut self.endnotes } else { &mut self.footnotes };
-            notes.push(DocumentNoteDefinition {
-                id,
-                text,
-                nodes: Some(nodes),
-            });
-        }
+        let notes = if note.endnote { &mut self.endnotes } else { &mut self.footnotes };
+        notes.push(DocumentNoteDefinition { id, text, nodes: Some(nodes) });
         out.push(ParagraphChildNode::Text(TextRunNode {
             r#type: TextRunNodeType::Text,
             text: String::new(),

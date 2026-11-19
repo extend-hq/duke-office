@@ -195,6 +195,7 @@ impl Collector<'_> {
                     r#type: BlockType::Text,
                     content,
                     details: serde_json::Value::Null.into(),
+                    note_id: None,
                     source_refs: vec![source.clone()],
                     parent_block_id: None,
                     children: vec![],

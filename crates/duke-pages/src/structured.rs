@@ -242,6 +242,9 @@ pub struct DocumentBlock {
     pub r#type: BlockType,
     pub content: String,
     pub details: BlockDetails,
+    /// Identifier shared by the top-level blocks of a footnote or endnote definition.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note_id: Option<i64>,
     pub source_refs: Vec<SourceRef>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_block_id: Option<String>,
@@ -621,6 +624,7 @@ impl Extractor<'_> {
             r#type: kind,
             content,
             details: details.into(),
+            note_id: None,
             source_refs: vec![SourceRef {
                 document_id: self.document_id.clone(),
                 node_id: id,
@@ -1098,13 +1102,15 @@ impl Extractor<'_> {
     }
 }
 
-fn block_has_visible_text(block: &DocumentBlock) -> bool {
-    if matches!(&block.details, BlockDetails::Paragraph(details) if details.list_label.is_some()) {
-        return true;
-    }
-    block.content.chars().any(|c| {
-        !c.is_whitespace() && !matches!(c, '\u{200b}' | '\u{feff}' | '\u{00ad}')
-    })
+fn has_paragraph_content(block: &DocumentBlock) -> bool {
+    block.note_id.is_some()
+        || block.content.chars().any(|c| {
+            !c.is_whitespace() && !matches!(c, '\u{200b}' | '\u{feff}' | '\u{00ad}')
+        })
+        || matches!(&block.details, BlockDetails::Paragraph(details)
+            if details.list_label.is_some() || details.inlines.iter().any(|inline| {
+                matches!(inline, ParagraphInline::Text { note_reference: Some(_), .. })
+            }))
 }
 
 fn without_empty_blocks(
@@ -1120,7 +1126,7 @@ fn without_empty_blocks(
         }
         let grid_cell = matches!(&block.details, BlockDetails::TableCell(cell)
             if !cell.style.as_ref().is_some_and(|style| style.v_merge_continuation == Some(true)));
-        if grid_cell || anchors.contains(block.id.as_str()) || block_has_visible_text(block) || matches!(block.r#type,
+        if grid_cell || anchors.contains(block.id.as_str()) || has_paragraph_content(block) || matches!(block.r#type,
             BlockType::Figure | BlockType::Formula | BlockType::Barcode
                 | BlockType::Watermark | BlockType::KeyValue)
         {
@@ -1140,7 +1146,7 @@ fn without_empty_blocks(
     }
     let mut retained = Vec::with_capacity(blocks.len());
     for mut block in blocks {
-        if matches!(block.r#type, BlockType::Text) && !block_has_visible_text(&block) && !anchors.contains(block.id.as_str()) {
+        if matches!(block.r#type, BlockType::Text) && !has_paragraph_content(&block) && !anchors.contains(block.id.as_str()) {
             for child in &mut block.children {
                 if child.parent_block_id.as_deref() != parent {
                     child.parent_block_id = parent.map(str::to_string);
@@ -1266,8 +1272,16 @@ fn extract(
         extractor.part_name = source_part(model, &format!("{kind}s"));
         extractor.story = kind.into();
         for note in notes.iter().flatten() {
+            let start = blocks.len();
             if let Some(nodes) = &note.nodes {
                 blocks.extend(extractor.story_nodes(nodes, None));
+            }
+            if blocks.len() == start {
+                let id = format!("docx:{document_id}/{}/{kind}/{}", extractor.part_name, note.id);
+                blocks.push(extractor.block(id, BlockType::Text, note.text.clone(), Value::Null, vec![], None));
+            }
+            for block in &mut blocks[start..] {
+                block.note_id = Some(note.id);
             }
         }
     }

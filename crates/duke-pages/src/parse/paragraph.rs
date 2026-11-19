@@ -336,7 +336,7 @@ fn parse_active_run_text_tokens(normalized_run_xml: &str) -> Vec<ParsedRunTextTo
         return tokens;
     }
     let token_pattern = re::get_unchecked(
-        r#"(?is)<w:t\b(?:[^>]*[^/>])?>([\s\S]*?)</w:t>|<a:t\b(?:[^>]*[^/>])?>([\s\S]*?)</a:t>|<w:footnoteReference\b[^>]*w:id="(-?\d+)"[^>]*/>|<w:endnoteReference\b[^>]*w:id="(-?\d+)"[^>]*/>|<w:tab\b[^>]*/>|<a:tab\b[^>]*/>|<w:br\b[^>]*/>|<w:cr\b[^>]*/>|<a:br\b[^>]*/>|<w:noBreakHyphen\b[^>]*/>|<w:softHyphen\b[^>]*/>|<w:sym\b[^>]*/>|</w:p>"#,
+        r#"(?is)<w:t\b(?:[^>]*[^/>])?>([\s\S]*?)</w:t>|<a:t\b(?:[^>]*[^/>])?>([\s\S]*?)</a:t>|<w:footnoteReference\b[^>]*w:id="([+-]?\d+)"[^>]*>|<w:endnoteReference\b[^>]*w:id="([+-]?\d+)"[^>]*>|<w:tab\b[^>]*/>|<a:tab\b[^>]*/>|<w:br\b[^>]*/>|<w:cr\b[^>]*/>|<a:br\b[^>]*/>|<w:noBreakHyphen\b[^>]*/>|<w:softHyphen\b[^>]*/>|<w:sym\b[^>]*/>|</w:p>"#,
     );
     let mut parts = Vec::new();
     for caps in token_pattern.captures_iter(normalized_run_xml) {
@@ -364,33 +364,11 @@ fn parse_active_run_text_tokens(normalized_run_xml: &str) -> Vec<ParsedRunTextTo
             });
             continue;
         }
-        if let Some(m) = caps.get(3) {
-            let reference_id: i64 = m.as_str().parse().unwrap_or(0);
-            if reference_id >= 0 {
-                parts.push(ParsedRunTextToken {
-                    source_start,
-                    text: String::new(),
-                    note_reference: Some(NoteReference {
-                        kind: NoteReferenceKind::Footnote,
-                        id: reference_id,
-                        label: None,
-                    }),
-                });
-            }
-            continue;
-        }
-        if let Some(m) = caps.get(4) {
-            let reference_id: i64 = m.as_str().parse().unwrap_or(0);
-            if reference_id >= 0 {
-                parts.push(ParsedRunTextToken {
-                    source_start,
-                    text: String::new(),
-                    note_reference: Some(NoteReference {
-                        kind: NoteReferenceKind::Endnote,
-                        id: reference_id,
-                        label: None,
-                    }),
-                });
+        if let Some((kind, matched)) = caps.get(3).map(|m| (NoteReferenceKind::Footnote, m))
+            .or_else(|| caps.get(4).map(|m| (NoteReferenceKind::Endnote, m)))
+        {
+            if let Ok(id) = matched.as_str().parse() {
+                parts.push(note_token(source_start, kind, id));
             }
             continue;
         }
@@ -504,6 +482,14 @@ fn indexed_run_text_tokens(xml: &str) -> Option<Vec<ParsedRunTextToken>> {
     complete.then_some(tokens)
 }
 
+fn note_token(source_start: usize, kind: NoteReferenceKind, id: i64) -> ParsedRunTextToken {
+    ParsedRunTextToken {
+        source_start,
+        text: String::new(),
+        note_reference: Some(NoteReference { kind, id, label: None }),
+    }
+}
+
 fn stream_run_text_tokens(xml: &str) -> Option<Vec<ParsedRunTextToken>> {
     use quick_xml::events::Event;
     if xml.contains("<!") {
@@ -538,48 +524,22 @@ fn stream_run_text_tokens(xml: &str) -> Option<Vec<ParsedRunTextToken>> {
                     note_reference: None,
                 });
             }
+            Event::Start(tag) | Event::Empty(tag)
+                if matches!(tag.name().as_ref(), "w:footnoteReference" | "w:endnoteReference") =>
+            {
+                if let Some(id) = crate::xml::get_attribute_ref(tag.as_ref(), "w:id").and_then(|v| v.parse().ok()) {
+                    let kind = if tag.name().as_ref() == "w:footnoteReference" {
+                        NoteReferenceKind::Footnote
+                    } else {
+                        NoteReferenceKind::Endnote
+                    };
+                    tokens.push(note_token(source_start, kind, id));
+                }
+            }
             Event::Empty(tag) => {
                 let name = tag.name();
                 let name = name.as_ref();
                 let text = match name {
-                    "w:footnoteReference" | "w:endnoteReference" => {
-                        let raw = tag.as_ref();
-                        let mut ids = 0;
-                        for attribute in tag.attributes() {
-                            let attribute = attribute.ok()?;
-                            ids += usize::from(attribute.key.as_ref().eq_ignore_ascii_case("w:id"));
-                        }
-                        if ids != 1 {
-                            return None;
-                        }
-                        let Some(id) = raw
-                            .split_once("w:id=\"")
-                            .and_then(|(_, value)| value.split_once('"').map(|v| v.0))
-                        else {
-                            return None;
-                        };
-                        let digits = id.strip_prefix('-').unwrap_or(id);
-                        if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-                            continue;
-                        }
-                        let id = id.parse::<i64>().unwrap_or(0);
-                        if id >= 0 {
-                            tokens.push(ParsedRunTextToken {
-                                text: String::new(),
-                                source_start,
-                                note_reference: Some(NoteReference {
-                                    kind: if name == "w:footnoteReference" {
-                                        NoteReferenceKind::Footnote
-                                    } else {
-                                        NoteReferenceKind::Endnote
-                                    },
-                                    id,
-                                    label: None,
-                                }),
-                            });
-                        }
-                        continue;
-                    }
                     "w:tab" | "a:tab" => "\t".to_owned(),
                     "w:br" | "w:cr" | "a:br" => "\n".to_owned(),
                     "w:noBreakHyphen" => "\u{2011}".to_owned(),
@@ -883,7 +843,7 @@ fn paragraph_runs<'a>(
     let mut empty_fields_by_run: std::collections::HashMap<usize, Vec<(usize, String)>> =
         std::collections::HashMap::new();
     let field_tokens = re::get_unchecked(
-        r#"(?is)<w:instrText\b(?:[^>]*[^/>])?>([\s\S]*?)</w:instrText>|<w:fldChar\b[^>]*>|<w:t\b(?:[^>]*[^/>])?>[\s\S]*?</w:t>|<a:t\b(?:[^>]*[^/>])?>[\s\S]*?</a:t>|<(?:w|a):t\b[^>]*/>|<w:(?:drawing|pict)\b[^>]*>|<w:(?:sym|tab|br|cr|noBreakHyphen|softHyphen|footnoteReference|endnoteReference)\b[^>]*/>|<a:(?:tab|br)\b[^>]*/>"#,
+        r#"(?is)<w:instrText\b(?:[^>]*[^/>])?>([\s\S]*?)</w:instrText>|<w:fldChar\b[^>]*>|<w:t\b(?:[^>]*[^/>])?>[\s\S]*?</w:t>|<a:t\b(?:[^>]*[^/>])?>[\s\S]*?</a:t>|<(?:w|a):t\b[^>]*/>|<w:(?:drawing|pict)\b[^>]*>|<w:(?:sym|tab|br|cr|noBreakHyphen|softHyphen)\b[^>]*/>|<w:(?:footnoteReference|endnoteReference)\b[^>]*>|<a:(?:tab|br)\b[^>]*/>"#,
     );
 
     for (run_index, range) in run_ranges.iter().enumerate() {

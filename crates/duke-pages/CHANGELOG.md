@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.5
+
+- Preserve note-only paragraphs and ordinary note definitions, including empty definitions. Top-level definition blocks expose the note identifier alongside their source story.
+
 ## 0.5.4
 
 - Expose authored picture descriptions separately from drawing names in structured output.
