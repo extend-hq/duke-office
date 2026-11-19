@@ -414,10 +414,8 @@ pub fn parse_table(
                 .collect()
         })
         .unwrap_or_default();
-    let table_look = merge_table_look(
-        parse_table_look(table_properties_xml.as_deref()),
-        style_table_look.as_ref(),
-    );
+    let source_look = parse_table_look(table_properties_xml.as_deref());
+    let table_look = merge_table_look(source_look.clone(), style_table_look.as_ref());
     let preserve_collapsed_base = layout == Some(TableLayout::Fixed)
         && cell_spacing_twips.unwrap_or(0) == 0
         && explicit_borders.is_none()
@@ -468,7 +466,9 @@ pub fn parse_table(
     let mut has_row_table_exception = false;
     let cache_geometry = row_blocks.len() >= 12 && table_xml.len() >= 64 * 1024;
     let mut geometry_cache = HashMap::<&str, ParsedTableCellResult>::new();
-    for row_xml in row_blocks {
+    let row_count = row_blocks.len() as i64;
+    let mut header_prefix = true;
+    for (row_index, row_xml) in row_blocks.into_iter().enumerate() {
         let row_properties_xml = direct_table_property(row_xml, "w:trPr");
         has_row_table_exception |= direct_table_property(row_xml, "w:tblPrEx").is_some();
         if preserve_collapsed_base && !has_row_spacing_override {
@@ -522,9 +522,26 @@ pub fn parse_table(
         let row_cant_split = row_properties_xml
             .as_deref()
             .and_then(|xml| parse_on_off_attribute(xml, "cantSplit"));
-        let row_is_header = row_properties_xml
-            .as_deref()
-            .and_then(|xml| parse_on_off_attribute(xml, "tblHeader"));
+        let direct_header = row_properties_xml
+            .and_then(super::styles::declared_row_header);
+        let inherited_header = if direct_header.is_none() && header_prefix {
+            table_style.filter(|style| !style.row_headers.is_empty()).and_then(|style| {
+                use TableConditionalStyleType::*;
+                [
+                    (table_look.last_row && row_index as i64 + 1 == row_count).then_some(LastRow),
+                    (table_look.first_row && row_index == 0).then_some(FirstRow),
+                    horizontal_band(&table_look, row_index as i64),
+                    Some(WholeTable),
+                ]
+                .into_iter()
+                .flatten()
+                .find_map(|kind| style.row_headers.get(&kind).copied())
+            })
+        } else {
+            None
+        };
+        let row_is_header = direct_header.or(inherited_header);
+        header_prefix &= row_is_header == Some(true);
         let cell_sources = crate::xml::extract_balanced_tag_slices(row_xml, "w:tc");
         let parsed_cells: Vec<ParsedTableCellResult> = cell_sources
             .iter()
@@ -684,6 +701,7 @@ pub fn parse_table(
                     height_rule: row_height_rule,
                     cant_split: row_cant_split,
                     is_header: row_is_header,
+                    source_inherited_header: inherited_header,
                 })
             } else {
                 None
@@ -841,6 +859,7 @@ pub fn parse_table(
                         height_rule: None,
                         cant_split: None,
                         is_header: None,
+                        source_inherited_header: None,
                     });
                     row_style.background_color = condition.row_background_color.clone();
                 }
@@ -938,6 +957,7 @@ pub fn parse_table(
         }
     }
     let has_table_style = table_style_id.is_some()
+        || source_look.is_some()
         || table_grid_xml.is_some()
         || preferred_width.is_some()
         || alignment.is_some()
@@ -970,6 +990,7 @@ pub fn parse_table(
             Some(TableStyle {
                 style_id: table_style_id.clone(),
                 source_style_id: table_style_id,
+                source_look,
                 width_twips,
                 source_width: Some(TableWidthSource {
                     preferred_width: preferred_width.clone(),
@@ -1603,6 +1624,18 @@ pub(crate) fn table_grid_column_bound(table: &TableNode) -> i64 {
     }
 }
 
+fn horizontal_band(look: &ParsedTableLook, row_index: i64) -> Option<TableConditionalStyleType> {
+    let index = row_index - i64::from(look.first_row);
+    if look.no_h_band || index < 0 {
+        return None;
+    }
+    Some(if (index / look.row_band_size.max(1)) % 2 == 0 {
+        TableConditionalStyleType::Band1Horz
+    } else {
+        TableConditionalStyleType::Band2Horz
+    })
+}
+
 pub(crate) fn resolve_table_condition_for_cell(
     table_style: &ParsedTableStyleDefinition,
     table_look: &ParsedTableLook,
@@ -1617,18 +1650,9 @@ pub(crate) fn resolve_table_condition_for_cell(
     let is_last_row = row_index == row_count - 1;
     let is_first_column = start_column_index == 0;
     let is_last_column = end_column_index >= column_count - 1;
-    let row_band_size = table_look.row_band_size.max(1);
     let col_band_size = table_look.col_band_size.max(1);
-    if !table_look.no_h_band {
-        let band_row_index = row_index - if table_look.first_row { 1 } else { 0 };
-        if band_row_index >= 0 {
-            let band_row_group = band_row_index / row_band_size;
-            condition_types.push(if band_row_group % 2 == 0 {
-                TableConditionalStyleType::Band1Horz
-            } else {
-                TableConditionalStyleType::Band2Horz
-            });
-        }
+    if let Some(band) = horizontal_band(table_look, row_index) {
+        condition_types.push(band);
     }
     if !table_look.no_v_band {
         let band_column_index = start_column_index - if table_look.first_col { 1 } else { 0 };

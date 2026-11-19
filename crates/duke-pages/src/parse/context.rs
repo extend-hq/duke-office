@@ -65,7 +65,8 @@ impl TableConditionalStyleType {
 }
 
 /// Mirrors TypeScript `ParsedTableLook`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ParsedTableLook {
     pub first_row: bool,
     pub last_row: bool,
@@ -114,6 +115,7 @@ pub struct ParsedTableStyleDefinition {
     pub based_on_id: Option<String>,
     pub name: String,
     pub conditions: HashMap<TableConditionalStyleType, ParsedTableStyleCondition>,
+    pub row_headers: HashMap<TableConditionalStyleType, bool>,
     pub floating: Option<TableFloating>,
     pub properties: Option<ParsedTableProperties>,
     pub has_row_cell_spacing: bool,

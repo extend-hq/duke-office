@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.8
+
+- Resolve repeating table headers from Word table styles, honor direct row overrides, and preserve inherited headers when saving an edited table.
+
 ## 0.5.6
 
 - Retain double strikethrough and explicit baseline resets in Word run formatting, including inherited styles and serialization.

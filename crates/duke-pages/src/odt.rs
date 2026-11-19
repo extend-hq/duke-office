@@ -1232,6 +1232,7 @@ impl<'a> Builder<'a> {
         let style = TableStyle {
             style_id: None,
             source_style_id: None,
+            source_look: None,
             width_twips: width,
             preferred_width: Some(match width {
                 Some(width) => TablePreferredWidth::Dxa { value: width as f64 },
@@ -1286,6 +1287,7 @@ impl<'a> Builder<'a> {
                 height_rule,
                 cant_split: None,
                 is_header: row.header.then_some(true),
+                source_inherited_header: None,
             });
             let mut cells: Vec<TableCellNode> = Vec::with_capacity(row.cells.len());
             let mut column = 0usize;

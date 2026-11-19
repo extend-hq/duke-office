@@ -4882,8 +4882,15 @@ fn row_has_source_geometry_edits(row: &TableRowNode) -> bool {
     }
 }
 
-fn patch_row_source_geometry(row: &TableRowNode, xml: &str) -> String {
-    if !row_has_source_geometry_edits(row) {
+fn edited_inherited_header(row: &TableRowNode) -> Option<bool> {
+    let style = row.style.as_ref()?;
+    let inherited = style.source_inherited_header?;
+    style.is_header.filter(|value| *value != inherited)
+}
+
+fn patch_row_source_properties(row: &TableRowNode, xml: &str) -> String {
+    let header_override = edited_inherited_header(row);
+    if !row_has_source_geometry_edits(row) && header_override.is_none() {
         return xml.to_string();
     }
     let style = row.style.as_ref().unwrap();
@@ -4952,6 +4959,15 @@ fn patch_row_source_geometry(row: &TableRowNode, xml: &str) -> String {
             ROW_PROPERTIES_ORDER,
         );
     }
+    if let Some(header) = header_override {
+        properties = patch_direct_table_property(
+            &properties,
+            "w:trPr",
+            "w:tblHeader",
+            Some(&[("w:val", u8::from(header).to_string())]),
+            ROW_PROPERTIES_ORDER,
+        );
+    }
     let mut updated = xml.to_string();
     if let Some(range) = range {
         updated.replace_range(range.start..range.end, &properties);
@@ -4967,7 +4983,9 @@ fn patch_row_source_geometry(row: &TableRowNode, xml: &str) -> String {
 }
 
 fn row_has_source_property_edits(row: &TableRowNode) -> bool {
-    row_has_source_geometry_edits(row) || row.cells.iter().any(cell_has_source_property_edits)
+    row_has_source_geometry_edits(row)
+        || edited_inherited_header(row).is_some()
+        || row.cells.iter().any(cell_has_source_property_edits)
 }
 
 fn paragraph_has_source_property_edits(paragraph: &ParagraphNode) -> bool {
@@ -5111,7 +5129,7 @@ fn patch_table_source_properties_inner(
     }
     let mut row_replacements = Vec::new();
     for (row_index, (range, row)) in rows.into_iter().zip(&table.rows).enumerate() {
-        let patched_row = patch_row_source_geometry(row, &source[range.start..range.end]);
+        let patched_row = patch_row_source_properties(row, &source[range.start..range.end]);
         let row_xml = patched_row.as_str();
         let cells = extract_balanced_tag_ranges(row_xml, "w:tc");
         if cells.len() != row.cells.len() {
@@ -5303,6 +5321,31 @@ fn table_xml(
         .and_then(|style| style.style_id.as_ref())
     {
         table_props.push(format!(r#"<w:tblStyle w:val="{}"/>"#, escape_xml(style_id)));
+    }
+
+    if let Some(look) = table.style.as_ref().and_then(|style| style.source_look.as_ref()) {
+        let mut mask = 0u16;
+        for (enabled, bit) in [
+            (look.first_row, 0x0020),
+            (look.last_row, 0x0040),
+            (look.first_col, 0x0080),
+            (look.last_col, 0x0100),
+            (look.no_h_band, 0x0200),
+            (look.no_v_band, 0x0400),
+        ] {
+            if enabled {
+                mask |= bit;
+            }
+        }
+        table_props.push(format!(r#"<w:tblLook w:val="{mask:04X}"/>"#));
+        for (name, size) in [
+            ("w:tblStyleRowBandSize", look.row_band_size),
+            ("w:tblStyleColBandSize", look.col_band_size),
+        ] {
+            if size > 1 {
+                table_props.push(format!(r#"<{name} w:val="{size}"/>"#));
+            }
+        }
     }
 
     // tblpPr precedes tblW in the tblPr child sequence.
@@ -5519,7 +5562,9 @@ fn table_xml(
             if row.style.as_ref().and_then(|s| s.cant_split) == Some(true) {
                 row_props.push("<w:cantSplit/>".to_string());
             }
-            if let Some(is_header) = row.style.as_ref().and_then(|s| s.is_header) {
+            if let Some(is_header) = row.style.as_ref().and_then(|style| {
+                style.is_header.filter(|value| Some(*value) != style.source_inherited_header)
+            }) {
                 row_props.push(if is_header {
                     "<w:tblHeader/>".to_string()
                 } else {

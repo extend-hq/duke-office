@@ -1343,6 +1343,8 @@ pub struct TableRowStyle {
     pub cant_split: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_header: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_inherited_header: Option<bool>,
 }
 
 /// Mirrors TypeScript `TableRowNode`.
@@ -1406,6 +1408,8 @@ pub struct TableStyle {
     pub style_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source_style_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_look: Option<crate::parse::ParsedTableLook>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub width_twips: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]

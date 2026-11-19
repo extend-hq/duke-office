@@ -1995,6 +1995,11 @@ fn resolve_style_properties_block<'a>(style_xml: &'a str, tag_name: &str) -> &'a
         .unwrap_or_default()
 }
 
+pub(crate) fn declared_row_header(row_properties: &str) -> Option<bool> {
+    direct_table_property(row_properties, "w:tblHeader")
+        .and_then(|tag| parse_on_off_attribute(tag, "tblHeader"))
+}
+
 fn strip_table_conditional_style_blocks(style_xml: &str) -> String {
     if style_xml.is_empty() {
         return style_xml.to_string();
@@ -2605,6 +2610,11 @@ fn parse_style_sheet_selected(
             }
             let mut conditions = HashMap::new();
             let whole_table_source_xml = strip_table_conditional_style_blocks(&style_xml);
+            let mut row_headers = HashMap::new();
+            let header = |xml: &str| direct_table_property(xml, "w:trPr").and_then(declared_row_header);
+            if let Some(value) = header(&whole_table_source_xml) {
+                row_headers.insert(TableConditionalStyleType::WholeTable, value);
+            }
             if let Some(whole_table_condition) =
                 parse_table_conditional_style_from_xml(&whole_table_source_xml, &theme_fonts)
             {
@@ -2622,6 +2632,9 @@ fn parse_style_sheet_selected(
                 ) else {
                     continue;
                 };
+                if let Some(value) = header(conditional_style_xml) {
+                    row_headers.insert(conditional_type, value);
+                }
                 if let Some(condition) =
                     parse_table_conditional_style_from_xml(&conditional_style_xml, &theme_fonts)
                 {
@@ -2636,6 +2649,7 @@ fn parse_style_sheet_selected(
                     based_on_id: get_attribute(&based_on_tag, "w:val"),
                     name: get_attribute(&name_tag, "w:val").unwrap_or(style_id),
                     conditions,
+                    row_headers,
                     floating: None,
                     properties: None,
                     has_row_cell_spacing: crate::xml::extract_balanced_tag_slices(
@@ -2915,7 +2929,10 @@ fn parse_style_sheet_selected(
             }
         }
 
+        let mut row_headers = inherited.as_ref().map(|s| s.row_headers.clone()).unwrap_or_default();
+        row_headers.extend(style.row_headers.iter().map(|(&kind, &value)| (kind, value)));
         let resolved = ParsedTableStyleDefinition {
+            row_headers,
             id: style.id.clone(),
             based_on_id: style.based_on_id.clone(),
             name: style.name.clone(),
