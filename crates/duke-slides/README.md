@@ -6,6 +6,8 @@ Parse PowerPoint presentations from bytes. The parser detects OOXML presentation
 
 The default XML element limit is 500,000 per part. Explicit caller limits remain strict. XML trees use compact child and attribute storage, and unused declared layouts are converted one at a time to reduce temporary memory. Generated artwork and retained assets also contribute to memory use; the element limit is not a total-memory limit.
 
+For OOXML presentations, callers that inspect package parts before parsing can use `PptxPackage::open` with their limits. `read_part` returns the uncompressed bytes of a named part and retains them in the package. Calling `parse` consumes the package and reuses those bytes. The document identity is the SHA-256 of the original input.
+
 Install with `cargo add duke-slides`. The Rust library target is named `duke_slides`.
 
 ```rust

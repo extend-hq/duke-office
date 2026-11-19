@@ -314,7 +314,7 @@ dependencies = [
 
 [[package]]
 name = "duke-slides"
-version = "0.5.5"
+version = "0.5.6"
 dependencies = [
  "base64",
  "base64-simd",
@@ -324,6 +324,7 @@ dependencies = [
  "duke-office-art",
  "duke-office-charts",
  "flate2",
+ "itoa",
  "memchr",
  "quick-xml 0.37.5",
  "serde",

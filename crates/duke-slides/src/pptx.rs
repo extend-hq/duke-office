@@ -2,6 +2,9 @@
 mod comments;
 #[path = "pptx_fields.rs"]
 mod fields;
+#[path = "pptx_package.rs"]
+mod package;
+pub use package::PptxPackage;
 #[path = "pptx_paint.rs"]
 mod paint;
 #[path = "pptx_timing.rs"]
@@ -11,7 +14,6 @@ use std::{
     cell::{Cell, RefCell},
     collections::{BTreeMap, HashMap},
     fmt::Write as _,
-    io::{Cursor, Read},
     rc::Rc,
     sync::OnceLock,
 };
@@ -24,7 +26,6 @@ use quick_xml::{
     name::ResolveResult,
     NsReader, Reader,
 };
-use zip::ZipArchive;
 
 use crate::{
     ChartSeries, ColorValue, FillStyle, GradientStop, LineStyle, ParseError, ParseLimits,
@@ -84,26 +85,6 @@ fn normalize_target(base: &str, target: &str) -> String {
         }
     }
     parts.join("/")
-}
-
-fn read_entry(
-    archive: &mut ZipArchive<Cursor<&[u8]>>,
-    name: &str,
-    limits: &ParseLimits,
-) -> Result<Option<Vec<u8>>, ParseError> {
-    let Ok(mut entry) = archive.by_name(name) else {
-        return Ok(None);
-    };
-    if entry.size() as usize > limits.max_entry_bytes {
-        return Err(ParseError::ResourceLimit(format!(
-            "entry {name} exceeds size limit"
-        )));
-    }
-    let mut bytes = Vec::with_capacity(entry.size() as usize);
-    entry
-        .read_to_end(&mut bytes)
-        .map_err(|error| ParseError::Corrupt(error.to_string()))?;
-    Ok(Some(bytes))
 }
 
 const CHART_STYLE_REL_TYPE: &str =
@@ -638,6 +619,14 @@ impl NamespaceDeclarations {
     }
 }
 
+fn namespace_prefix(key: &[u8]) -> Option<&[u8]> {
+    if key == b"xmlns" {
+        Some(b"")
+    } else {
+        key.strip_prefix(b"xmlns:")
+    }
+}
+
 /// Whether raw tag bytes contain `xmlns`, without building a substring searcher per tag.
 fn mentions_xmlns(tag: &[u8]) -> bool {
     let mut rest = tag;
@@ -661,11 +650,7 @@ fn collect_namespaces(
     }
     for attribute in start.attributes().with_checks(false).flatten() {
         let key = attribute.key.as_ref();
-        let prefix = if key == b"xmlns" {
-            Some(&b""[..])
-        } else {
-            key.strip_prefix(b"xmlns:")
-        };
+        let prefix = namespace_prefix(key);
         if let (Some(prefix), Ok(value)) = (prefix, attribute.unescape_value()) {
             namespaces.push((
                 depth,
@@ -790,6 +775,8 @@ impl<'x> TreeBuilder<'x> {
         start: &BytesStart<'_>,
         budget: &mut XmlBudget,
         limits: &ParseLimits,
+        mut namespaces: Option<&mut NamespaceDeclarations>,
+        depth: usize,
     ) -> Result<u32, ParseError> {
         budget.consume_node_count(limits)?;
         // Raw tag bytes bound both attribute count and total raw attribute bytes.
@@ -823,6 +810,15 @@ impl<'x> TreeBuilder<'x> {
                     .map_err(|error| ParseError::Corrupt(format!("{}: {error}", self.context)))?;
                 self.intern(decoded.into_owned())
             };
+            if let Some(declarations) = namespaces.as_deref_mut() {
+                if let Some(prefix) = namespace_prefix(key) {
+                    declarations.push((
+                        depth,
+                        String::from_utf8_lossy(prefix).into_owned(),
+                        self.resolve(value).to_owned(),
+                    ));
+                }
+            }
             self.attributes.push(RawAttribute {
                 name,
                 value,
@@ -1003,11 +999,16 @@ fn parse_xml_tree(
                 if stack.len() >= limits.max_xml_depth {
                     return Err(ParseError::ResourceLimit("XML nesting depth".into()));
                 }
-                let index = builder.push_start(&start, &mut budget, limits)?;
                 if track_namespaces {
                     namespace_scopes.push(namespaces.len());
-                    collect_namespaces(&start, stack.len(), &mut namespaces);
                 }
+                let index = builder.push_start(
+                    &start,
+                    &mut budget,
+                    limits,
+                    track_namespaces.then_some(&mut namespaces),
+                    stack.len(),
+                )?;
                 let editing_scope = if track_editing {
                     stack.last().map(|frame| frame.editing_scope).unwrap_or_default()
                         .next(&start, &namespaces.values)
@@ -1054,11 +1055,14 @@ fn parse_xml_tree(
                 });
             }
             Ok(Event::Empty(start)) => {
-                let index = builder.push_start(&start, &mut budget, limits)?;
                 let namespace_count = namespaces.len();
-                if track_namespaces {
-                    collect_namespaces(&start, stack.len(), &mut namespaces);
-                }
+                let index = builder.push_start(
+                    &start,
+                    &mut budget,
+                    limits,
+                    track_namespaces.then_some(&mut namespaces),
+                    stack.len(),
+                )?;
                 let editing_scope = if track_editing {
                     stack.last().map(|frame| frame.editing_scope).unwrap_or_default()
                         .next(&start, &namespaces.values)
@@ -3043,38 +3047,17 @@ fn push_fixed_eight(output: &mut String, value: f64) -> bool {
     if negative && scaled != 0 {
         output.push('-');
     }
-    let mut integer = scaled / SCALE;
-    let mut fractional = scaled % SCALE;
-    let mut digits = [0u8; 40];
-    let mut length = 0;
-    loop {
-        digits[length] = b'0' + (integer % 10) as u8;
-        length += 1;
-        integer /= 10;
-        if integer == 0 {
-            break;
-        }
-    }
-    for index in (0..length).rev() {
-        output.push(digits[index] as char);
-    }
-    if fractional != 0 {
-        let mut width = 8;
-        while fractional % 10 == 0 {
-            fractional /= 10;
-            width -= 1;
-        }
+    let (integer, fraction) = match u64::try_from(scaled) {
+        Ok(small) => (small / SCALE as u64, (small % SCALE as u64) as u32),
+        Err(_) => ((scaled / SCALE) as u64, (scaled % SCALE) as u32),
+    };
+    let mut digits = itoa::Buffer::new();
+    output.push_str(digits.format(integer));
+    if fraction != 0 {
+        // The leading digit pads the fractional part to eight decimal places.
+        let padded = digits.format(SCALE as u32 + fraction);
         output.push('.');
-        let mut buffer = [b'0'; 8];
-        let mut position = width;
-        while fractional != 0 {
-            position -= 1;
-            buffer[position] = b'0' + (fractional % 10) as u8;
-            fractional /= 10;
-        }
-        for byte in &buffer[..width] {
-            output.push(*byte as char);
-        }
+        output.push_str(padded[1..].trim_end_matches('0'));
     }
     true
 }
@@ -3570,10 +3553,9 @@ fn asset_content_type(path: &str, types: XmlNode<'_>) -> String {
 }
 
 fn load_picture_assets(
-    archive: &mut ZipArchive<Cursor<&[u8]>>,
+    archive: &mut PptxPackage<'_>,
     paths: &BTreeMap<String, String>,
     assets: &mut BTreeMap<String, PresentationAsset>,
-    limits: &ParseLimits,
     options: &ParseOptions,
     content_types: XmlNode<'_>,
     mut generations: Option<&mut AssetGenerations>,
@@ -3593,7 +3575,7 @@ fn load_picture_assets(
         {
             continue;
         }
-        if let Some(data) = read_entry(archive, &path, limits)? {
+        if let Some(data) = archive.take_part(&path)? {
             if let Some(generations) = generations.as_deref_mut() {
                 generations.record(&path);
             }
@@ -6573,15 +6555,15 @@ fn relationship_part_path(path: &str) -> String {
 }
 
 fn load_xml_part(
-    archive: &mut ZipArchive<Cursor<&[u8]>>,
+    archive: &mut PptxPackage<'_>,
     path: &str,
     limits: &ParseLimits,
 ) -> Result<Option<ParsedXmlPart>, ParseError> {
-    let Some(xml) = read_entry(archive, path, limits)? else {
+    let Some(xml) = archive.take_part(path)? else {
         return Ok(None);
     };
     let document = parse_xml_tree(xml, limits, path)?;
-    let rels = match read_entry(archive, &relationship_part_path(path), limits)? {
+    let rels = match archive.take_part(&relationship_part_path(path))? {
         Some(xml) => relationships(&xml, path, limits.max_xml_depth)?,
         None => Relationships::default(),
     };
@@ -6593,14 +6575,14 @@ fn load_xml_part(
 }
 
 fn load_theme_part(
-    archive: &mut ZipArchive<Cursor<&[u8]>>,
+    archive: &mut PptxPackage<'_>,
     path: &str,
     limits: &ParseLimits,
 ) -> Result<Option<ThemeDataInternal>, ParseError> {
-    let Some(xml) = read_entry(archive, path, limits)? else {
+    let Some(xml) = archive.take_part(path)? else {
         return Ok(None);
     };
-    let rels = match read_entry(archive, &relationship_part_path(path), limits)? {
+    let rels = match archive.take_part(&relationship_part_path(path))? {
         Some(xml) => relationships(&xml, path, limits.max_xml_depth)?,
         None => Relationships::default(),
     };
@@ -6638,7 +6620,8 @@ pub(crate) fn parse_with_artwork_target(
     target: Option<&crate::ArtworkTarget>,
 ) -> Result<PresentationDocument, ParseError> {
     duke_office_art::with_cached_xml(|| {
-        parse_cached(bytes, limits, options, target, false).map(|(document, _)| document)
+        let package = PptxPackage::open(bytes, limits)?;
+        parse_cached(package, limits, options, target, false).map(|(document, _)| document)
     })
 }
 
@@ -6655,7 +6638,8 @@ pub(crate) fn parse_retained(
         ..*options
     };
     duke_office_art::with_cached_xml(|| {
-        let (document, retained) = parse_cached(bytes, limits, &options, None, true)?;
+        let package = PptxPackage::open(bytes, limits)?;
+        let (document, retained) = parse_cached(package, limits, &options, None, true)?;
         Ok((
             document,
             retained.expect("a retaining parse keeps its state"),
@@ -6664,33 +6648,17 @@ pub(crate) fn parse_retained(
 }
 
 fn parse_cached(
-    bytes: &[u8],
+    mut archive: PptxPackage<'_>,
     limits: &ParseLimits,
     options: &ParseOptions,
     artwork_target: Option<&crate::ArtworkTarget>,
     retain: bool,
 ) -> Result<(PresentationDocument, Option<RetainedParse>), ParseError> {
-    let cursor = Cursor::new(bytes);
-    let mut archive =
-        ZipArchive::new(cursor).map_err(|error| ParseError::Corrupt(format!("ZIP: {error}")))?;
-    if archive.len() > limits.max_entries {
-        return Err(ParseError::ResourceLimit("ZIP entry count".into()));
-    }
-    let total: u64 = (0..archive.len())
-        .filter_map(|index| archive.by_index(index).ok().map(|file| file.size()))
-        .sum();
-    if total > limits.max_total_uncompressed_bytes as u64 {
-        return Err(ParseError::ResourceLimit("ZIP expanded size".into()));
-    }
-    if archive.by_name("EncryptedPackage").is_ok() {
-        return Err(ParseError::Encrypted);
-    }
-
-    let content_types = read_entry(&mut archive, "[Content_Types].xml", limits)?
+    let content_types = archive.take_part("[Content_Types].xml")?
         .map(|xml| parse_xml_tree(xml, limits, "[Content_Types].xml"))
         .transpose()?
         .unwrap_or_else(|| XmlDocument::leaf("Types"));
-    let package_rels = match read_entry(&mut archive, "_rels/.rels", limits)? {
+    let package_rels = match archive.take_part("_rels/.rels")? {
         Some(xml) => relationships(&xml, "", limits.max_xml_depth)?,
         None => Relationships::default(),
     };
@@ -6698,7 +6666,7 @@ fn parse_cached(
         .related("extended-properties", "\0")
         .map(String::as_str)
         .unwrap_or("docProps/app.xml");
-    let legacy_chart_defaults = read_entry(&mut archive, app_path, limits)?
+    let legacy_chart_defaults = archive.take_part(app_path)?
         .and_then(|xml| parse_xml_tree(xml, limits, app_path).ok())
         .and_then(|document| {
             document.root().child("AppVersion")?
@@ -6714,14 +6682,11 @@ fn parse_cached(
         .related("officeDocument", "\0")
         .map(String::as_str)
         .unwrap_or("ppt/presentation.xml");
-    let presentation = read_entry(&mut archive, presentation_path, limits)?
+    let presentation = archive.take_part(presentation_path)?
         .ok_or_else(|| ParseError::Corrupt(format!("missing {presentation_path}")))?;
-    let rel_bytes = read_entry(
-        &mut archive,
-        &relationship_part_path(presentation_path),
-        limits,
-    )?
-    .unwrap_or_default();
+    let rel_bytes = archive
+        .take_part(&relationship_part_path(presentation_path))?
+        .unwrap_or_default();
     let rels = relationships(&rel_bytes, presentation_path, limits.max_xml_depth)?;
     let mut comment_authors = None;
     let mut modern_comment_authors = None;
@@ -6735,7 +6700,7 @@ fn parse_cached(
     let presentation_text_style = presentation_root.child("defaultTextStyle");
     let table_styles_path = related_path(&rels, "tableStyles", "ppt/tableStyles")
         .unwrap_or_else(|| "ppt/tableStyles.xml".to_owned());
-    let table_styles_root = match read_entry(&mut archive, &table_styles_path, limits)? {
+    let table_styles_root = match archive.take_part(&table_styles_path)? {
         Some(xml) => Some(parse_xml_tree(xml, limits, &table_styles_path)?),
         None => None,
     };
@@ -6764,12 +6729,12 @@ fn parse_cached(
     let mut retained_layouts = BTreeMap::new();
     let mut retained_master_views = BTreeMap::new();
     for (index, slide_path) in slide_paths.iter().enumerate() {
-        let xml = read_entry(&mut archive, slide_path, limits)?
+        let xml = archive.take_part(slide_path)?
             .ok_or_else(|| ParseError::Corrupt(format!("missing {slide_path}")))?;
         let slide_document = parse_xml_tree(xml, limits, slide_path)?;
         let slide_root = slide_document.root();
         let slide_relationship_xml =
-            read_entry(&mut archive, &relationship_part_path(slide_path), limits)?;
+            archive.take_part(&relationship_part_path(slide_path))?;
         let slide_rels = match slide_relationship_xml.as_deref() {
             Some(bytes) => relationships(bytes, slide_path, limits.max_xml_depth)?,
             None => Relationships::default(),
@@ -6885,10 +6850,10 @@ fn parse_cached(
                     "related presentation parts".into(),
                 ));
             }
-            if let Some(bytes) = read_entry(&mut archive, &target, limits)? {
+            if let Some(bytes) = archive.take_part(&target)? {
                 related_parts.insert(target.clone(), bytes);
                 let Some(rels_xml) =
-                    read_entry(&mut archive, &relationship_part_path(&target), limits)?
+                    archive.take_part(&relationship_part_path(&target))?
                 else {
                     continue;
                 };
@@ -6935,7 +6900,7 @@ fn parse_cached(
                         _ => continue,
                     };
                     if slot.is_none() {
-                        if let Some(bytes) = read_entry(&mut archive, &rel_target, limits)? {
+                        if let Some(bytes) = archive.take_part(&rel_target)? {
                             *slot = Some(String::from_utf8_lossy(&bytes).into_owned());
                         }
                     }
@@ -6972,18 +6937,17 @@ fn parse_cached(
             &mut archive,
             &asset_paths,
             &mut assets,
-            limits,
             options,
             content_types.root(),
             generations.as_mut(),
         )?;
         let notes = if let Some(target) = slide_rels.related("notesSlide", "ppt/notesSlides/") {
             let notes_rels =
-                match read_entry(&mut archive, &relationship_part_path(target), limits)? {
+                match archive.take_part(&relationship_part_path(target))? {
                     Some(xml) => relationships(&xml, target, limits.max_xml_depth)?,
                     None => Relationships::default(),
                 };
-            read_entry(&mut archive, target, limits)?
+            archive.take_part(target)?
                 .map(|xml| parse_notes(&xml, limits, target, &notes_rels))
                 .transpose()?
                 .unwrap_or_default()
@@ -6991,7 +6955,7 @@ fn parse_cached(
             Vec::new()
         };
         let comments = if let Some(target) = comments_path {
-            if let Some(xml) = read_entry(&mut archive, &target, limits)? {
+            if let Some(xml) = archive.take_part(&target)? {
                 let modern = comments::is_modern(&xml);
                 let author_cache = if modern {
                     &mut modern_comment_authors
@@ -7007,7 +6971,7 @@ fn parse_cached(
                             office_relationship(&kind, "commentAuthors")
                         };
                         if selected {
-                            if let Some(xml) = read_entry(&mut archive, path, limits)? {
+                            if let Some(xml) = archive.take_part(path)? {
                                 authors.extend(if modern {
                                     comments::modern_authors(&xml, limits, path)?
                                 } else {
@@ -7019,7 +6983,7 @@ fn parse_cached(
                     *author_cache = Some(authors);
                 }
                 let comment_rels = if modern {
-                    match read_entry(&mut archive, &relationship_part_path(&target), limits)? {
+                    match archive.take_part(&relationship_part_path(&target))? {
                         Some(xml) => relationships(&xml, &target, limits.max_xml_depth)?,
                         None => Relationships::default(),
                     }
@@ -7187,7 +7151,6 @@ fn parse_cached(
         &mut archive,
         &asset_paths,
         &mut assets,
-        limits,
         options,
         content_types.root(),
         generations.as_mut(),
@@ -7285,7 +7248,6 @@ fn parse_cached(
                 &mut archive,
                 &part_asset_paths,
                 &mut assets,
-                limits,
                 options,
                 content_types.root(),
                 generations.as_mut(),
@@ -7391,7 +7353,7 @@ fn parse_cached(
                 ));
                 continue;
             };
-            let Some(mut data) = read_entry(&mut archive, path, limits)? else {
+            let Some(mut data) = archive.take_part(path)? else {
                 font_warnings.push(PresentationWarning::warning(
                     "missing-font",
                     format!("Embedded font data for {} is missing.", font.family),
@@ -7431,7 +7393,7 @@ fn parse_cached(
             .then_some(path.as_str())
     }).unwrap_or("docProps/core.xml");
     let metadata =
-        read_entry(&mut archive, core_path, limits)?.map(|xml| parse_core_metadata(&xml));
+        archive.take_part(core_path)?.map(|xml| parse_core_metadata(&xml));
     document_warnings.extend(font_warnings);
     let document = PresentationDocument {
         document_id: None,

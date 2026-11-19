@@ -19,6 +19,7 @@ pub use chart::{extract_chart_data, ChartCategory, ChartData, ChartPoint};
 pub use export::*;
 pub use extraction_limits::ExtractionLimits;
 pub use model::*;
+pub use pptx::PptxPackage;
 pub use reading_order::presentation_node_reading_order;
 pub use semantic::{ParagraphDetails, ParagraphInline};
 pub use structured::*;

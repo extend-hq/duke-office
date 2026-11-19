@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.6
+
+- Expose `PptxPackage` so callers can inspect presentation parts once and reuse their decompressed contents during parsing.
+- Reduce the cost of formatting drawing coordinates and tracking XML namespaces while preserving drawing paths and source identity.
+
 ## 0.5.5
 
 - Reuse normalized drawing paths in shared slide layouts and masters.

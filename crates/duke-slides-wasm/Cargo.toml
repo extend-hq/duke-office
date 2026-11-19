@@ -1,6 +1,6 @@
 [package]
 name = "duke-slides-wasm"
-version = "0.5.5"
+version = "0.5.6"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -14,7 +14,7 @@ name = "duke_slides_wasm"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-duke-slides = { path = "../duke-slides", version = "=0.5.5" }
+duke-slides = { path = "../duke-slides", version = "=0.5.6" }
 serde.workspace = true
 serde_json.workspace = true
 serde-wasm-bindgen.workspace = true
