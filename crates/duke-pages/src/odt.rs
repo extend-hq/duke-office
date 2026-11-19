@@ -494,6 +494,7 @@ fn paragraph_node(
     comment_ranges: Option<Vec<CommentRange>>,
 ) -> ParagraphNode {
     ParagraphNode {
+        bookmarks: Vec::new(),
         review_content: None,
         block_id: None,
         r#type: ParagraphNodeType::Paragraph,

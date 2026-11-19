@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.10
+
+- Resolve slide-number fields in slides and notes using the presentation’s starting number and slide order.
+
 ## 0.5.8
 
 - Expose structured extraction with raw media and optional body text, including reuse of an inspected PowerPoint package.

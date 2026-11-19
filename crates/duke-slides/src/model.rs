@@ -276,6 +276,23 @@ pub enum SlideNode {
 }
 
 impl SlideNode {
+    pub(crate) fn visit_paragraphs_mut(&mut self, visit: &mut impl FnMut(&mut [TextParagraph])) {
+        match self {
+            Self::Shape { paragraphs, .. } => visit(paragraphs),
+            Self::Table { rows, .. } => {
+                for cell in rows.iter_mut().flatten() {
+                    visit(&mut cell.paragraphs);
+                }
+            }
+            Self::Group { children, .. } => {
+                for node in children {
+                    node.visit_paragraphs_mut(visit);
+                }
+            }
+            _ => {}
+        }
+    }
+
     pub fn text_content(&self) -> Option<&ObjectText> {
         match self {
             Self::Shape { metadata, .. }

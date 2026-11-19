@@ -292,7 +292,7 @@ fn parse_presentation_xml(
     xml: &[u8],
     rels: &Relationships,
     limits: &ParseLimits,
-) -> Result<(PresentationSize, Vec<String>), ParseError> {
+) -> Result<(PresentationSize, Vec<String>, i32), ParseError> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(true);
     let mut size = PresentationSize {
@@ -300,6 +300,7 @@ fn parse_presentation_xml(
         height_emu: DEFAULT_HEIGHT,
     };
     let mut slides = Vec::new();
+    let mut first_slide_number = 1;
     let mut depth = 0usize;
     loop {
         match reader.read_event() {
@@ -309,6 +310,11 @@ fn parse_presentation_xml(
                     return Err(ParseError::ResourceLimit("XML nesting depth".into()));
                 }
                 match local_name(start.name().as_ref()) {
+                    b"presentation" if depth == 1 => {
+                        first_slide_number = attr(&start, b"firstSlideNum")
+                            .and_then(|v| v.parse().ok())
+                            .unwrap_or(1);
+                    }
                     b"sldSz" => {
                         size.width_emu = attr(&start, b"cx")
                             .and_then(|v| v.parse().ok())
@@ -381,7 +387,7 @@ fn parse_presentation_xml(
             _ => {}
         }
     }
-    Ok((size, slides))
+    Ok((size, slides, first_slide_number))
 }
 
 #[derive(Debug)]
@@ -6412,11 +6418,23 @@ fn parse_core_metadata(xml: &[u8]) -> PresentationMetadata {
     metadata
 }
 
+fn resolve_slide_number(paragraphs: &mut [TextParagraph], number: &str) {
+    for run in paragraphs.iter_mut().flat_map(|p| &mut p.runs) {
+        if run.field.as_ref()
+            .and_then(|field| field.field_type.as_deref())
+            .is_some_and(|kind| kind.eq_ignore_ascii_case("slidenum"))
+        {
+            number.clone_into(&mut run.text);
+        }
+    }
+}
+
 fn parse_notes(
     xml: &[u8],
     limits: &ParseLimits,
     part_name: &str,
     rels: &Relationships,
+    slide_number: &str,
 ) -> Result<Vec<SlideNote>, ParseError> {
     let document = parse_xml_tree(xml.to_vec(), limits, part_name)?;
     let root = document.root();
@@ -6452,6 +6470,7 @@ fn parse_notes(
             ));
         }
     }
+    resolve_slide_number(&mut paragraphs, slide_number);
     let text = paragraphs
         .iter()
         .map(|paragraph| {
@@ -6687,7 +6706,8 @@ fn parse_cached(
     let rels = relationships(&rel_bytes, presentation_path, limits.max_xml_depth)?;
     let mut comment_authors = None;
     let mut modern_comment_authors = None;
-    let (size, slide_paths) = parse_presentation_xml(&presentation, &rels, limits)?;
+    let (size, slide_paths, first_slide_number) =
+        parse_presentation_xml(&presentation, &rels, limits)?;
     let embedded_font_refs = parse_embedded_font_references(&presentation);
     let presentation_document = parse_xml_tree(presentation, limits, presentation_path)?;
     let presentation_root = presentation_document.root();
@@ -6726,6 +6746,7 @@ fn parse_cached(
     let mut retained_layouts = BTreeMap::new();
     let mut retained_master_views = BTreeMap::new();
     for (index, slide_path) in slide_paths.iter().enumerate() {
+        let slide_number = (i64::from(first_slide_number) + index as i64).to_string();
         let xml = archive.take_part(slide_path)?
             .ok_or_else(|| ParseError::Corrupt(format!("missing {slide_path}")))?;
         let slide_document = parse_part_tree(xml, limits, slide_path, content_only)?;
@@ -6949,7 +6970,7 @@ fn parse_cached(
                     None => Relationships::default(),
                 };
             archive.take_part(target)?
-                .map(|xml| parse_notes(&xml, limits, target, &notes_rels))
+                .map(|xml| parse_notes(&xml, limits, target, &notes_rels, &slide_number))
                 .transpose()?
                 .unwrap_or_default()
         } else {
@@ -7017,7 +7038,7 @@ fn parse_cached(
             .unwrap_or_else(|| master_color_map.clone());
         let slide_color_map = merge_color_maps(&layout_color_map, &color_map(slide_root));
         let diagnostics = ParseDiagnostics::new(Some(index), slide_path);
-        let content = {
+        let mut content = {
             let colors = ColorContext {
                 theme,
                 color_map: &slide_color_map,
@@ -7054,6 +7075,11 @@ fn parse_cached(
             };
             parse_slide(slide_root, &context)?
         };
+        for node in &mut content.nodes {
+            node.visit_paragraphs_mut(&mut |paragraphs| {
+                resolve_slide_number(paragraphs, &slide_number);
+            });
+        }
         let slide_warnings = diagnostics.take();
         let retained_paths = retain.then(|| (layout_path.clone(), master_path.clone()));
         slides.push(PresentationSlide {

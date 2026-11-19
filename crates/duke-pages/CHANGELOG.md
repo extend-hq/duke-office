@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.10
+
+- Preserve named Word bookmarks at their inline positions, including targets in empty paragraphs.
+
 ## 0.5.9
 
 - Preserve Word equation operators, fractions and limit placement, grouped picture descriptions and relationships, and title styles identified by name.

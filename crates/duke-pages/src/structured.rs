@@ -162,6 +162,8 @@ pub struct ParagraphDetails {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub list_label_style: Option<TextStyle>,
     pub field_instructions: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub bookmarks: Vec<ParagraphBookmark>,
     pub inlines: Vec<ParagraphInline>,
 }
 
@@ -1095,6 +1097,7 @@ impl Extractor<'_> {
             list_label,
             list_label_style,
             field_instructions,
+            bookmarks: p.bookmarks.clone(),
             inlines: inline,
         };
         let mut block = self.block(id.to_string(), kind, content, details, children, parent);
@@ -1225,7 +1228,7 @@ fn has_paragraph_content(block: &DocumentBlock) -> bool {
             !c.is_whitespace() && !matches!(c, '\u{200b}' | '\u{feff}' | '\u{00ad}')
         })
         || matches!(&block.details, BlockDetails::Paragraph(details)
-            if details.list_label.is_some() || details.inlines.iter().any(|inline| {
+            if !details.bookmarks.is_empty() || details.list_label.is_some() || details.inlines.iter().any(|inline| {
                 matches!(inline, ParagraphInline::Text { note_reference: Some(_), .. })
             }))
 }

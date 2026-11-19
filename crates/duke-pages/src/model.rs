@@ -1080,6 +1080,8 @@ pub struct ParagraphMarkFormattingSource {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ParagraphNode {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bookmarks: Vec<ParagraphBookmark>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub review_content: Option<Vec<crate::revisions::ReviewContent>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1112,6 +1114,13 @@ pub struct ParagraphNode {
     /// comment ranges in `source_xml` instead.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment_ranges: Option<Vec<CommentRange>>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParagraphBookmark {
+    pub child_index: usize,
+    pub name: String,
 }
 
 /// The part of one paragraph a comment covers.

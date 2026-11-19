@@ -49,6 +49,11 @@ pub(super) fn join(mut cap: DocumentBlock, mut body: DocumentBlock) -> DocumentB
                 ParagraphInline::Block { offset, .. } => *offset += cap_length,
             }
         }
+        for bookmark in &mut body_details.bookmarks {
+            bookmark.child_index += cap_details.inlines.len();
+        }
+        cap_details.bookmarks.append(&mut body_details.bookmarks);
+        body_details.bookmarks = std::mem::take(&mut cap_details.bookmarks);
         cap_details.inlines.append(&mut body_details.inlines);
         body_details.inlines = std::mem::take(&mut cap_details.inlines);
         cap_details

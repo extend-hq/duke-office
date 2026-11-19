@@ -279,7 +279,7 @@ fn resolve_slide_fields(
     footer: Option<&str>,
     date_time: Option<&str>,
 ) {
-    let paragraphs = |paragraphs: &mut [TextParagraph]| {
+    let mut paragraphs = |paragraphs: &mut [TextParagraph]| {
         for paragraph in paragraphs {
             for run in &mut paragraph.runs {
                 let Some(field) = run.field.as_mut() else {
@@ -299,18 +299,7 @@ fn resolve_slide_fields(
         }
     };
     for node in nodes {
-        match node {
-            SlideNode::Shape { paragraphs: text, .. } => paragraphs(text),
-            SlideNode::Table { rows, .. } => {
-                for cell in rows.iter_mut().flatten() {
-                    paragraphs(&mut cell.paragraphs);
-                }
-            }
-            SlideNode::Group { children, .. } => {
-                resolve_slide_fields(children, number, count, name, footer, date_time);
-            }
-            _ => {}
-        }
+        node.visit_paragraphs_mut(&mut paragraphs);
     }
 }
 

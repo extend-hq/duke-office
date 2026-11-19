@@ -2229,6 +2229,36 @@ pub fn parse_paragraph_in_table(
     parse_paragraph_with_table_run_style(paragraph_xml, context, table_paragraph_spacing, None)
 }
 
+fn bookmark_tokens(xml: &str, base: usize, out: &mut Vec<(usize, String)>) {
+    use crate::xml::extract_direct_child_tag_ranges;
+    for range in extract_direct_child_tag_ranges(xml) {
+        let child = &xml[range.start..range.end];
+        let start = base + range.start;
+        match range.tag_name.as_str() {
+            "w:bookmarkStart" => {
+                if let Some(name) = get_attribute_ref(child, "w:name").filter(|name| !name.is_empty())
+                {
+                    out.push((start, decode_xml_entities(name)));
+                }
+            }
+            "w:ins" | "w:moveTo" | "w:hyperlink" | "w:sdt" | "w:sdtContent" | "w:smartTag"
+            | "w:customXml" | "w:fldSimple" | "w:dir" | "w:bdo" => {
+                bookmark_tokens(child, start, out);
+            }
+            "mc:AlternateContent" => {
+                let branches = extract_direct_child_tag_ranges(child);
+                if let Some(branch) = branches.iter()
+                    .find(|b| b.tag_name == "mc:Choice")
+                    .or_else(|| branches.iter().find(|b| b.tag_name == "mc:Fallback"))
+                {
+                    bookmark_tokens(&child[branch.start..branch.end], start + branch.start, out);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
 pub(crate) fn parse_paragraph_with_table_run_style(
     paragraph_xml: &str,
     context: &ParseContext<'_, impl std::borrow::Borrow<super::context::ParsedStyleSheet>>,
@@ -2236,6 +2266,7 @@ pub(crate) fn parse_paragraph_with_table_run_style(
     table_run_style: Option<&TextStyle>,
 ) -> ParagraphNode {
     let mut children: Vec<ParagraphChildNode> = Vec::new();
+    let mut bookmarks = Vec::new();
     let paragraph_properties_xml =
         super::styles::direct_table_property(paragraph_xml, "w:pPr").unwrap_or_default();
     let paragraph_style = super::style::parse_paragraph_style_from_properties(
@@ -2306,6 +2337,10 @@ pub(crate) fn parse_paragraph_with_table_run_style(
         );
 
         enum ContentToken<'a> {
+            Bookmark {
+                start: usize,
+                name: String,
+            },
             Run {
                 start: usize,
                 token: &'a RunToken<'a>,
@@ -2322,6 +2357,13 @@ pub(crate) fn parse_paragraph_with_table_run_style(
 
         let mut content_tokens: Vec<ContentToken<'_>> =
             Vec::with_capacity(runs.len() + form_field_tokens.len());
+        if paragraph_xml.contains(":bookmarkStart") {
+            let mut starts = Vec::new();
+            bookmark_tokens(paragraph_xml, 0, &mut starts);
+            content_tokens.extend(starts.into_iter().map(|(start, name)| {
+                ContentToken::Bookmark { start, name }
+            }));
+        }
         let mut form_field_token_cursor = 0usize;
         for run in &runs {
             while form_field_token_cursor < form_field_tokens.len()
@@ -2359,13 +2401,19 @@ pub(crate) fn parse_paragraph_with_table_run_style(
             }
         }
         content_tokens.sort_by_key(|token| match token {
-            ContentToken::Run { start, .. } => *start,
+            ContentToken::Bookmark { start, .. } | ContentToken::Run { start, .. } => *start,
             ContentToken::FormField { start, .. } => *start,
             ContentToken::Math { start, .. } => *start,
         });
 
         for content_token in content_tokens {
             match content_token {
+                ContentToken::Bookmark { name, .. } => {
+                    bookmarks.push(crate::model::ParagraphBookmark {
+                        child_index: children.len(),
+                        name,
+                    });
+                }
                 ContentToken::Math { xml, .. } => {
                     if let Some(math) = super::math::parse_math(xml) {
                         children.push(ParagraphChildNode::Image(Box::new(math)));
@@ -2548,6 +2596,7 @@ pub(crate) fn parse_paragraph_with_table_run_style(
         })
         .collect::<Vec<_>>();
     ParagraphNode {
+        bookmarks,
         review_content: (!review_content.is_empty()).then_some(review_content),
         r#type: ParagraphNodeType::Paragraph,
         block_id: None,
