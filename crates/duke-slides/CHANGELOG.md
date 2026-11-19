@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.5
+
+- Reuse normalized drawing paths in shared slide layouts and masters.
+- Expose the SHA-256 of the original input through `PresentationDocument::source_sha256`.
+
 ## 0.5.4
 
 - Bound sparse chart-cache expansion across a presentation and decode cached categories and numbers directly into their native arrays.

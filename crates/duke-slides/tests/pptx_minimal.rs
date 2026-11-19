@@ -52,7 +52,11 @@ fn extracts_embedded_powerpoint_fonts() {
 
 #[test]
 fn parses_slide_order_size_transform_and_text() {
-    let document = parse_presentation(&minimal_pptx(), &ParseLimits::default()).unwrap();
+    use sha2::{Digest, Sha256};
+    let bytes = minimal_pptx();
+    let digest = format!("{:x}", Sha256::digest(&bytes));
+    let document = parse_presentation(&bytes, &ParseLimits::default()).unwrap();
+    assert_eq!(document.source_sha256(), Some(digest.as_str()));
     assert_eq!(document.format, PresentationFormat::Pptx);
     assert_eq!(document.size.width_emu, 12_192_000);
     assert_eq!(document.slides.len(), 1);

@@ -6,7 +6,7 @@
 //! UTF-8 and contains no entities at that position; everything else lives in
 //! the side-string table. `XmlNode` is a `Copy` handle into a document.
 
-use std::fmt;
+use std::{collections::HashMap, fmt, sync::OnceLock};
 
 pub(super) const NONE: u32 = u32::MAX;
 
@@ -64,9 +64,19 @@ pub(super) struct XmlDocument {
     pub(super) attributes: Vec<RawAttribute>,
     pub(super) strings: Vec<String>,
     pub(super) root: u32,
+    pub(super) geometry_paths: HashMap<u32, OnceLock<Option<String>>>,
 }
 
 impl XmlDocument {
+    pub(super) fn cache_geometry_paths(&mut self) {
+        let mut paths = Vec::new();
+        self.root().collect_descendants("pathLst", &mut paths);
+        self.geometry_paths = paths
+            .into_iter()
+            .map(|node| (node.index, OnceLock::new()))
+            .collect();
+    }
+
     /// The part bytes without a leading byte-order mark.
     pub(super) fn bytes(&self) -> &[u8] {
         &self.buffer[self.base..]
@@ -277,6 +287,16 @@ impl<'t> XmlNode<'t> {
                     self.document.resolve(attribute.value),
                 )
             })
+    }
+
+    pub(super) fn geometry_path(
+        self,
+        normalize: impl FnOnce(Self) -> Option<String>,
+    ) -> Option<String> {
+        match self.document.geometry_paths.get(&self.index) {
+            Some(value) => value.get_or_init(|| normalize(self)).clone(),
+            None => normalize(self),
+        }
     }
 
     pub(super) fn children(self) -> Children<'t> {

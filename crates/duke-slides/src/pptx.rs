@@ -1197,6 +1197,7 @@ fn parse_xml_tree(
         attributes,
         strings,
         root,
+        geometry_paths: HashMap::new(),
     })
 }
 
@@ -3090,6 +3091,10 @@ fn custom_path_point(node: XmlNode<'_>) -> Option<(f64, f64)> {
 /// guide formulas are skipped instead of degrading the shape to a rectangle.
 fn custom_geometry_path(node: XmlNode<'_>) -> Option<String> {
     let paths = node.child("spPr")?.child("custGeom")?.child("pathLst")?;
+    paths.geometry_path(normalized_custom_path)
+}
+
+fn normalized_custom_path(paths: XmlNode<'_>) -> Option<String> {
     let mut output = String::new();
     let mut has_drawn_segment = false;
     fn push_command(output: &mut String, letter: &str) {
@@ -3132,29 +3137,26 @@ fn custom_geometry_path(node: XmlNode<'_>) -> Option<String> {
                     }
                 }
                 "cubicBezTo" => {
-                    let points = command
-                        .children_named("pt")
-                        .filter_map(custom_path_point)
-                        .collect::<Vec<_>>();
-                    if let [first, second, third] = points.as_slice() {
+                    let mut points = command.children_named("pt").filter_map(custom_path_point);
+                    if let [Some(first), Some(second), Some(third), None] =
+                        std::array::from_fn(|_| points.next())
+                    {
                         push_command(&mut output, "C");
-                        normalized(&mut output, *first);
-                        normalized(&mut output, *second);
-                        normalized(&mut output, *third);
-                        current = Some(*third);
+                        normalized(&mut output, first);
+                        normalized(&mut output, second);
+                        normalized(&mut output, third);
+                        current = Some(third);
                         has_drawn_segment = true;
                     }
                 }
                 "quadBezTo" => {
-                    let points = command
-                        .children_named("pt")
-                        .filter_map(custom_path_point)
-                        .collect::<Vec<_>>();
-                    if let [first, second] = points.as_slice() {
+                    let mut points = command.children_named("pt").filter_map(custom_path_point);
+                    if let [Some(first), Some(second), None] = std::array::from_fn(|_| points.next())
+                    {
                         push_command(&mut output, "Q");
-                        normalized(&mut output, *first);
-                        normalized(&mut output, *second);
-                        current = Some(*second);
+                        normalized(&mut output, first);
+                        normalized(&mut output, second);
+                        current = Some(second);
                         has_drawn_segment = true;
                     }
                 }
@@ -6777,7 +6779,8 @@ fn parse_cached(
         if let Some(path) = layout_path.as_deref() {
             if !layout_parts.contains_key(path) {
                 match load_xml_part(&mut archive, path, limits)? {
-                    Some(part) => {
+                    Some(mut part) => {
+                        part.document.cache_geometry_paths();
                         layout_parts.insert(path.to_owned(), part);
                     }
                     None => document_warnings.push(missing_part_warning(path, Some(index))),
@@ -6791,7 +6794,8 @@ fn parse_cached(
         if let Some(path) = master_path.as_deref() {
             if !master_parts.contains_key(path) {
                 match load_xml_part(&mut archive, path, limits)? {
-                    Some(part) => {
+                    Some(mut part) => {
+                        part.document.cache_geometry_paths();
                         master_parts.insert(path.to_owned(), part);
                     }
                     None => document_warnings.push(missing_part_warning(path, Some(index))),

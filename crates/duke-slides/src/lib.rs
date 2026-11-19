@@ -351,6 +351,8 @@ mod tests {
     }
 }
 
+const SOURCE_ID_PREFIX: &str = "pptx-v1:sha256:";
+
 fn presentation_identity(bytes: &[u8]) -> String {
-    format!("pptx-v1:sha256:{:x}", Sha256::digest(bytes))
+    format!("{SOURCE_ID_PREFIX}{:x}", Sha256::digest(bytes))
 }
