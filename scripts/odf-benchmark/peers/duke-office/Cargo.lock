@@ -272,7 +272,7 @@ dependencies = [
 
 [[package]]
 name = "duke-office-charts"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "base64",
  "duke-odf",
@@ -287,7 +287,7 @@ dependencies = [
 
 [[package]]
 name = "duke-pages"
-version = "0.5.2"
+version = "0.5.7"
 dependencies = [
  "arc-swap",
  "base64",
@@ -314,7 +314,7 @@ dependencies = [
 
 [[package]]
 name = "duke-slides"
-version = "0.5.8"
+version = "0.5.9"
 dependencies = [
  "base64",
  "base64-simd",

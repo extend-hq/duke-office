@@ -1,6 +1,6 @@
 [package]
 name = "duke-slides"
-version = "0.5.8"
+version = "0.5.9"
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -14,7 +14,7 @@ name = "duke_slides"
 
 [dependencies]
 duke-office-art = { version = "=0.2.2", path = "../duke-office-art" }
-duke-office-charts = { version = "=0.3.2", path = "../duke-office-charts", default-features = false, features = ["extended-charts"] }
+duke-office-charts = { version = "=0.3.3", path = "../duke-office-charts", default-features = false, features = ["extended-charts", "odf-text-outlines"] }
 duke-odf = { version = "=0.3.2", path = "../duke-odf" }
 base64 = "0.22"
 base64-simd = "=0.8.0"

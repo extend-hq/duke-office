@@ -1,6 +1,6 @@
 [package]
 name = "duke-office-charts"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 license = "MIT AND OFL-1.1"
 description = "Render Office Open XML charts to SVG from native Rust or WebAssembly"
@@ -10,7 +10,8 @@ categories = ["graphics", "rendering"]
 include = ["src/**", "Cargo.toml", "README.md", "LICENSE"]
 
 [features]
-default = ["extended-charts"]
+default = ["extended-charts", "odf-text-outlines"]
+odf-text-outlines = []
 extended-charts = ["dep:base64", "dep:miniz_oxide"]
 map-fallback = ["extended-charts"]
 

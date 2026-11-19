@@ -2905,7 +2905,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
 
 --------------------
 
-duke-office-charts 0.3.2
+duke-office-charts 0.3.3
 MIT AND OFL-1.1
 https://github.com/extend-hq/duke-office
 
@@ -2934,7 +2934,7 @@ SOFTWARE.
 
 --------------------
 
-duke-office-charts-wasm 0.3.2
+duke-office-charts-wasm 0.3.3
 MIT
 https://github.com/extend-hq/duke-office
 

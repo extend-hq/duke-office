@@ -1,11 +1,14 @@
-use std::{fmt::Write, sync::OnceLock};
+use std::fmt::Write;
 
 struct Glyph {
     path: String,
     advance: f64,
 }
 
+#[cfg(feature = "odf-text-outlines")]
 fn glyph(code: u8, bold: bool, italic: bool) -> Option<&'static Glyph> {
+    use std::sync::OnceLock;
+
     if !(32..=126).contains(&code) {
         return None;
     }
@@ -28,6 +31,11 @@ fn glyph(code: u8, bold: bool, italic: bool) -> Option<&'static Glyph> {
             })
         })
         .as_ref()
+}
+
+#[cfg(not(feature = "odf-text-outlines"))]
+fn glyph(_: u8, _: bool, _: bool) -> Option<&'static Glyph> {
+    None
 }
 
 pub(super) struct LegendLayout {
@@ -440,6 +448,7 @@ mod tests {
         assert!(result.contains(r#"font-weight="bold" font-style="italic""#));
     }
 
+    #[cfg(feature = "odf-text-outlines")]
     #[test]
     fn portable_glyphs_are_reused_and_ids_do_not_collide() {
         let svg = r#"<svg><defs><path id="odf-glyph-0" d="M0 0"/></defs><g font-family="Carlito" font-size="16" transform="rotate(10)"><text x="30" y="20" text-anchor="middle">ABBA</text><text x="30" y="40">AB</text></g></svg>"#;

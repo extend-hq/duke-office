@@ -29,6 +29,8 @@ Aggregate geometry, including histogram bins, box summaries, merged hierarchy br
 
 Default builds include the classic chart families, 3D and surface plots, and supported ChartEx types. Consumers that use only two-dimensional bar, line, area and scatter charts can disable default features to omit the additional renderers and map cache decoder.
 
+The default `odf-text-outlines` feature embeds the fonts used to outline OpenDocument radar labels. Builds with this feature disabled use SVG text with measured widths. The standalone browser chart bundles disable this feature.
+
 Maps use the saved Office boundary cache, including its hierarchy, projection and attribution. The optional `map-fallback` feature adds offline country and US-state boundaries for spreadsheet charts without a usable cache. This fallback does not run for DOCX. An uncached location outside the atlas renders the chart frame and legend with an SVG description explaining that boundaries are unavailable. The browser `/full` entry includes this feature; the compact entry does not load its data.
 
 Extracted from [extend-hq/react-docx](https://github.com/extend-hq/react-docx/tree/185025994fb74825506ff024c37fe67283d6fc6a). Licensed under the [MIT License](LICENSE).
