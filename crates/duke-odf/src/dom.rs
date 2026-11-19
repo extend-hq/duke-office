@@ -24,6 +24,8 @@ pub(crate) enum Ns {
     Chart,
     ChartExt,
     LibreOfficeExt,
+    WriterFormula,
+    OpenFormula,
     Number,
     Xlink,
     Dc,
@@ -51,6 +53,7 @@ impl Ns {
                 "dr3d:1.0" => Self::Dr3d,
                 "chart:1.0" => Self::Chart,
                 "datastyle:1.0" => Self::Number,
+                "of:1.2" => Self::OpenFormula,
                 _ => Self::OtherOdf,
             };
         }
@@ -61,6 +64,7 @@ impl Ns {
             "http://www.w3.org/XML/1998/namespace" => Self::Xml,
             "http://openoffice.org/2010/draw" => Self::DrawExt,
             "http://openoffice.org/2010/chart" => Self::ChartExt,
+            "http://openoffice.org/2004/writer" => Self::WriterFormula,
             "urn:org:documentfoundation:names:experimental:office:xmlns:loext:1.0" => {
                 Self::LibreOfficeExt
             }
@@ -80,6 +84,7 @@ impl Ns {
                 | Self::Xml
                 | Self::ChartExt
                 | Self::LibreOfficeExt
+                | Self::WriterFormula
         )
     }
 }
@@ -93,6 +98,7 @@ pub(crate) enum DomError {
 
 pub(crate) struct Attribute<'i> {
     pub(crate) namespace: Option<Ns>,
+    pub(crate) formula_namespace: Option<Ns>,
     pub(crate) name: &'i str,
     pub(crate) value: Cow<'i, str>,
 }
@@ -619,6 +625,7 @@ impl<'i> Document<'i> {
                 Some(prefix) if prefix.starts_with(':') => scopes.declare(&prefix[1..], &unescape(value)?),
                 _ => self.attributes.push(Attribute {
                     namespace: None,
+                    formula_namespace: None,
                     name: key,
                     value: unescape(value)?,
                 }),
@@ -636,6 +643,21 @@ impl<'i> Document<'i> {
             };
             attribute.namespace = namespace;
             attribute.name = name;
+            if namespace == Some(Ns::Text) && name == "condition" {
+                attribute.formula_namespace =
+                    attribute
+                        .value
+                        .trim()
+                        .split_once(':')
+                        .and_then(|(prefix, _)| {
+                            scopes
+                                .bindings
+                                .iter()
+                                .rev()
+                                .find(|(bound, _)| *bound == prefix)?
+                                .1
+                        });
+            }
         }
         let id = self.push(
             NodeData {

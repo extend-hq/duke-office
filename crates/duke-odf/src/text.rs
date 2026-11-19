@@ -283,11 +283,20 @@ pub(crate) fn parse_blocks(parent: Node<'_, '_>, ctx: &mut Ctx<'_>) -> Vec<Block
                 }
                 "list" => blocks.push(Block::List(parse_list(node, ctx))),
                 "numbered-paragraph" => blocks.extend(parse_blocks(node, ctx)),
-                "section" if attr(node, TEXT, "display") != Some("none") => blocks.push(Block::Section(Section {
-                    name: owned(node, TEXT, "name"),
-                    style: owned(node, TEXT, "style-name"),
-                    blocks: parse_blocks(node, ctx),
-                })),
+                "section" => {
+                    let hidden = match attr(node, TEXT, "display") {
+                        Some("none") => true,
+                        Some("condition") => hidden_condition(node),
+                        _ => false,
+                    };
+                    if !hidden {
+                        blocks.push(Block::Section(Section {
+                            name: owned(node, TEXT, "name"),
+                            style: owned(node, TEXT, "style-name"),
+                            blocks: parse_blocks(node, ctx),
+                        }));
+                    }
+                }
                 "table-of-content" | "illustration-index" | "table-index" | "object-index"
                 | "user-index" | "alphabetical-index" | "bibliography" => {
                     if let Some(body) = child(node, TEXT, "index-body") {
@@ -393,6 +402,35 @@ pub(crate) fn parse_annotation(node: Node<'_, '_>, ctx: &mut Ctx<'_>) -> Annotat
     }
 }
 
+fn hidden_condition(node: Node<'_, '_>) -> bool {
+    let condition = node
+        .attributes()
+        .iter()
+        .find(|a| a.namespace == Some(TEXT) && a.name == "condition");
+    let constant = condition.and_then(|a| {
+        let (_, expression) = a.value.split_once(':')?;
+        let expression = expression.trim();
+        let literal = match a.formula_namespace? {
+            Ns::WriterFormula => expression,
+            Ns::OpenFormula => expression
+                .strip_prefix('=')
+                .unwrap_or(expression)
+                .trim()
+                .strip_suffix("()")?
+                .trim(),
+            _ => return None,
+        };
+        if literal.eq_ignore_ascii_case("true") {
+            Some(true)
+        } else if literal.eq_ignore_ascii_case("false") {
+            Some(false)
+        } else {
+            None
+        }
+    });
+    constant.unwrap_or_else(|| matches!(attr(node, TEXT, "is-hidden"), Some("true" | "1")))
+}
+
 fn parse_inlines(
     parent: Node<'_, '_>,
     ctx: &mut Ctx<'_>,
@@ -484,13 +522,14 @@ fn parse_inlines(
                     }
                 }
                 "hidden-paragraph" => {
-                    let field_hidden = matches!(attr(node, TEXT, "is-hidden"), Some("true" | "1"));
+                    let field_hidden = hidden_condition(node);
                     *hidden = Some(hidden.unwrap_or(true) && field_hidden);
                 }
                 "hidden-text" => {
-                    if !matches!(attr(node, TEXT, "is-hidden"), Some("true" | "1")) {
-                        let text =
-                            owned(node, TEXT, "string-value").unwrap_or_else(|| text_content(node));
+                    if !hidden_condition(node) {
+                        let text = attr(node, TEXT, "string-value")
+                            .map(str::to_owned)
+                            .unwrap_or_else(|| text_content(node));
                         if !text.is_empty() {
                             *after_space = text.ends_with(' ');
                             out.push(Inline::Field {
