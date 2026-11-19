@@ -1074,6 +1074,12 @@ impl<'a> Builder<'a> {
                     let href = Some(href.as_str()).filter(|href| !href.is_empty());
                     self.inlines(children, scope, &inner, href.or(link), out, ranges);
                 }
+                Inline::Ruby { base, reading } => {
+                    self.inlines(base, scope, run, link, out, ranges);
+                    if !run.hidden {
+                        out.push(text_run(format!(" ({reading})"), run, link));
+                    }
+                }
                 Inline::Tab => {
                     if !run.hidden {
                         out.push(text_run("\t".to_owned(), run, link));

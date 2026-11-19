@@ -1455,18 +1455,13 @@ fn parse_legacy_form_field_from_range(
                     re::get(r"(?i)<w:listEntry\b[^>]*/?>")
                         .map(|re| {
                             re.find_iter(xml)
-                                .filter_map(|m| {
+                                .map(|m| {
                                     let entry = get_attribute(m.as_str(), "w:val")
-                                        .and_then(|value| decode_xml_attribute(Some(&value)))?
-                                        .trim()
-                                        .to_string();
-                                    if entry.is_empty() {
-                                        None
-                                    } else {
-                                        Some(FormFieldOption {
-                                            display_text: entry.clone(),
-                                            value: Some(entry),
-                                        })
+                                        .and_then(|value| decode_xml_attribute(Some(&value)))
+                                        .unwrap_or_default();
+                                    FormFieldOption {
+                                        display_text: entry.clone(),
+                                        value: Some(entry),
                                     }
                                 })
                                 .collect()
@@ -1474,27 +1469,22 @@ fn parse_legacy_form_field_from_range(
                         .unwrap_or_default()
                 })
                 .unwrap_or_default();
-            let default_tag = dropdown_xml.as_deref().and_then(|xml| {
-                re::get(r"(?i)<w:default\b[^>]*/?>")
-                    .and_then(|re| re.find(xml))
-                    .map(|m| m.as_str().to_string())
-            });
-            let default_value = default_tag
+            let index_attribute = |pattern| {
+                let tag = re::get(pattern)?.find(dropdown_xml.as_deref()?)?;
+                get_attribute(tag.as_str(), "w:val")
+            };
+            let default_value = index_attribute(r"(?i)<w:default\b[^>]*/?>");
+            let option_at = |index: &str| options.get(index.trim().parse::<usize>().ok()?);
+            let value = index_attribute(r"(?i)<w:result\b[^>]*/?>")
                 .as_deref()
-                .and_then(|tag| get_attribute(tag, "w:val"))
-                .as_deref()
-                .and_then(|value| decode_xml_attribute(Some(&value)))
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty());
-            let dropdown_default_value = default_value.clone();
-            if dropdown_default_value.is_some() {
-                widget_settings.dropdown = Some(FormFieldDropdownWidgetSettings {
-                    default_value: dropdown_default_value,
-                });
+                .and_then(option_at)
+                .or_else(|| default_value.as_deref().and_then(option_at))
+                .map(|option| option.display_text.clone())
+                .or(fallback_result_text)
+                .or_else(|| options.first().map(|option| option.display_text.clone()));
+            if default_value.is_some() {
+                widget_settings.dropdown = Some(FormFieldDropdownWidgetSettings { default_value });
             }
-            let value = fallback_result_text
-                .or(default_value)
-                .or_else(|| options.first().map(|o| o.display_text.clone()));
             return Some(FormFieldRunNode {
                 r#type: FormFieldRunNodeType::FormField,
                 field_type: FormFieldType::Dropdown,

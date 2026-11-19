@@ -583,7 +583,11 @@ pub fn extract_chart_data(chart: &Chart) -> Option<crate::ChartData> {
     use crate::chart::{ChartCategory, ChartData, ChartPoint, ChartSeries};
     use std::collections::BTreeMap;
     kind(&chart.class)?;
-    if chart.series.is_empty() {
+    if chart.series.is_empty()
+        && chart.title.is_none()
+        && chart.subtitle.is_none()
+        && chart.axes.iter().all(|a| a.title.is_none())
+    {
         return None;
     }
     let mut groups = Vec::new();
@@ -689,6 +693,12 @@ pub fn extract_chart_data(chart: &Chart) -> Option<crate::ChartData> {
     }
     Some(ChartData {
         title: chart.title.clone().filter(|t| !t.is_empty()),
+        subtitle: chart.subtitle.clone().filter(|t| !t.is_empty()),
+        axis_titles: chart
+            .axes
+            .iter()
+            .filter_map(|axis| axis.title.clone())
+            .collect(),
         series,
     })
 }

@@ -1,10 +1,15 @@
 use roxmltree::Node;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChartData {
     pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub subtitle: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub axis_titles: Vec<String>,
     pub series: Vec<ChartSeries>,
 }
 
@@ -21,6 +26,8 @@ pub struct ChartSeries {
 #[serde(rename_all = "camelCase")]
 pub struct ChartPoint {
     pub index: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<Arc<str>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub categories: Vec<ChartCategory>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -63,7 +70,187 @@ pub(crate) fn child<'a>(node: Node<'a, 'a>, name: &str) -> Option<Node<'a, 'a>> 
     node.children().find(|n| chart_node(*n, name))
 }
 
-fn series_data(series: Node, chart_type: &str) -> ChartSeries {
+fn label_text(owner: Node, mut field_value: impl FnMut(&str) -> Option<String>) -> Option<String> {
+    let tx = child(owner, "tx")?;
+    if let Some(rich) = child(tx, "rich") {
+        let field_cache = label_field_cache(owner);
+        let drawing = |node: Node, name| {
+            node.tag_name().name() == name
+                && matches!(
+                    node.tag_name().namespace(),
+                    Some(
+                        "http://schemas.openxmlformats.org/drawingml/2006/main"
+                            | "http://purl.oclc.org/ooxml/drawingml/main"
+                    )
+                )
+        };
+        let mut text = String::new();
+        for paragraph in rich.children().filter(|&n| drawing(n, "p")) {
+            let before = text.len();
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            let start = text.len();
+            let mut missing_field = false;
+            for run in paragraph.children().filter(Node::is_element) {
+                if drawing(run, "br") {
+                    text.push('\n');
+                } else if drawing(run, "r") || drawing(run, "fld") {
+                    let value = run
+                        .children()
+                        .find(|&n| drawing(n, "t"))
+                        .and_then(|n| n.text())
+                        .unwrap_or_default();
+                    if drawing(run, "fld") {
+                        if let Some(cached) = run.attribute("id").and_then(|id| field_cache.get(id))
+                        {
+                            text.push_str(cached);
+                            continue;
+                        }
+                        if let Some(kind) = run.attribute("type").filter(|&kind| {
+                            value.strip_prefix('[').and_then(|v| v.strip_suffix(']')) == Some(kind)
+                        }) {
+                            if let Some(display) = field_value(kind) {
+                                text.push_str(&display);
+                            } else {
+                                missing_field = true;
+                            }
+                            continue;
+                        }
+                    }
+                    text.push_str(value);
+                }
+            }
+            if missing_field && text.len() == start {
+                text.truncate(before);
+            }
+        }
+        return (!text.trim().is_empty()).then_some(text);
+    }
+    let value = tx.descendants().find(|&n| chart_node(n, "v"))?.text()?;
+    (!value.is_empty()).then(|| value.to_owned())
+}
+
+fn label_field_cache<'a>(owner: Node<'a, 'a>) -> BTreeMap<&'a str, &'a str> {
+    const NS: &str = "http://schemas.microsoft.com/office/drawing/2012/chart";
+    let Some(extensions) = child(owner, "extLst") else {
+        return BTreeMap::new();
+    };
+    extensions
+        .descendants()
+        .filter(|n| n.has_tag_name((NS, "dlblFTEntry")))
+        .filter_map(|entry| {
+            let id = entry
+                .children()
+                .find(|n| n.has_tag_name((NS, "txfldGUID")))?
+                .text()?;
+            let cache = entry
+                .children()
+                .find(|n| n.has_tag_name((NS, "dlblFieldTableCache")))?;
+            Some((
+                id,
+                child(child(cache, "pt")?, "v")?.text().unwrap_or_default(),
+            ))
+        })
+        .collect()
+}
+
+fn deleted(node: Node) -> bool {
+    child(node, "delete")
+        .is_some_and(|d| !matches!(d.attribute("val"), Some("0" | "false" | "off")))
+}
+
+enum PointLabel<'a> {
+    Text(Arc<str>),
+    Fields(Node<'a, 'a>),
+}
+
+fn point_labels<'a>(group: Node<'a, 'a>) -> BTreeMap<u32, Option<PointLabel<'a>>> {
+    group
+        .children()
+        .filter(|&n| chart_node(n, "dLbl"))
+        .filter_map(|label| {
+            let index = child(label, "idx")?.attribute("val")?.parse().ok()?;
+            if deleted(label) {
+                return Some((index, None));
+            }
+            child(label, "tx")?;
+            let mut has_fields = false;
+            let text = label_text(label, |_| {
+                has_fields = true;
+                None
+            });
+            let label = if has_fields {
+                Some(PointLabel::Fields(label))
+            } else {
+                text.map(|s| PointLabel::Text(Arc::from(s)))
+            };
+            Some((index, label))
+        })
+        .collect()
+}
+
+fn cached_format<'a>(series: Node<'a, 'a>, channel: &str) -> Option<&'a str> {
+    child(series, channel)?
+        .descendants()
+        .find(|&n| chart_node(n, "formatCode"))?
+        .text()
+}
+
+struct LabelValues<'a> {
+    series: Option<&'a str>,
+    value_format: Option<&'a str>,
+    bubble_format: Option<&'a str>,
+    pie_total: Option<f64>,
+}
+
+impl PointLabel<'_> {
+    fn resolve(&self, point: &ChartPoint, values: &LabelValues) -> Option<Arc<str>> {
+        let node = match self {
+            Self::Text(value) => return Some(Arc::clone(value)),
+            Self::Fields(node) => *node,
+        };
+        let format = [Some(node), node.parent_element()]
+            .into_iter()
+            .flatten()
+            .find_map(|n| child(n, "numFmt"))
+            .filter(|n| !matches!(n.attribute("sourceLinked"), Some("1" | "true")))
+            .and_then(|n| n.attribute("formatCode"));
+        let number = |raw: &str, code| {
+            raw.parse::<f64>()
+                .ok()
+                .filter(|n| n.is_finite())
+                .map(|n| crate::parse::format_value(n, code).trim().to_owned())
+                .unwrap_or_else(|| raw.to_owned())
+        };
+        label_text(node, |kind| match kind {
+            "VALUE" => Some(number(
+                point.value.as_deref().or(point.y.as_deref())?,
+                format.or(values.value_format),
+            )),
+            "BUBBLESIZE" => Some(number(
+                point.bubble_size.as_deref()?,
+                format.or(values.bubble_format),
+            )),
+            "CATEGORYNAME" => point.categories.first().map(|c| c.label.clone()),
+            "SERIESNAME" => values.series.map(str::to_owned),
+            "PERCENTAGE" => {
+                let value = point.value.as_deref()?.parse::<f64>().ok()?;
+                let share = value.abs() / values.pie_total?;
+                let code = format.filter(|c| c.contains('%')).unwrap_or("0%");
+                Some(crate::parse::format_value(share, Some(code)))
+            }
+            _ => None,
+        })
+        .map(Arc::from)
+    }
+}
+
+fn series_data(
+    series: Node,
+    chart_type: &str,
+    group_labels: &BTreeMap<u32, Option<PointLabel>>,
+) -> ChartSeries {
     let name = child(series, "tx")
         .and_then(|tx| tx.descendants().find(|n| chart_node(*n, "v")))
         .and_then(|n| n.text())
@@ -116,6 +303,39 @@ fn series_data(series: Node, chart_type: &str) -> ChartSeries {
             }
         }
     }
+    let local = child(series, "dLbls");
+    if !local.is_some_and(deleted) && (local.is_some() || !group_labels.is_empty()) {
+        let pie_total = if matches!(chart_type, "pie" | "pie3D" | "doughnut") {
+            points
+                .values()
+                .filter_map(|p| p.value.as_deref())
+                .try_fold(0.0, |sum, v| Some(sum + v.parse::<f64>().ok()?.abs()))
+                .filter(|n| n.is_finite() && *n > 0.0)
+        } else {
+            None
+        };
+        let values = LabelValues {
+            series: name.as_deref(),
+            value_format: cached_format(series, "val").or_else(|| cached_format(series, "yVal")),
+            bubble_format: cached_format(series, "bubbleSize"),
+            pie_total,
+        };
+        let local_labels = local.map(point_labels).unwrap_or_default();
+        for (&index, label) in &local_labels {
+            if label.is_some() {
+                points.entry(index).or_insert_with(|| ChartPoint {
+                    index,
+                    ..Default::default()
+                });
+            }
+        }
+        for (index, point) in &mut points {
+            point.label = local_labels
+                .get(index)
+                .or_else(|| group_labels.get(index))
+                .and_then(|label| label.as_ref()?.resolve(point, &values));
+        }
+    }
     ChartSeries {
         chart_type: chart_type.to_owned(),
         name,
@@ -135,37 +355,38 @@ pub(crate) fn chart_data_from_root(root: Node) -> Option<ChartData> {
     }
     let chart = child(root, "chart")?;
     let plot = child(chart, "plotArea")?;
-    let title = child(chart, "title")
-        .and_then(|n| child(n, "tx"))
-        .map(|tx| {
-            tx.descendants()
-                .filter(|n| {
-                    chart_node(*n, "v")
-                        || (n.tag_name().name() == "t"
-                            && matches!(
-                                n.tag_name().namespace(),
-                                Some(
-                                    "http://schemas.openxmlformats.org/drawingml/2006/main"
-                                        | "http://purl.oclc.org/ooxml/drawingml/main"
-                                )
-                            ))
-                })
-                .filter_map(|n| n.text())
-                .collect::<String>()
+    let title = child(chart, "title").and_then(|n| label_text(n, |_| None));
+    let axis_titles = plot
+        .children()
+        .filter(|&n| {
+            ["catAx", "dateAx", "valAx", "serAx"]
+                .iter()
+                .any(|name| chart_node(n, name))
+                && !deleted(n)
         })
-        .filter(|s| !s.is_empty());
+        .filter_map(|axis| child(axis, "title").and_then(|n| label_text(n, |_| None)))
+        .collect();
     let mut series = Vec::new();
     for group in plot.children().filter(Node::is_element) {
         if let Some(kind) = group.tag_name().name().strip_suffix("Chart") {
+            let group_labels = child(group, "dLbls")
+                .filter(|&n| !deleted(n))
+                .map(point_labels)
+                .unwrap_or_default();
             series.extend(
                 group
                     .children()
                     .filter(|n| chart_node(*n, "ser"))
-                    .map(|n| series_data(n, kind)),
+                    .map(|n| series_data(n, kind, &group_labels)),
             );
         }
     }
-    Some(ChartData { title, series })
+    Some(ChartData {
+        title,
+        subtitle: None,
+        axis_titles,
+        series,
+    })
 }
 
 fn extended_text(node: Node) -> Option<String> {
@@ -287,6 +508,15 @@ fn extended_data(root: Node) -> Option<ChartData> {
         .collect();
     Some(ChartData {
         title: cx_child(chart, "title").and_then(extended_text),
+        subtitle: None,
+        axis_titles: cx_child(chart, "plotArea")?
+            .children()
+            .filter(|n| {
+                n.has_tag_name((CHARTEX_NS, "axis"))
+                    && !matches!(n.attribute("hidden"), Some("1" | "true"))
+            })
+            .filter_map(|axis| cx_child(axis, "title").and_then(extended_text))
+            .collect(),
         series,
     })
 }

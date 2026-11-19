@@ -251,7 +251,7 @@ dependencies = [
 
 [[package]]
 name = "duke-odf"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "base64",
  "encoding_rs",
@@ -263,7 +263,7 @@ dependencies = [
 
 [[package]]
 name = "duke-office-art"
-version = "0.2.2"
+version = "0.3.0"
 dependencies = [
  "base64",
  "duke-odf",
@@ -280,7 +280,7 @@ dependencies = [
 
 [[package]]
 name = "duke-office-charts"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "base64",
  "duke-odf",
@@ -295,7 +295,7 @@ dependencies = [
 
 [[package]]
 name = "duke-office-charts-wasm"
-version = "0.3.3"
+version = "0.4.0"
 dependencies = [
  "duke-office-charts",
  "serde",
@@ -305,7 +305,7 @@ dependencies = [
 
 [[package]]
 name = "duke-pages"
-version = "0.5.10"
+version = "0.6.0"
 dependencies = [
  "arc-swap",
  "base64",
@@ -332,7 +332,7 @@ dependencies = [
 
 [[package]]
 name = "duke-pages-wasm"
-version = "0.5.10"
+version = "0.6.0"
 dependencies = [
  "duke-pages",
  "js-sys",
@@ -344,7 +344,7 @@ dependencies = [
 
 [[package]]
 name = "duke-slides"
-version = "0.5.10"
+version = "0.6.0"
 dependencies = [
  "base64",
  "base64-simd",
@@ -368,7 +368,7 @@ dependencies = [
 
 [[package]]
 name = "duke-slides-wasm"
-version = "0.5.10"
+version = "0.6.0"
 dependencies = [
  "duke-slides",
  "serde",

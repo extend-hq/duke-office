@@ -41,6 +41,10 @@ pub enum Inline {
         href: String,
         children: Vec<Inline>,
     },
+    Ruby {
+        base: Vec<Inline>,
+        reading: String,
+    },
     Tab,
     LineBreak,
     SoftPageBreak,
@@ -272,10 +276,14 @@ pub(crate) fn parse_blocks(parent: Node<'_, '_>, ctx: &mut Ctx<'_>) -> Vec<Block
         let name = node.tag_name().name();
         match node.tag_name().namespace() {
             Some(TEXT) => match name {
-                "p" | "h" => blocks.push(Block::Paragraph(parse_paragraph(node, ctx))),
+                "p" | "h" => {
+                    if let Some(paragraph) = parse_paragraph(node, ctx) {
+                        blocks.push(Block::Paragraph(paragraph));
+                    }
+                }
                 "list" => blocks.push(Block::List(parse_list(node, ctx))),
                 "numbered-paragraph" => blocks.extend(parse_blocks(node, ctx)),
-                "section" => blocks.push(Block::Section(Section {
+                "section" if attr(node, TEXT, "display") != Some("none") => blocks.push(Block::Section(Section {
                     name: owned(node, TEXT, "name"),
                     style: owned(node, TEXT, "style-name"),
                     blocks: parse_blocks(node, ctx),
@@ -315,11 +323,12 @@ fn is_foreign(namespace: Ns) -> bool {
     namespace.is_foreign()
 }
 
-fn parse_paragraph(node: Node<'_, '_>, ctx: &mut Ctx<'_>) -> Paragraph {
+fn parse_paragraph(node: Node<'_, '_>, ctx: &mut Ctx<'_>) -> Option<Paragraph> {
     let mut inlines = Vec::with_capacity(node.children().take(4).count());
     let mut after_space = true;
-    parse_inlines(node, ctx, &mut inlines, &mut after_space);
-    Paragraph {
+    let mut hidden = None;
+    parse_inlines(node, ctx, &mut inlines, &mut after_space, &mut hidden);
+    (hidden != Some(true)).then(|| Paragraph {
         style: owned(node, TEXT, "style-name"),
         outline_level: (node.tag_name().name() == "h").then(|| {
             attr(node, TEXT, "outline-level")
@@ -329,7 +338,7 @@ fn parse_paragraph(node: Node<'_, '_>, ctx: &mut Ctx<'_>) -> Paragraph {
         }),
         id: owned(node, XML, "id"),
         inlines,
-    }
+    })
 }
 
 /// Collapses white space as OpenDocument defines it: runs become one space
@@ -375,11 +384,21 @@ fn push_literal(text: &str, out: &mut Vec<Inline>) {
     }
 }
 
+pub(crate) fn parse_annotation(node: Node<'_, '_>, ctx: &mut Ctx<'_>) -> Annotation {
+    Annotation {
+        name: owned(node, OFFICE, "name"),
+        author: child(node, DC, "creator").map(text_content),
+        date: child(node, DC, "date").map(text_content),
+        blocks: parse_blocks(node, ctx),
+    }
+}
+
 fn parse_inlines(
     parent: Node<'_, '_>,
     ctx: &mut Ctx<'_>,
     out: &mut Vec<Inline>,
     after_space: &mut bool,
+    hidden: &mut Option<bool>,
 ) {
     if !ctx.enter() {
         return;
@@ -397,7 +416,7 @@ fn parse_inlines(
             Some(TEXT) => match name {
                 "span" => {
                     let mut children = Vec::with_capacity(node.children().take(4).count());
-                    parse_inlines(node, ctx, &mut children, after_space);
+                    parse_inlines(node, ctx, &mut children, after_space, hidden);
                     if !children.is_empty() {
                         out.push(Inline::Span {
                             style: owned(node, TEXT, "style-name"),
@@ -407,7 +426,7 @@ fn parse_inlines(
                 }
                 "a" => {
                     let mut children = Vec::with_capacity(node.children().take(4).count());
-                    parse_inlines(node, ctx, &mut children, after_space);
+                    parse_inlines(node, ctx, &mut children, after_space, hidden);
                     out.push(Inline::Link {
                         href: attr(node, XLINK, "href").unwrap_or_default().to_owned(),
                         children,
@@ -449,10 +468,41 @@ fn parse_inlines(
                 }
                 "ruby" => {
                     if let Some(base) = child(node, TEXT, "ruby-base") {
-                        parse_inlines(base, ctx, out, after_space);
+                        let mut children = Vec::new();
+                        parse_inlines(base, ctx, &mut children, after_space, hidden);
+                        let reading = child(node, TEXT, "ruby-text")
+                            .map(text_content)
+                            .unwrap_or_default();
+                        if reading.is_empty() {
+                            out.extend(children);
+                        } else {
+                            out.push(Inline::Ruby {
+                                base: children,
+                                reading,
+                            });
+                        }
                     }
                 }
-                "meta" | "meta-field" => parse_inlines(node, ctx, out, after_space),
+                "hidden-paragraph" => {
+                    let field_hidden = matches!(attr(node, TEXT, "is-hidden"), Some("true" | "1"));
+                    *hidden = Some(hidden.unwrap_or(true) && field_hidden);
+                }
+                "hidden-text" => {
+                    if !matches!(attr(node, TEXT, "is-hidden"), Some("true" | "1")) {
+                        let text =
+                            owned(node, TEXT, "string-value").unwrap_or_else(|| text_content(node));
+                        if !text.is_empty() {
+                            *after_space = text.ends_with(' ');
+                            out.push(Inline::Field {
+                                kind: name.to_owned(),
+                                text,
+                            });
+                        }
+                    }
+                }
+                "variable-set" | "variable-input" | "user-field-get"
+                    if attr(node, TEXT, "display") == Some("none") => {}
+                "meta" | "meta-field" => parse_inlines(node, ctx, out, after_space, hidden),
                 "bookmark-end" | "reference-mark" | "reference-mark-start"
                 | "reference-mark-end" | "change" | "change-start" | "change-end"
                 | "toc-mark" | "toc-mark-start" | "toc-mark-end" | "user-index-mark"
@@ -468,12 +518,7 @@ fn parse_inlines(
                 }
             },
             Some(OFFICE) => match name {
-                "annotation" => out.push(Inline::Annotation(Annotation {
-                    name: owned(node, OFFICE, "name"),
-                    author: child(node, DC, "creator").map(text_content),
-                    date: child(node, DC, "date").map(text_content),
-                    blocks: parse_blocks(node, ctx),
-                })),
+                "annotation" => out.push(Inline::Annotation(parse_annotation(node, ctx))),
                 "annotation-end" => {
                     if let Some(name) = owned(node, OFFICE, "name") {
                         out.push(Inline::AnnotationEnd(name));
@@ -500,8 +545,10 @@ fn parse_inlines(
                     text: text_content(node),
                 });
             }
-            None => parse_inlines(node, ctx, out, after_space),
-            Some(namespace) if is_foreign(namespace) => parse_inlines(node, ctx, out, after_space),
+            None => parse_inlines(node, ctx, out, after_space, hidden),
+            Some(namespace) if is_foreign(namespace) => {
+                parse_inlines(node, ctx, out, after_space, hidden)
+            }
             _ => {}
         }
     }
@@ -641,6 +688,12 @@ pub fn plain_text(blocks: &[Block]) -> String {
                 Inline::Text(text) => out.push_str(text),
                 Inline::Span { children, .. } | Inline::Link { children, .. } => {
                     inlines(children, out)
+                }
+                Inline::Ruby { base, reading } => {
+                    inlines(base, out);
+                    out.push_str(" (");
+                    out.push_str(reading);
+                    out.push(')');
                 }
                 Inline::Tab => out.push('\t'),
                 Inline::LineBreak => out.push('\n'),

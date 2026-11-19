@@ -2915,28 +2915,25 @@ fn wrap_with_hyperlink_xml(
 }
 
 fn resolve_dropdown_display_value(field: &FormFieldRunNode) -> String {
-    let selected = field.value.as_deref().map(str::trim).unwrap_or("");
+    let options = field.options.as_deref().unwrap_or_default();
+    if let Some(raw) = field.value.as_deref() {
+        if let Some(option) = options.iter().find(|option| option.display_text == raw) {
+            return option.display_text.clone();
+        }
+    }
+    let selected = field.value.as_deref().unwrap_or_default().trim();
     if selected.is_empty() {
-        return field
-            .options
-            .as_ref()
-            .and_then(|options| options.first())
+        return options
+            .first()
             .map(|option| option.display_text.clone())
             .unwrap_or_default();
     }
 
-    if let Some(options) = &field.options {
-        if let Some(matching_option) = options.iter().find(|option| {
-            option.display_text.trim() == selected
-                || option
-                    .value
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .is_some_and(|value| value == selected)
-        }) {
-            return matching_option.display_text.clone();
-        }
+    if let Some(option) = options.iter().find(|option| {
+        option.display_text.trim() == selected
+            || option.value.as_deref().map(str::trim) == Some(selected)
+    }) {
+        return option.display_text.clone();
     }
 
     selected.to_string()
@@ -3063,30 +3060,37 @@ fn legacy_form_field_run_xml(
         FormFieldType::Dropdown => {
             instruction = "FORMDROPDOWN";
             display_value = resolve_dropdown_display_value(field);
-            let mut dropdown_fragments: Vec<String> = Vec::new();
-            if let Some(options) = &field.options {
-                for option in options {
-                    let display_text = option.display_text.trim();
-                    if display_text.is_empty() {
-                        continue;
-                    }
-                    dropdown_fragments.push(format!(
-                        r#"<w:listEntry w:val="{}"/>"#,
-                        escape_xml(display_text)
-                    ));
-                }
+            let mut dropdown_fragments = Vec::new();
+            let options = field.options.as_deref().unwrap_or_default();
+            if let Some(index) = options
+                .iter()
+                .position(|option| option.display_text == display_value)
+            {
+                dropdown_fragments.push(format!(r#"<w:result w:val="{index}"/>"#));
             }
-            if let Some(default_value) = widget
+            if let Some(value) = widget
                 .and_then(|w| w.dropdown.as_ref())
                 .and_then(|d| d.default_value.as_deref())
-                .map(str::trim)
             {
-                if !default_value.is_empty() {
-                    dropdown_fragments.push(format!(
-                        r#"<w:default w:val="{}"/>"#,
-                        escape_xml(default_value)
-                    ));
+                let index = value
+                    .trim()
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|i| *i < options.len())
+                    .or_else(|| {
+                        options
+                            .iter()
+                            .position(|option| option.display_text == value)
+                    });
+                if let Some(index) = index {
+                    dropdown_fragments.push(format!(r#"<w:default w:val="{index}"/>"#));
                 }
+            }
+            for option in options {
+                dropdown_fragments.push(format!(
+                    r#"<w:listEntry w:val="{}"/>"#,
+                    escape_xml(&option.display_text)
+                ));
             }
             if dropdown_fragments.is_empty() {
                 ff_data_fragments.push("<w:ddList/>".to_string());

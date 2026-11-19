@@ -571,6 +571,10 @@ impl<'a> Builder<'a> {
                     let link = Some(href.as_str()).filter(|href| !href.is_empty()).or(link);
                     self.runs(children, context, props, link, out);
                 }
+                Inline::Ruby { base, reading } => {
+                    self.runs(base, context, props, link, out);
+                    out.push(self.run(format!(" ({reading})"), props, link));
+                }
                 Inline::Tab => out.push(self.run("\t".into(), props, link)),
                 Inline::LineBreak => out.push(self.run("\n".into(), props, link)),
                 Inline::Field { kind, text } => {
@@ -1466,7 +1470,22 @@ impl<'a> Builder<'a> {
             timing: None,
             nodes,
             notes,
-            comments: Vec::new(),
+            comments: page
+                .annotations
+                .iter()
+                .enumerate()
+                .map(|(ordinal, annotation)| crate::SlideComment {
+                    id: annotation
+                        .name
+                        .clone()
+                        .unwrap_or_else(|| format!("slide-{}-comment-{}", index + 1, ordinal + 1)),
+                    text: plain_text(&annotation.blocks),
+                    author: annotation.author.clone(),
+                    created_at: annotation.date.clone(),
+                    source_part: Some("content.xml".into()),
+                    ..Default::default()
+                })
+                .collect(),
             source_part: Some("content.xml".into()),
             warnings: Vec::new(),
         }

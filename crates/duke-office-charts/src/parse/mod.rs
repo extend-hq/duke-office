@@ -20,6 +20,7 @@ mod util;
 
 use crate::{RenderOptions, RenderedChart};
 use chart_colors::ChartColors;
+pub(crate) use chart_svg::format_value;
 use util::escape_xml_text;
 type ThemeColorMap = std::collections::HashMap<String, String>;
 

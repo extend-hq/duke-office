@@ -227,7 +227,7 @@ pub(super) fn marker(
     svg.push_str("</g>");
 }
 
-pub(super) fn format_value(value: f64, code: Option<&str>) -> String {
+pub(crate) fn format_value(value: f64, code: Option<&str>) -> String {
     number_format::format(value, code).unwrap_or_else(|| value.to_string())
 }
 

@@ -42,6 +42,7 @@ pub struct Page {
     pub shapes: Vec<Shape>,
     /// Shapes of the notes page, including the notes text placeholder.
     pub notes: Vec<Shape>,
+    pub annotations: Vec<text::Annotation>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -297,6 +298,10 @@ fn parse_pages(body: Node<'_, '_>, ctx: &mut Ctx<'_>) -> Vec<Page> {
             footer_name: owned(node, PRESENTATION, "use-footer-name"),
             date_time_name: owned(node, PRESENTATION, "use-date-time-name"),
             shapes: shapes(node, ctx),
+            annotations: elements(node)
+                .filter(|entry| is(*entry, OFFICE, "annotation"))
+                .map(|entry| text::parse_annotation(entry, ctx))
+                .collect(),
             notes: child(node, PRESENTATION, "notes")
                 .map(|notes| shapes(notes, ctx))
                 .unwrap_or_default(),
