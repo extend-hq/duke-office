@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.4
+
+- Bound sparse chart-cache expansion across a presentation and decode cached categories and numbers directly into their native arrays.
+
 ## 0.5.3
 
 - Expose slide text in native reading order and retain declared title placeholders in structured blocks.

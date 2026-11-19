@@ -8,7 +8,7 @@ mod paint;
 mod timing;
 
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::{BTreeMap, HashMap},
     fmt::Write as _,
     io::{Cursor, Read},
@@ -3312,6 +3312,7 @@ struct NodeParseContext<'a, 'color> {
     artwork_id_match: ArtworkIdMatch,
     shape_cache: &'a RefCell<paint::ShapeCache>,
     editing_cache: &'a RefCell<editing::Cache>,
+    chart_padding: &'a Cell<usize>,
     source_part: Option<&'a str>,
     options: &'a ParseOptions,
     slide_index: usize,
@@ -4634,7 +4635,11 @@ fn parse_table_node(
     }
 }
 
-fn indexed_cache_values(node: XmlNode<'_>) -> Vec<Option<String>> {
+fn indexed_cache_values<T: Default>(
+    node: XmlNode<'_>,
+    padding: &Cell<usize>,
+    convert: impl Fn(String) -> T,
+) -> Result<Vec<T>, ParseError> {
     let cache = [
         "strCache",
         "numCache",
@@ -4652,29 +4657,44 @@ fn indexed_cache_values(node: XmlNode<'_>) -> Vec<Option<String>> {
         .and_then(|count| count.attr("val"))
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
-    let observed = points
-        .iter()
-        .filter_map(|point| point.attr("idx")?.parse::<usize>().ok())
-        .max()
-        .map(|index| index.saturating_add(1))
-        .unwrap_or(0);
-    let mut values = vec![None; declared.max(observed)];
-    for point in points {
-        let Some(index) = point
+    let mut extent = declared;
+    let mut stored = 0usize;
+    for point in &points {
+        if let Some(index) = point
             .attr("idx")
             .and_then(|value| value.parse::<usize>().ok())
-        else {
-            continue;
-        };
-        if index >= values.len() {
-            values.resize(index.saturating_add(1), None);
+        {
+            extent = extent.max(index.checked_add(1).ok_or_else(chart_cache_limit)?);
+            stored += 1;
         }
-        values[index] = point
-            .child("v")
-            .or_else(|| point.child("t"))
-            .map(XmlNode::text_content);
     }
+    let remaining = padding
+        .get()
+        .checked_sub(extent.saturating_sub(stored))
+        .ok_or_else(chart_cache_limit)?;
+    let mut values = Vec::new();
     values
+        .try_reserve_exact(extent)
+        .map_err(|_| chart_cache_limit())?;
+    values.resize_with(extent, T::default);
+    padding.set(remaining);
+    for point in points {
+        if let Some(index) = point
+            .attr("idx")
+            .and_then(|value| value.parse::<usize>().ok())
+        {
+            values[index] = point
+                .child("v")
+                .or_else(|| point.child("t"))
+                .map(|value| convert(value.text_content()))
+                .unwrap_or_default();
+        }
+    }
+    Ok(values)
+}
+
+fn chart_cache_limit() -> ParseError {
+    ParseError::ResourceLimit("expanded chart cache".into())
 }
 
 fn category_cache_is_numeric(node: XmlNode<'_>) -> bool {
@@ -4825,55 +4845,54 @@ fn parse_chart_part(
         .iter()
         .flat_map(|(plot, _)| plot.children_named("ser"))
         .map(|series| {
-            let name = series
-                .child("tx")
-                .and_then(|value| indexed_cache_values(value).into_iter().flatten().next())
-                .or_else(|| {
-                    series
-                        .child("tx")
-                        .and_then(|value| value.child("v"))
-                        .map(XmlNode::text_content)
-                });
+            let name = match series.child("tx") {
+                Some(tx) => indexed_cache_values(tx, context.chart_padding, Some)?
+                    .into_iter()
+                    .flatten()
+                    .next()
+                    .or_else(|| tx.child("v").map(XmlNode::text_content)),
+                None => None,
+            };
             let categories = series
                 .child("cat")
                 .or_else(|| series.child("xVal"))
                 .map(|categories| {
                     let numeric = category_cache_is_numeric(categories);
-                    indexed_cache_values(categories)
-                        .into_iter()
-                        .map(|value| match value {
-                            None => serde_json::Value::Null,
-                            Some(value) if numeric => value
+                    indexed_cache_values(categories, context.chart_padding, |value| {
+                        if numeric {
+                            value
                                 .parse::<f64>()
                                 .ok()
                                 .and_then(serde_json::Number::from_f64)
                                 .map(serde_json::Value::Number)
-                                .unwrap_or(serde_json::Value::Null),
-                            Some(value) => serde_json::Value::String(value),
-                        })
-                        .collect()
+                                .unwrap_or_default()
+                        } else {
+                            serde_json::Value::String(value)
+                        }
+                    })
                 })
-                .filter(|values: &Vec<serde_json::Value>| !values.is_empty());
+                .transpose()?
+                .filter(|values| !values.is_empty());
             let values = series
                 .child("val")
                 .or_else(|| series.child("yVal"))
-                .map(indexed_cache_values)
-                .unwrap_or_default()
-                .into_iter()
-                .map(|value| value.and_then(|value| value.parse::<f64>().ok()))
-                .collect();
+                .map(|values| {
+                    indexed_cache_values(values, context.chart_padding, |v| v.parse::<f64>().ok())
+                })
+                .transpose()?
+                .unwrap_or_default();
             let color = series
                 .child("spPr")
                 .and_then(|properties| properties.child("solidFill"))
                 .and_then(|fill| parse_color(fill, context.colors));
-            ChartSeries {
+            Ok(ChartSeries {
                 name,
                 categories,
                 values,
                 color,
-            }
+            })
         })
-        .collect();
+        .collect::<Result<Vec<_>, ParseError>>()?;
     Ok(ParsedChart {
         svg: if render {
             render_shared_chart(root, xml, transform, context, companions)
@@ -6290,6 +6309,7 @@ fn parse_slide(
                 artwork_id_match: ArtworkIdMatch::Prefixed("master"),
                 shape_cache: context.shape_cache,
                 editing_cache: context.editing_cache,
+                chart_padding: context.chart_padding,
                 source_part: context.layout_rels.and_then(|rels| {
                     rels.related("slideMaster", "ppt/slideMasters/")
                         .map(String::as_str)
@@ -6327,6 +6347,7 @@ fn parse_slide(
             artwork_id_match: ArtworkIdMatch::Prefixed("layout"),
             shape_cache: context.shape_cache,
             editing_cache: context.editing_cache,
+            chart_padding: context.chart_padding,
             source_part: context
                 .rels
                 .related("slideLayout", "ppt/slideLayouts/")
@@ -6735,6 +6756,7 @@ fn parse_cached(
     let mut document_warnings = Vec::new();
     let shape_cache = RefCell::new(paint::ShapeCache::default());
     let editing_cache = RefCell::new(editing::Cache::default());
+    let chart_padding = Cell::new(limits.max_xml_nodes);
     let mut generations = retain.then(AssetGenerations::default);
     let mut retained_slides = Vec::new();
     let mut retained_layouts = BTreeMap::new();
@@ -7039,6 +7061,7 @@ fn parse_cached(
                 artwork_id_match: ArtworkIdMatch::Exact,
                 shape_cache: &shape_cache,
                 editing_cache: &editing_cache,
+                chart_padding: &chart_padding,
                 source_part: Some(slide_path),
                 slide_index: index,
                 paint_scale: (1.0, 1.0),
@@ -7187,6 +7210,7 @@ fn parse_cached(
                 artwork_id_match: ArtworkIdMatch::Exact,
                 shape_cache: &shape_cache,
                 editing_cache: &editing_cache,
+                chart_padding: &chart_padding,
                 source_part: Some(&part.path),
                 slide_index: 0,
                 paint_scale: (1.0, 1.0),
@@ -7293,6 +7317,7 @@ fn parse_cached(
                 artwork_id_match: ArtworkIdMatch::Exact,
                 shape_cache: &shape_cache,
                 editing_cache: &editing_cache,
+                chart_padding: &chart_padding,
                 source_part: Some(&part.path),
                 slide_index: 0,
                 paint_scale: (1.0, 1.0),
@@ -7585,6 +7610,7 @@ impl RetainedParse {
             artwork_id_match: ArtworkIdMatch::Exact,
             shape_cache: &self.shape_cache,
             editing_cache: &self.editing_cache,
+            chart_padding: &Cell::new(self.limits.max_xml_nodes),
             source_part: Some(&slide.path),
             slide_index: index,
             paint_scale: (1.0, 1.0),
@@ -7635,6 +7661,7 @@ impl RetainedParse {
             artwork_id_match: ArtworkIdMatch::Exact,
             shape_cache: &self.shape_cache,
             editing_cache: &self.editing_cache,
+            chart_padding: &Cell::new(self.limits.max_xml_nodes),
             source_part: Some(&master.part.path),
             slide_index: 0,
             paint_scale: (1.0, 1.0),
@@ -7690,6 +7717,7 @@ impl RetainedParse {
             artwork_id_match: ArtworkIdMatch::Exact,
             shape_cache: &self.shape_cache,
             editing_cache: &self.editing_cache,
+            chart_padding: &Cell::new(self.limits.max_xml_nodes),
             source_part: Some(&layout.part.path),
             slide_index: 0,
             paint_scale: (1.0, 1.0),
@@ -7832,6 +7860,18 @@ mod tests {
 
     fn xml(value: &[u8]) -> XmlDocument {
         parse_xml_tree(value.to_vec(), &ParseLimits::default(), "test.xml").unwrap()
+    }
+
+    #[test]
+    fn indexed_chart_values_preserve_gaps_and_share_the_padding_limit() {
+        let tree = xml(br#"<numLit><ptCount val="4"/><pt idx="0"><v>1.25</v></pt><pt idx="3"><v>2.75</v></pt></numLit>"#);
+        let padding = Cell::new(3);
+        let read =
+            || indexed_cache_values(tree.root(), &padding, |value| value.parse::<f64>().ok());
+        assert_eq!(read().unwrap(), vec![Some(1.25), None, None, Some(2.75)]);
+        assert_eq!(padding.get(), 1);
+        assert!(matches!(read(), Err(ParseError::ResourceLimit(_))));
+        assert_eq!(padding.get(), 1);
     }
 
     #[test]

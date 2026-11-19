@@ -51,6 +51,7 @@ pub struct ParseLimits {
     pub max_entry_bytes: usize,
     pub max_total_uncompressed_bytes: usize,
     pub max_xml_depth: usize,
+    /// Maximum nodes per XML part and additional indexed chart slots per parse.
     pub max_xml_nodes: usize,
     pub max_xml_attributes: usize,
     pub max_xml_text_bytes: usize,

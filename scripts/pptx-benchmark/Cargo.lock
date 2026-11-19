@@ -262,7 +262,7 @@ dependencies = [
 
 [[package]]
 name = "duke-slides"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "base64",
  "base64-simd",
