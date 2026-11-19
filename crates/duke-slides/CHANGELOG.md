@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.7
+
+- Resolve embedded picture representations using the declared relationship mode, including relative external targets and SVG fallbacks.
+- Store XML string ranges in two words to reduce memory use when parsing presentations with large drawings.
+
 ## 0.5.6
 
 - Expose `PptxPackage` so callers can inspect presentation parts once and reuse their decompressed contents during parsing.

@@ -736,15 +736,12 @@ impl<'x> TreeBuilder<'x> {
         }
         let start = (bytes.as_ptr() as usize).checked_sub(self.xml.as_ptr() as usize)?;
         let end = start.checked_add(bytes.len())?;
-        (end <= self.xml.len()).then(|| StrRef::Buffer {
-            start: start as u32,
-            len: bytes.len() as u32,
-        })
+        (end <= self.xml.len()).then(|| StrRef::buffer(start as u32, bytes.len() as u32))
     }
 
     fn intern(&mut self, value: String) -> StrRef {
         self.strings.push(value);
-        StrRef::Owned(self.strings.len() as u32 - 1)
+        StrRef::owned(self.strings.len() as u32 - 1)
     }
 
     /// Stores raw bytes that are known to be valid UTF-8 when borrowable.
@@ -756,18 +753,7 @@ impl<'x> TreeBuilder<'x> {
     }
 
     fn resolve(&self, value: StrRef) -> &str {
-        match value {
-            StrRef::None => "",
-            StrRef::Buffer { start, len } => {
-                let bytes = &self.xml[start as usize..start as usize + len as usize];
-                debug_assert!(std::str::from_utf8(bytes).is_ok());
-                // SAFETY: see `XmlDocument::resolve`; the builder only creates
-                // buffer references for borrowable (UTF-8 validated) parts at
-                // ASCII delimiter boundaries.
-                unsafe { std::str::from_utf8_unchecked(bytes) }
-            }
-            StrRef::Owned(index) => self.strings[index as usize].as_str(),
-        }
+        value.resolve(self.xml, &self.strings)
     }
 
     fn push_start(
@@ -862,7 +848,7 @@ impl<'x> TreeBuilder<'x> {
     /// Appends raw part bytes (valid UTF-8 in a borrowable part) to a node's text.
     fn append_raw_text(&mut self, index: u32, raw: &[u8]) {
         match self.nodes[index as usize].text {
-            StrRef::None => {
+            StrRef::ABSENT => {
                 let value = self.name_ref(raw);
                 self.nodes[index as usize].text = value;
             }
@@ -875,7 +861,7 @@ impl<'x> TreeBuilder<'x> {
 
     fn append_text(&mut self, index: u32, piece: &str) {
         match self.nodes[index as usize].text {
-            StrRef::None => {
+            StrRef::ABSENT => {
                 let value = self.intern(piece.to_owned());
                 self.nodes[index as usize].text = value;
             }
@@ -884,8 +870,8 @@ impl<'x> TreeBuilder<'x> {
     }
 
     fn append_owned_text(&mut self, index: u32, existing: StrRef, piece: &str) {
-        if let StrRef::Owned(string) = existing {
-            self.strings[string as usize].push_str(piece);
+        if let Some(index) = existing.owned_index() {
+            self.strings[index].push_str(piece);
         } else {
             let mut value = self.resolve(existing).to_owned();
             value.push_str(piece);
@@ -3993,30 +3979,30 @@ fn parse_image_node(
         let alternative = blip.child("extLst").and_then(|extensions| {
             extensions.children_named("ext").find_map(|extension| {
                 extension.children_named("svgBlip").find_map(|svg| {
-                    svg_image_relationship(svg)
-                        .and_then(|id| rels.get(&id))
-                        .filter(|id| context.assets.contains_key(*id))
+                    let id = svg_image_relationship(svg)?;
+                    let relationship = rels.entries.get(&id)?;
+                    (!relationship.external && context.assets.contains_key(&relationship.target))
+                        .then_some(&relationship.target)
                 })
             })
         });
         let original = blip
             .attr("embed")
             .or_else(|| blip.attr("link"))
-            .and_then(|id| rels.get(id));
-        let fallback_asset_id = alternative.and_then(|selected| {
-            original
-                .filter(|id| *id != selected && context.assets.contains_key(*id))
-                .cloned()
+            .and_then(|id| rels.entries.get(id));
+        if alternative.is_none() && original.is_none() {
+            return None;
+        }
+        let embedded = original
+            .filter(|entry| !entry.external)
+            .map(|entry| &entry.target);
+        let fallback = alternative.and_then(|selected| {
+            embedded.filter(|id| *id != selected && context.assets.contains_key(*id))
         });
-        let asset_id = alternative.or(original)?.clone();
-        Some((fill, asset_id, fallback_asset_id))
+        Some((fill, alternative.or(embedded), fallback))
     });
-    let asset_id = resolved_fill
-        .as_ref()
-        .map(|(_, asset_id, _)| asset_id.clone());
-    let fallback_asset_id = resolved_fill
-        .as_ref()
-        .and_then(|(_, _, fallback)| fallback.clone());
+    let asset_id = resolved_fill.and_then(|(_, asset, _)| asset).cloned();
+    let fallback_asset_id = resolved_fill.and_then(|(_, _, fallback)| fallback).cloned();
     let crop = resolved_fill
         .as_ref()
         .and_then(|(fill, _, _)| image_crop(*fill));
@@ -4068,13 +4054,13 @@ fn parse_image_node(
     let rendered = if render {
         resolved_fill
             .as_ref()
-            .and_then(|(fill, asset_id, _)| render_asset(*fill, asset_id))
+            .and_then(|(fill, asset_id, _)| render_asset(*fill, (*asset_id)?))
     } else {
         None
     };
     let fallback_picture = if render {
         resolved_fill.as_ref().and_then(|(fill, _, fallback)| {
-            render_asset(*fill, fallback.as_deref()?).map(|picture| {
+            render_asset(*fill, (*fallback)?).map(|picture| {
                 Box::new(crate::PictureArtwork {
                     svg: picture.svg,
                     paint_bounds: picture.paint_bounds,

@@ -10,11 +10,52 @@ use std::{collections::HashMap, fmt, sync::OnceLock};
 
 pub(super) const NONE: u32 = u32::MAX;
 
-#[derive(Clone, Copy, Debug)]
-pub(super) enum StrRef {
-    None,
-    Buffer { start: u32, len: u32 },
-    Owned(u32),
+/// The sentinel offset selects either the side-string table or the absent value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct StrRef {
+    start: u32,
+    len_or_index: u32,
+}
+
+impl StrRef {
+    pub(super) const ABSENT: Self = Self {
+        start: NONE,
+        len_or_index: NONE,
+    };
+
+    pub(super) fn buffer(start: u32, len: u32) -> Self {
+        debug_assert_ne!(start, NONE);
+        Self {
+            start,
+            len_or_index: len,
+        }
+    }
+
+    pub(super) fn owned(index: u32) -> Self {
+        debug_assert_ne!(index, NONE);
+        Self {
+            start: NONE,
+            len_or_index: index,
+        }
+    }
+
+    pub(super) fn owned_index(self) -> Option<usize> {
+        (self.start == NONE && self.len_or_index != NONE).then_some(self.len_or_index as usize)
+    }
+
+    pub(super) fn resolve<'a>(self, bytes: &'a [u8], strings: &'a [String]) -> &'a str {
+        if self.start != NONE {
+            let start = self.start as usize;
+            let slice = &bytes[start..start + self.len_or_index as usize];
+            debug_assert!(std::str::from_utf8(slice).is_ok());
+            // SAFETY: borrowed ranges use ASCII delimiters in a UTF-8 validated buffer.
+            unsafe { std::str::from_utf8_unchecked(slice) }
+        } else if let Some(index) = self.owned_index() {
+            &strings[index]
+        } else {
+            ""
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -47,11 +88,11 @@ impl RawNode {
             name,
             attributes_start,
             attributes_len,
-            text: StrRef::None,
+            text: StrRef::ABSENT,
             first_child: NONE,
             next_sibling: NONE,
             subtree_names,
-            source_xml: StrRef::None,
+            source_xml: StrRef::ABSENT,
         }
     }
 }
@@ -97,23 +138,12 @@ impl XmlDocument {
     }
 
     pub(super) fn resolve(&self, value: StrRef) -> &str {
-        match value {
-            StrRef::None => "",
-            StrRef::Buffer { start, len } => {
-                let bytes = &self.bytes()[start as usize..start as usize + len as usize];
-                debug_assert!(std::str::from_utf8(bytes).is_ok());
-                // SAFETY: buffer references are created only after the whole part
-                // passed UTF-8 validation, and every range starts and ends at an
-                // ASCII delimiter, so the slice is valid UTF-8 on char boundaries.
-                unsafe { std::str::from_utf8_unchecked(bytes) }
-            }
-            StrRef::Owned(index) => self.strings[index as usize].as_str(),
-        }
+        value.resolve(self.bytes(), &self.strings)
     }
 
     pub(super) fn intern(&mut self, value: String) -> StrRef {
         self.strings.push(value);
-        StrRef::Owned(self.strings.len() as u32 - 1)
+        StrRef::owned(self.strings.len() as u32 - 1)
     }
 
     /// Builds a document from an owned tree, for synthesized fragments.
@@ -246,7 +276,7 @@ impl<'t> XmlNode<'t> {
 
     pub(super) fn source_xml(self) -> Option<&'t str> {
         match self.raw().source_xml {
-            StrRef::None => None,
+            StrRef::ABSENT => None,
             value => Some(self.document.resolve(value)),
         }
     }
