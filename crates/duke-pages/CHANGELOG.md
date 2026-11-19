@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.9
+
+- Preserve Word equation operators, fractions and limit placement, grouped picture descriptions and relationships, and title styles identified by name.
+
 ## 0.5.8
 
 - Resolve repeating table headers from Word table styles, honor direct row overrides, and preserve inherited headers when saving an edited table.

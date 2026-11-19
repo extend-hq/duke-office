@@ -1,7 +1,7 @@
 mod drop_caps;
 mod list_labels;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use list_labels::{ListDefinitions, StoryLists};
 
@@ -314,11 +314,22 @@ pub fn package_identity(package: &OoxmlPackage) -> String {
     format!("{:x}", hash.finalize())
 }
 
-fn picture_description(image: &ImageRunNode) -> Option<String> {
-    let Some(xml) = image.source_xml.as_deref() else { return image.alt.clone() };
+fn picture_description(image: &ImageRunNode, grouped: bool) -> Option<String> {
+    let Some(xml) = image.source_xml.as_deref() else {
+        return image.alt.clone();
+    };
     let properties = ["wp:docPr", "pic:cNvPr", "v:imagedata"]
         .map(|name| crate::parse::find_tag_token_ref(xml, name));
-    if properties.iter().all(Option::is_none) {
+    let properties = if grouped {
+        &properties[..1]
+    } else {
+        &properties[..]
+    };
+    if !grouped
+        && properties.iter().all(Option::is_none)
+        && !xml.contains("<w:pict")
+        && !xml.contains("<w:drawing")
+    {
         return image.alt.clone();
     }
     ["descr", "title", "o:title"].into_iter()
@@ -640,6 +651,79 @@ impl Extractor<'_> {
         }
     }
 
+    fn group_pictures(
+        &self,
+        parent: &str,
+        presentation: &crate::model::ImagePresentation,
+    ) -> Vec<DocumentBlock> {
+        fn property<'a>(node: &'a ImagePropertyNode, name: &str) -> Option<&'a str> {
+            node.attributes
+                .iter()
+                .find(|a| a.name == name)
+                .map(|a| a.value.as_str())
+        }
+        fn descendant<'a>(
+            node: &'a ImagePropertyNode,
+            name: &str,
+        ) -> Option<&'a ImagePropertyNode> {
+            if node.name == name {
+                Some(node)
+            } else {
+                node.children
+                    .iter()
+                    .find_map(|child| descendant(child, name))
+            }
+        }
+        let assets: HashMap<_, _> = presentation
+            .assets
+            .iter()
+            .filter_map(|asset| Some((asset.relationship_id.as_deref()?, asset)))
+            .collect();
+        let mut pictures = Vec::new();
+        let mut pending: Vec<_> = presentation.properties.iter().rev().collect();
+        while let Some(node) = pending.pop() {
+            let (blip, properties) = match node.name.as_str() {
+                "pic:pic" => {
+                    let Some(blip) = descendant(node, "a:blip") else {
+                        continue;
+                    };
+                    (blip, descendant(node, "pic:cNvPr"))
+                }
+                "v:imagedata" => (node, Some(node)),
+                _ => {
+                    pending.extend(node.children.iter().rev());
+                    continue;
+                }
+            };
+            let asset = ["r:embed", "r:link", "r:id", "o:relid"]
+                .into_iter()
+                .filter_map(|name| assets.get(property(blip, name)?))
+                .find(|asset| asset.target.is_some());
+            let Some(asset) = asset else { continue };
+            let description = properties.and_then(|p| {
+                ["descr", "title", "o:title"]
+                    .into_iter()
+                    .find_map(|name| property(p, name).filter(|s| !s.trim().is_empty()))
+            });
+            let mut details =
+                json!({"kind": "image", "asset": asset.target, "description": description});
+            if let Some(link) = property(blip, "r:link").and_then(|id| assets.get(id)) {
+                details["linkedTarget"] = json!(link.target);
+            } else if asset.kind == "linked" {
+                details["linkedTarget"] = json!(asset.target);
+            }
+            pictures.push(self.block(
+                indexed_path(parent, [("/picture/", pictures.len())]),
+                BlockType::Figure,
+                description.unwrap_or_default().to_owned(),
+                details,
+                Vec::new(),
+                Some(parent),
+            ));
+        }
+        pictures
+    }
+
     fn words(&self, block: &DocumentBlock) -> Vec<DocumentWord> {
         let block_id = &block.id;
         let content = &block.content;
@@ -801,8 +885,10 @@ impl Extractor<'_> {
             BlockType::Barcode
         } else if heading_level.is_some() {
             BlockType::Heading
-        } else if style_id.eq_ignore_ascii_case("title")
-            || style_id.eq_ignore_ascii_case("subtitle")
+        } else if [Some(style_id), style.and_then(|s| s.style_name.as_deref())]
+            .into_iter()
+            .flatten()
+            .any(|name| name.eq_ignore_ascii_case("title") || name.eq_ignore_ascii_case("subtitle"))
         {
             BlockType::SectionHeading
         } else if style_id.eq_ignore_ascii_case("caption") {
@@ -893,18 +979,36 @@ impl Extractor<'_> {
                         block_id: image_id.to_owned(),
                         offset: text_offset,
                     });
-                    let nested = image
+                    let group = image.presentation.as_deref().filter(|p| {
+                        p.properties
+                            .iter()
+                            .any(|n| matches!(n.name.as_str(), "wpg:grpSpPr" | "v:group"))
+                            || image
+                                .source_xml
+                                .as_deref()
+                                .is_some_and(|xml| crate::parse::find_tag_token_ref(xml, "wpg:wgp").is_some())
+                    });
+                    let authored_picture = kind == BlockType::Figure
+                        && image.semantic_kind.is_none()
+                        && image.chart_part_name.is_none()
+                        && image.synthetic_text_box != Some(true);
+                    let description =
+                        authored_picture.then(|| picture_description(image, group.is_some()));
+                    let mut nested = image
                         .content_nodes
                         .as_ref()
                         .map(|nodes| self.story_nodes(nodes, Some(image_id)))
                         .unwrap_or_default();
+                    if let Some(group) = group.filter(|_| authored_picture && nested.is_empty()) {
+                        nested = self.group_pictures(image_id, group);
+                    }
                     let text = if kind == BlockType::Formula && image.source_xml.is_none() {
                         image.math_ml.as_deref().and_then(formula_text).or_else(|| image.alt.clone()).unwrap_or_default()
                     } else if nested.is_empty() {
                         image
                             .text_box_text
                             .clone()
-                            .or_else(|| image.alt.clone())
+                            .or_else(|| description.clone().unwrap_or_else(|| image.alt.clone()))
                             .unwrap_or_default()
                     } else {
                         nested
@@ -914,8 +1018,21 @@ impl Extractor<'_> {
                             .join("\n")
                     };
                     let mut details = json!({"kind":image.semantic_kind.as_deref().unwrap_or(if image.synthetic_text_box == Some(true) {"text_box"} else {"image"}), "mathMl":image.math_ml, "asset":image.part_name, "alt":image.alt, "contentType":image.content_type, "width":image.width_px, "height":image.height_px, "floating":image.floating});
-                    if image.part_name.is_some() && image.chart_part_name.is_none() && image.semantic_kind.is_none() {
-                        details["description"] = json!(picture_description(image));
+                    if let Some(description) = description {
+                        details["description"] = json!(description);
+                    }
+                    if let Some(target) = image
+                        .presentation
+                        .as_deref()
+                        .filter(|_| group.is_none())
+                        .and_then(|p| {
+                            p.assets
+                                .iter()
+                                .find(|a| a.kind == "linked")
+                                .and_then(|a| a.target.as_deref())
+                        })
+                    {
+                        details["linkedTarget"] = json!(target);
                     }
                     if let Some(part_name) = &image.chart_part_name {
                         details["chartPartName"] = json!(part_name);

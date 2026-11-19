@@ -310,7 +310,7 @@ pub(super) fn parse_image_presentation(
         };
         properties.push(node);
     }
-    if properties.iter().all(is_plain) {
+    if properties.iter().all(is_plain) && super::find_tag_token_ref(xml, "wpg:wgp").is_none() {
         return None;
     }
 
