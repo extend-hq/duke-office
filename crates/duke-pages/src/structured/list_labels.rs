@@ -1,3 +1,5 @@
+mod ordinals;
+
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -245,7 +247,13 @@ impl StoryLists {
                     } else {
                         referenced.format.as_deref()
                     };
-                    write_counter(&mut label, counters[i]?, fmt, referenced.minimum_digits)?;
+                    write_counter(
+                        &mut label,
+                        counters[i]?,
+                        fmt,
+                        referenced.minimum_digits,
+                        paragraph.paragraph_mark_style.as_deref(),
+                    )?;
                 }
             } else {
                 label.push(match (level.format.as_deref(), ch) {
@@ -264,7 +272,13 @@ impl StoryLists {
     }
 }
 
-fn write_counter(out: &mut String, n: u64, format: Option<&str>, minimum_digits: Option<u8>) -> Option<()> {
+fn write_counter(
+    out: &mut String,
+    n: u64,
+    format: Option<&str>,
+    minimum_digits: Option<u8>,
+    mark_style: Option<&TextStyle>,
+) -> Option<()> {
     if n == 0 && minimum_digits.is_some() && matches!(format, None | Some("decimal" | "decimalZero")) {
         out.push('0');
         return Some(());
@@ -273,6 +287,8 @@ fn write_counter(out: &mut String, n: u64, format: Option<&str>, minimum_digits:
     match format.unwrap_or("decimal") {
         "decimal" => write!(out, "{n:0width$}").ok()?,
         "decimalZero" => write!(out, "{n:0width$}", width = width.max(2)).ok()?,
+        "ordinalText" => ordinals::write_spelled(out, n, mark_style)?,
+        "ordinal" => ordinals::write_numeric(out, n, mark_style)?,
         "lowerLetter" | "upperLetter" if n > 0 => {
             let base = if format == Some("lowerLetter") {
                 b'a'

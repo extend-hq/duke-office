@@ -20,6 +20,11 @@ duke-office-art = { version = "=0.3.0", path = "../duke-office-art" }
 duke-office-charts = { version = "=0.4.0", path = "../duke-office-charts" }
 duke-odf = { version = "=0.4.0", path = "../duke-odf" }
 itoa = "1"
+n2words = "0.1.1"
+numbertext = { version = "0.1.0", default-features = false, features = [
+    "lang-bg", "lang-ca", "lang-cs", "lang-et", "lang-fi", "lang-hu", "lang-no",
+    "lang-ro", "lang-ru", "lang-sk", "lang-sl", "lang-sv",
+] }
 serde = { workspace = true, features = ["rc"] }
 serde_json.workspace = true
 serde_bytes.workspace = true
