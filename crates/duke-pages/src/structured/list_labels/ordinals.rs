@@ -141,21 +141,9 @@ pub(super) fn write_spelled(out: &mut String, n: u64, mark: Option<&TextStyle>) 
                     None => word,
                 }
             }
-            "fi" => {
-                let word = rule_ordinal("fi", n)?;
-                match (n % 100, n % 10) {
-                    (20.., 1) => word
-                        .strip_suffix("ensimmäinen")
-                        .map(|stem| format!("{stem}yhdes"))
-                        .unwrap_or(word),
-                    (20.., 2) => word
-                        .strip_suffix("toinen")
-                        .map(|stem| format!("{stem}kahdes"))
-                        .unwrap_or(word),
-                    _ => word,
-                }
-            }
-            "ca" | "cs" | "hu" | "ro" => rule_ordinal(&lang, n)?,
+            "fi" => finnish(n)?,
+            "ca" => catalan(n)?,
+            "cs" | "hu" | "ro" => rule_ordinal(&lang, n)?,
             "hr" => n2words::hr::to_ordinal(n).ok()?,
             "lt" => n2words::lt::to_ordinal(n).ok()?,
             "lv" => n2words::lv::to_ordinal(n).ok()?,
@@ -188,6 +176,47 @@ pub(super) fn write_spelled(out: &mut String, n: u64, mark: Option<&TextStyle>) 
 fn rule_ordinal(lang: &str, n: u64) -> Option<String> {
     let word = numbertext::ordinal(lang, &n.to_string()).ok()?;
     (word.chars().any(char::is_alphabetic) && !word.chars().any(char::is_numeric)).then_some(word)
+}
+
+fn catalan(n: u64) -> Option<String> {
+    let units = n % 100;
+    if n < 100 || !(1..=3).contains(&units) {
+        return rule_ordinal("ca", n);
+    }
+    let prefix = numbertext::cardinal("ca", &(n - units).to_string()).ok()?;
+    let ending = ["unè", "dosè", "tresè"][(units - 1) as usize];
+    Some(format!("{prefix} {ending}"))
+}
+
+fn finnish(n: u64) -> Option<String> {
+    let mut word = rule_ordinal("fi", n)?;
+    if let Some((prefix, rest)) = word.split_once("tuhannes") {
+        let (long, short) = if n / 1000 % 100 == 2 {
+            ("toinen", "kahdes")
+        } else {
+            ("ensimmäinen", "yhdes")
+        };
+        let prefix = prefix
+            .strip_suffix(long)
+            .map(|stem| format!("{stem}{short}"))
+            .unwrap_or_else(|| prefix.to_owned());
+        let rest = rest.trim_start();
+        word = if rest.is_empty() {
+            format!("{prefix}tuhannes")
+        } else {
+            format!("{prefix}tuhannes {rest}")
+        };
+    }
+    let (long, short) = match (n % 100, n % 10) {
+        (20.., 1) => ("ensimmäinen", "yhdes"),
+        (20.., 2) => ("toinen", "kahdes"),
+        _ => return Some(word),
+    };
+    Some(
+        word.strip_suffix(long)
+            .map(|stem| format!("{stem}{short}"))
+            .unwrap_or(word),
+    )
 }
 
 fn spanish(n: u64) -> Option<String> {
@@ -334,27 +363,26 @@ fn dutch(n: u64, ordinal: bool) -> Option<String> {
 }
 
 fn danish(n: u64, ordinal: bool) -> Option<String> {
-    const ORDINAL_TENS: [&str; 8] = [
-        "tyvende",
-        "tredivte",
-        "fyrretyvende",
-        "halvtredsindstyvende",
-        "tresindstyvende",
-        "halvfjerdsindstyvende",
-        "firsindstyvende",
-        "halvfemsindstyvende",
+    const TENS: [(&str, &str); 8] = [
+        ("tyve", "tyvende"),
+        ("tredive", "tredivte"),
+        ("fyrre", "fyrretyvende"),
+        ("halvtreds", "halvtredsindstyvende"),
+        ("tres", "tresindstyvende"),
+        ("halvfjerds", "halvfjerdsindstyvende"),
+        ("firs", "firsindstyvende"),
+        ("halvfems", "halvfemsindstyvende"),
     ];
+    if n < 20 {
+        return match (ordinal, n) {
+            (true, _) => n2words::da::to_ordinal(n).ok(),
+            (false, 1) => Some("en".into()),
+            (false, _) => n2words::da::to_cardinal(n).ok(),
+        };
+    }
     if n < 100 {
-        if !ordinal {
-            if n == 1 {
-                return Some("en".into());
-            }
-            return n2words::da::to_cardinal(n).ok().map(|v| v.replace(' ', ""));
-        }
-        if n < 20 {
-            return n2words::da::to_ordinal(n).ok();
-        }
-        let tens = ORDINAL_TENS[(n / 10 - 2) as usize];
+        let (cardinal, inflected) = TENS[(n / 10 - 2) as usize];
+        let tens = if ordinal { inflected } else { cardinal };
         return if n % 10 == 0 {
             Some(tens.to_owned())
         } else {
@@ -464,32 +492,33 @@ fn basque(n: u64) -> String {
 }
 
 fn slovak(n: u64) -> Option<String> {
-    let (scale, name) = match n {
-        0..=99 => return Some(rule_ordinal("sk", n)?.replace(' ', "")),
-        100..=999 => (100, "sto"),
-        _ => (1000, "tisíc"),
-    };
-    let (quotient, rest) = (n / scale, n % scale);
-    if rest == 0 {
-        if let Some(word) = rule_ordinal("sk", n) {
-            return Some(word.replace(' ', ""));
+    if n < 100 {
+        return Some(rule_ordinal("sk", n)?.replace(' ', ""));
+    }
+    if n < 1000 {
+        let rest = n % 100;
+        if rest == 0 {
+            return rule_ordinal("sk", n);
         }
+        let hundreds = numbertext::cardinal("sk", &(n - rest).to_string()).ok()?;
+        return Some(format!("{hundreds}{}", slovak(rest)?));
     }
-    let mut word = if scale == 100 {
-        numbertext::cardinal("sk", &(quotient * scale).to_string())
+    let (thousands, rest) = (n / 1000, n % 1000);
+    if rest == 0 && thousands <= 4 {
+        return rule_ordinal("sk", n);
+    }
+    let prefix = match thousands {
+        1 => String::new(),
+        2 => "dve".to_owned(),
+        _ => numbertext::cardinal("sk", &thousands.to_string())
             .ok()?
-            .replace(' ', "")
-    } else if quotient == 1 {
-        name.to_owned()
-    } else {
-        format!("{}{name}", slovak(quotient)?)
+            .replace(' ', ""),
     };
-    if rest > 0 {
-        word.push_str(&slovak(rest)?);
+    if rest == 0 {
+        Some(format!("{prefix}tisíci"))
     } else {
-        word.push('i');
+        Some(format!("{prefix}tisíc{}", slovak(rest)?))
     }
-    Some(word)
 }
 
 fn estonian(n: u64, ordinal: bool) -> Option<String> {
