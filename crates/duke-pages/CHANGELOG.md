@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.4
+
+- Preserve embedded chart frames and their source order alongside text in grouped Word drawings.
+
 ## 0.6.3
 
 - Improve Catalan, Danish and Finnish compound ordinal labels and preserve the complete thousands count in Slovak Word lists.
