@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.2
+
+- Render spelled-out list ordinals in the paragraph mark’s language, including inherited language, nested counters and mixed numbering formats.
+
 ## 0.6.1
 
 - Resolve alternate numbering definitions and preserve list continuation across format changes and explicit zero starts.
