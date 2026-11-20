@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.3
+
+- Improve Catalan, Danish and Finnish compound ordinal labels and preserve the complete thousands count in Slovak Word lists.
+
 ## 0.6.2
 
 - Render spelled-out list ordinals in the paragraph mark’s language, including inherited language, nested counters and mixed numbering formats.
