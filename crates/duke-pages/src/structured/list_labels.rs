@@ -207,12 +207,7 @@ impl StoryLists {
             let has_start_override = instance
                 .level_start_overrides
                 .as_ref()
-                .is_some_and(|s| s.contains_key(LEVEL_KEYS[index]))
-                || instance
-                    .level_overrides
-                    .iter()
-                    .flatten()
-                    .any(|l| l.ilvl == num.ilvl && l.start.is_some());
+                .is_some_and(|s| s.contains_key(LEVEL_KEYS[index]));
             let continued = if first_use && current.is_none() && has_start_override {
                 None
             } else {

@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::model::{
@@ -77,7 +78,69 @@ pub fn parse_numbering_picture_bullet_definitions(
     numbering_xml: &str,
     content_types: &ContentTypeLookup,
 ) -> HashMap<i64, NumberingPictureBulletDefinition> {
-    parse_picture_bullets_with_assets(pkg, numbering_xml, content_types, &pkg.binary_assets)
+    parse_picture_bullets_with_assets(
+        pkg,
+        &active_numbering_xml(numbering_xml),
+        content_types,
+        &pkg.binary_assets,
+    )
+}
+
+fn active_numbering_xml(xml: &str) -> Cow<'_, str> {
+    const MC: &str = "http://schemas.openxmlformats.org/markup-compatibility/2006";
+    if !xml.contains("AlternateContent") {
+        return Cow::Borrowed(xml);
+    }
+    let Ok(document) = roxmltree::Document::parse(xml) else {
+        return Cow::Borrowed(xml);
+    };
+    let mut omitted = Vec::new();
+    for alternate in document
+        .descendants()
+        .filter(|n| n.has_tag_name((MC, "AlternateContent")))
+    {
+        let choice = alternate
+            .children()
+            .find(|node| {
+                node.has_tag_name((MC, "Choice"))
+                    && node.attribute("Requires").is_some_and(|requires| {
+                        let mut prefixes = requires.split_ascii_whitespace().peekable();
+                        prefixes.peek().is_some()
+                            && prefixes.all(|p| {
+                                let ns = node
+                                    .lookup_namespace_uri(Some(p))
+                                    .and_then(super::namespaces::prefix);
+                                matches!(ns, Some("w" | "r" | "v" | "mc" | "xml"))
+                            })
+                    })
+            })
+            .or_else(|| {
+                alternate
+                    .children()
+                    .find(|n| n.has_tag_name((MC, "Fallback")))
+            });
+        let range = alternate.range();
+        if let Some((first, last)) = choice.and_then(|n| n.first_child().zip(n.last_child())) {
+            omitted.push(range.start..first.range().start);
+            omitted.push(last.range().end..range.end);
+        } else {
+            omitted.push(range);
+        }
+    }
+    if omitted.is_empty() {
+        return Cow::Borrowed(xml);
+    }
+    omitted.sort_unstable_by_key(|r| r.start);
+    let mut output = String::with_capacity(xml.len());
+    let mut cursor = 0;
+    for range in omitted {
+        if cursor < range.start {
+            output.push_str(&xml[cursor..range.start]);
+        }
+        cursor = cursor.max(range.end);
+    }
+    output.push_str(&xml[cursor..]);
+    Cow::Owned(output)
 }
 
 fn parse_picture_bullets_with_assets(
@@ -141,6 +204,25 @@ fn parse_picture_bullets_with_assets(
 
 /// Mirrors TypeScript `parseNumberingLevelDefinition`.
 pub fn parse_numbering_level_definition(
+    level_xml: &str,
+    picture_bullets_by_id: &HashMap<i64, NumberingPictureBulletDefinition>,
+) -> Option<NumberingLevelDefinition> {
+    if !level_xml.contains("AlternateContent") {
+        return parse_active_level(level_xml, picture_bullets_by_id);
+    }
+    let wrapped;
+    let source = if level_xml.trim_start().starts_with("<?xml") {
+        level_xml
+    } else {
+        wrapped = format!(
+            r#"<root xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" xmlns:v="urn:schemas-microsoft-com:vml">{level_xml}</root>"#
+        );
+        &wrapped
+    };
+    parse_active_level(&active_numbering_xml(source), picture_bullets_by_id)
+}
+
+fn parse_active_level(
     level_xml: &str,
     picture_bullets_by_id: &HashMap<i64, NumberingPictureBulletDefinition>,
 ) -> Option<NumberingLevelDefinition> {
@@ -260,7 +342,8 @@ pub(crate) fn parse_numbering_with_assets(
     content_types: &ContentTypeLookup,
     binary_assets: &HashMap<String, Vec<u8>>,
 ) -> Option<NumberingDefinitionSet> {
-    let numbering_xml = crate::package::related_document_part(pkg, "numbering")?.content.as_str();
+    let active = active_numbering_xml(&crate::package::related_document_part(pkg, "numbering")?.content);
+    let numbering_xml = active.as_ref();
     #[cfg(not(target_arch = "wasm32"))]
     if numbering_xml.len() <= 128 * 1024
         && !super::scan::contains_tag(numbering_xml, "w:numPicBullet")
@@ -292,7 +375,7 @@ fn parse_numbering_xml(
                     crate::xml::extract_balanced_tag_slices(&abstract_xml, "w:lvl")
                         .into_iter()
                         .filter_map(|level_xml| {
-                            parse_numbering_level_definition(&level_xml, picture_bullets_by_id)
+                            parse_active_level(&level_xml, picture_bullets_by_id)
                         })
                         .collect();
                 levels.sort_by_key(|level| level.ilvl);
@@ -370,7 +453,7 @@ fn parse_numbering_xml(
                     let start_override = start_override_tag
                         .as_deref()
                         .and_then(|tag| parse_integer_attribute(tag, "w:val"));
-                    if let Some(start_override) = start_override.filter(|value| *value > 0) {
+                    if let Some(start_override) = start_override.filter(|value| *value >= 0) {
                         level_start_overrides
                             .insert(override_level.round().max(0.0) as i64, start_override);
                     }
@@ -379,7 +462,7 @@ fn parse_numbering_xml(
                         crate::xml::extract_balanced_tag_slices(&override_xml, "w:lvl").into_iter().next()
                     {
                         if let Some(parsed_level) =
-                            parse_numbering_level_definition(&level_xml, picture_bullets_by_id)
+                            parse_active_level(&level_xml, picture_bullets_by_id)
                         {
                             level_overrides.push(parsed_level);
                         }

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1
+
+- Resolve alternate numbering definitions and preserve list continuation across format changes and explicit zero starts.
+
 ## 0.5.10
 
 - Preserve named Word bookmarks at their inline positions, including targets in empty paragraphs.
