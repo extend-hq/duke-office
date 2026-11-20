@@ -569,10 +569,22 @@ pub struct ImageTile {
     pub flip: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GroupChart {
+    pub part_name: String,
+    /// Number of text-story nodes preceding the graphic frame in the drawing.
+    pub before_node: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
 /// Parsed properties describe source intent independently of rendering coverage.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImagePresentation {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub group_charts: Vec<GroupChart>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub transform_applied: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

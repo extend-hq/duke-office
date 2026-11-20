@@ -2204,6 +2204,27 @@ fn parse_paragraph_mark_formatting(
     }
 }
 
+fn grouped_chart(
+    frame: &str,
+    before_node: usize,
+    context: &ParseContext<'_, impl std::borrow::Borrow<super::context::ParsedStyleSheet>>,
+) -> Option<crate::model::GroupChart> {
+    use crate::xml::direct_child_tag;
+    let graphic = direct_child_tag(frame, "a:graphic")?;
+    let data = direct_child_tag(graphic, "a:graphicData")?;
+    let chart = direct_child_tag(data, "c:chart").or_else(|| direct_child_tag(data, "cx:chart"))?;
+    let part = context.relationships.get(get_attribute_ref(chart, "r:id")?)?;
+    if !context.parts.contains_key(part) {
+        return None;
+    }
+    let description = direct_child_tag(frame, "wpg:cNvPr").and_then(|properties| {
+        ["descr", "title", "name"].into_iter().find_map(|key| {
+            get_attribute_ref(properties, key).filter(|s| !s.trim().is_empty()).map(decode_xml_entities)
+        })
+    });
+    Some(crate::model::GroupChart { part_name: part.clone(), before_node, description })
+}
+
 pub fn parse_paragraph(
     paragraph_xml: &str,
     context: &ParseContext<'_, impl std::borrow::Borrow<super::context::ParsedStyleSheet>>,
@@ -2515,18 +2536,28 @@ pub(crate) fn parse_paragraph_with_table_run_style(
                     for (source_start, mut image) in images {
                         if let Some(xml) = image.source_xml.as_deref() {
                             let active_xml = prefer_alternate_content_choice(xml);
-                            let text_boxes =
-                                extract_balanced_tag_blocks(&active_xml, "w:txbxContent");
-                            if !text_boxes.is_empty() {
-                                image.content_nodes = Some(
-                                    text_boxes
-                                        .iter()
-                                        .flat_map(|xml| {
-                                            super::document::parse_document_xml(xml, context)
-                                        })
-                                        .collect(),
-                                );
+                            let frames = crate::parse::find_tag_token_ref(&active_xml, "wpg:graphicFrame").is_some();
+                            let kinds: &[&str] = if frames { &["w:txbxContent", "wpg:graphicFrame"] } else { &["w:txbxContent"] };
+                            let mut nodes = Vec::new();
+                            let mut charts = Vec::new();
+                            let mut has_story = false;
+                            for part in crate::xml::extract_balanced_tag_blocks_in_order(&active_xml, kinds) {
+                                let xml = &active_xml[part.start..part.end];
+                                if part.tag_name == "w:txbxContent" {
+                                    has_story = true;
+                                    nodes.extend(super::document::parse_document_xml(xml, context));
+                                } else if let Some(chart) = grouped_chart(xml, nodes.len(), context) {
+                                    charts.push(chart);
+                                }
+                            }
+                            if has_story {
+                                image.content_nodes = Some(nodes);
                                 image.semantic_kind = Some("text_box".into());
+                            }
+                            if !charts.is_empty() {
+                                image.chart_part_name = None;
+                                image.chart_data = None;
+                                image.presentation.get_or_insert_with(Default::default).group_charts = charts;
                             }
                         }
                         ordered_children

@@ -653,6 +653,45 @@ impl Extractor<'_> {
         }
     }
 
+    fn insert_group_charts(
+        &self,
+        nested: Vec<DocumentBlock>,
+        image: &crate::ImageRunNode,
+        parent: &str,
+        charts: &[crate::model::GroupChart],
+    ) -> Vec<DocumentBlock> {
+        let node_positions: HashMap<_, _> = image.content_nodes.iter().flatten().enumerate()
+            .filter_map(|(i, node)| {
+                let id = match node {
+                    DocNode::Paragraph(p) => p.block_id.as_deref(),
+                    DocNode::Table(t) => t.block_id.as_deref(),
+                };
+                Some((id?, i))
+            }).collect();
+        let mut result = Vec::with_capacity(nested.len() + charts.len());
+        let mut frames = charts.iter().enumerate().peekable();
+        for (position, block) in nested.into_iter().enumerate() {
+            let position = node_positions.get(block.id.as_str()).copied().unwrap_or(position);
+            while let Some((i, frame)) = frames.next_if(|(_, frame)| frame.before_node <= position) {
+                result.push(self.group_chart(parent, i, frame));
+            }
+            result.push(block);
+        }
+        result.extend(frames.map(|(i, frame)| self.group_chart(parent, i, frame)));
+        result
+    }
+
+    fn group_chart(&self, parent: &str, index: usize, frame: &crate::model::GroupChart) -> DocumentBlock {
+        self.block(
+            indexed_path(parent, [("/chart/", index)]),
+            BlockType::Figure,
+            frame.description.clone().unwrap_or_default(),
+            json!({"kind": "image", "description": frame.description, "chartPartName": frame.part_name}),
+            Vec::new(),
+            Some(parent),
+        )
+    }
+
     fn group_pictures(
         &self,
         parent: &str,
@@ -1003,6 +1042,9 @@ impl Extractor<'_> {
                         .unwrap_or_default();
                     if let Some(group) = group.filter(|_| authored_picture && nested.is_empty()) {
                         nested = self.group_pictures(image_id, group);
+                    }
+                    if let Some(presentation) = image.presentation.as_ref().filter(|p| !p.group_charts.is_empty()) {
+                        nested = self.insert_group_charts(nested, image, image_id, &presentation.group_charts);
                     }
                     let text = if kind == BlockType::Formula && image.source_xml.is_none() {
                         image.math_ml.as_deref().and_then(formula_text).or_else(|| image.alt.clone()).unwrap_or_default()

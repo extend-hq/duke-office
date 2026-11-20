@@ -349,6 +349,7 @@ pub(super) fn parse_image_presentation(
         flip: attribute(node, "flip").map(str::to_owned),
     });
     Some(Box::new(ImagePresentation {
+        group_charts: Vec::new(),
         transform_applied: false,
         assets,
         transform,
