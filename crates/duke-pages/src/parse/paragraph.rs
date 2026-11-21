@@ -1759,6 +1759,7 @@ fn trimmed_sdt_dropdown_style(
         strike,
         all_caps,
         small_caps,
+        hidden,
         color,
         highlight,
         background_color,
@@ -2506,6 +2507,7 @@ pub(crate) fn parse_paragraph_with_table_run_style(
                     ));
                     parsed_tokens.sort_by_key(|(token, _)| token.source_start);
                     let mut parsed_tokens = parsed_tokens.into_iter().peekable();
+                    let hidden = style.as_ref().is_some_and(|s| s.hidden == Some(true));
                     let mut remaining_style = style;
                     let needs_child_ordering = !images.is_empty();
                     let mut ordered_children = Vec::new();
@@ -2534,6 +2536,12 @@ pub(crate) fn parse_paragraph_with_table_run_style(
                         }
                     }
                     for (source_start, mut image) in images {
+                        if hidden {
+                            image
+                                .presentation
+                                .get_or_insert_with(Default::default)
+                                .hidden = true;
+                        }
                         if let Some(xml) = image.source_xml.as_deref() {
                             let active_xml = prefer_alternate_content_choice(xml);
                             let frames = crate::parse::find_tag_token_ref(&active_xml, "wpg:graphicFrame").is_some();

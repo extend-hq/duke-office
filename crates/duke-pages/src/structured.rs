@@ -316,9 +316,9 @@ pub fn package_identity(package: &OoxmlPackage) -> String {
     format!("{:x}", hash.finalize())
 }
 
-fn picture_description(image: &ImageRunNode, grouped: bool) -> Option<String> {
+fn picture_labels(image: &ImageRunNode, grouped: bool) -> (Option<String>, Option<String>) {
     let Some(xml) = image.source_xml.as_deref() else {
-        return image.alt.clone();
+        return (image.alt.clone(), None);
     };
     let properties = ["wp:docPr", "pic:cNvPr", "v:imagedata"]
         .map(|name| crate::parse::find_tag_token_ref(xml, name));
@@ -332,13 +332,17 @@ fn picture_description(image: &ImageRunNode, grouped: bool) -> Option<String> {
         && !xml.contains("<w:pict")
         && !xml.contains("<w:drawing")
     {
-        return image.alt.clone();
+        return (image.alt.clone(), None);
     }
-    ["descr", "title", "o:title"].into_iter()
-        .find_map(|attribute| properties.iter().flatten().find_map(|tag| {
-            crate::xml::get_attribute_ref(tag, attribute).filter(|value| !value.trim().is_empty())
-        }))
-        .map(crate::xml::decode_xml_entities)
+    let attribute = |name| {
+        properties.iter().flatten().find_map(|tag| {
+            crate::xml::get_attribute_ref(tag, name)
+                .filter(|value| !value.trim().is_empty())
+                .map(crate::xml::decode_xml_entities)
+        })
+    };
+    let title = attribute("title").or_else(|| attribute("o:title"));
+    (attribute("descr").or_else(|| title.clone()), title)
 }
 
 fn image_url(image: &ImageRunNode) -> Option<String> {
@@ -748,6 +752,12 @@ impl Extractor<'_> {
             });
             let mut details =
                 json!({"kind": "image", "asset": asset.target, "description": description});
+            if let Some(title) = properties
+                .and_then(|p| property(p, "title").or_else(|| property(p, "o:title")))
+                .filter(|v| !v.trim().is_empty())
+            {
+                details["title"] = json!(title);
+            }
             if let Some(link) = property(blip, "r:link").and_then(|id| assets.get(id)) {
                 details["linkedTarget"] = json!(link.target);
             } else if asset.kind == "linked" {
@@ -781,6 +791,8 @@ impl Extractor<'_> {
         }
         let mut offset = 0;
         let mut previous = 0;
+        let mut references = block.source_refs.iter().peekable();
+        let mut base = 0;
         boundaries.into_iter().chain(std::iter::once(content.len()))
             .flat_map(|end| {
                 let section = &content[previous..end];
@@ -799,24 +811,26 @@ impl Extractor<'_> {
                     block_id: block_id.clone(),
                     content: word.into(),
                     source_refs: {
-                        let mut base = 0;
-                        block
-                            .source_refs
-                            .iter()
-                            .filter_map(|source| {
-                                let source_start = source.start.unwrap_or(0);
-                                let source_length = source.end.unwrap_or(length) - source_start;
-                                let from = start.max(base);
-                                let to = offset.min(base + source_length);
-                                let reference = (from < to).then(|| SourceRef {
-                                    start: Some(source_start + from - base),
-                                    end: Some(source_start + to - base),
-                                    ..source.clone()
+                        let mut ranges = Vec::new();
+                        while let Some(source) = references.peek() {
+                            let first = source.start.unwrap_or(0);
+                            let end = base + source.end.unwrap_or(length).saturating_sub(first);
+                            let from = start.max(base);
+                            let to = offset.min(end);
+                            if from < to {
+                                ranges.push(SourceRef {
+                                    start: Some(first + from - base),
+                                    end: Some(first + to - base),
+                                    ..(*source).clone()
                                 });
-                                base += source_length;
-                                reference
-                            })
-                            .collect()
+                            }
+                            if offset < end {
+                                break;
+                            }
+                            base = end;
+                            references.next();
+                        }
+                        ranges
                     },
                 })
             })
@@ -950,20 +964,26 @@ impl Extractor<'_> {
         let mut inline = Vec::with_capacity(p.children.len());
         let mut children = Vec::new();
         let mut text_offset = 0;
+        let mut hidden_ranges = Vec::new();
         for (index, child) in p.children.iter().enumerate() {
             match child {
                 ParagraphChildNode::Text(run) => {
+                    let hidden = run.style.as_ref().is_some_and(|s| s.hidden == Some(true));
                     let text = run.text_with_note_label();
                     let start = text_offset;
                     text_offset += utf16_len(text);
+                    if hidden && start < text_offset {
+                        hidden_ranges.push(start..text_offset);
+                    }
+                    let text = if hidden { "" } else { text };
                     content.push_str(text);
                     inline.push(ParagraphInline::Text {
                         start,
                         end: text_offset,
                         text: text.to_owned(),
                         style: run.style.clone(),
-                        link: run.link.clone(),
-                        note_reference: run.note_reference.clone(),
+                        link: run.link.clone().filter(|_| !hidden),
+                        note_reference: run.note_reference.clone().filter(|_| !hidden),
                     });
                 }
                 ParagraphChildNode::FormField(field) => {
@@ -976,6 +996,13 @@ impl Extractor<'_> {
                     });
                     let start = text_offset;
                     text_offset += utf16_len(&value);
+                    let hidden = field.style.as_ref().is_some_and(|s| s.hidden == Some(true));
+                    let value = if hidden && start < text_offset {
+                        hidden_ranges.push(start..text_offset);
+                        String::new()
+                    } else {
+                        value
+                    };
                     content.push_str(&value);
                     inline.push(ParagraphInline::FormField {
                         block_id: child_id.clone(),
@@ -1008,6 +1035,17 @@ impl Extractor<'_> {
                     children.push(block);
                 }
                 ParagraphChildNode::Image(image) => {
+                    if image.presentation.as_ref().is_some_and(|p| p.hidden) {
+                        inline.push(ParagraphInline::Text {
+                            start: text_offset,
+                            end: text_offset,
+                            text: String::new(),
+                            style: None,
+                            link: None,
+                            note_reference: None,
+                        });
+                        continue;
+                    }
                     let child_id = indexed_path(&id, [("/child/", index)]);
                     let kind = match image.semantic_kind.as_deref() {
                         Some("formula") => BlockType::Formula,
@@ -1033,8 +1071,9 @@ impl Extractor<'_> {
                         && image.semantic_kind.is_none()
                         && image.chart_part_name.is_none()
                         && image.synthetic_text_box != Some(true);
-                    let description =
-                        authored_picture.then(|| picture_description(image, group.is_some()));
+                    let diagram = image.presentation.as_ref().and_then(|p| p.diagram.as_ref());
+                    let labels = (authored_picture || diagram.is_some())
+                        .then(|| picture_labels(image, group.is_some() || diagram.is_some()));
                     let mut nested = image
                         .content_nodes
                         .as_ref()
@@ -1048,11 +1087,18 @@ impl Extractor<'_> {
                     }
                     let text = if kind == BlockType::Formula && image.source_xml.is_none() {
                         image.math_ml.as_deref().and_then(formula_text).or_else(|| image.alt.clone()).unwrap_or_default()
+                    } else if let Some(diagram) = diagram {
+                        diagram.labels.join("\n")
                     } else if nested.is_empty() {
                         image
                             .text_box_text
                             .clone()
-                            .or_else(|| description.clone().unwrap_or_else(|| image.alt.clone()))
+                            .or_else(|| {
+                                labels
+                                    .as_ref()
+                                    .map(|(description, _)| description.clone())
+                                    .unwrap_or_else(|| image.alt.clone())
+                            })
                             .unwrap_or_default()
                     } else {
                         nested
@@ -1062,8 +1108,11 @@ impl Extractor<'_> {
                             .join("\n")
                     };
                     let mut details = json!({"kind":image.semantic_kind.as_deref().unwrap_or(if image.synthetic_text_box == Some(true) {"text_box"} else {"image"}), "mathMl":image.math_ml, "asset":image.part_name, "alt":image.alt, "contentType":image.content_type, "width":image.width_px, "height":image.height_px, "floating":image.floating});
-                    if let Some(description) = description {
+                    if let Some((description, title)) = labels {
                         details["description"] = json!(description);
+                        if let Some(title) = title {
+                            details["title"] = json!(title);
+                        }
                     }
                     if let Some(target) = image
                         .presentation
@@ -1143,6 +1192,31 @@ impl Extractor<'_> {
             inlines: inline,
         };
         let mut block = self.block(id.to_string(), kind, content, details, children, parent);
+        if !hidden_ranges.is_empty() {
+            let source = block.source_refs[0].clone();
+            block.source_refs.clear();
+            let mut start = 0;
+            for gap in hidden_ranges
+                .into_iter()
+                .chain(std::iter::once(text_offset..text_offset))
+            {
+                if start < gap.start {
+                    block.source_refs.push(SourceRef {
+                        start: Some(start),
+                        end: Some(gap.start),
+                        ..source.clone()
+                    });
+                }
+                start = gap.end;
+            }
+            if block.source_refs.is_empty() {
+                block.source_refs.push(SourceRef {
+                    start: Some(0),
+                    end: Some(0),
+                    ..source
+                });
+            }
+        }
         if let (Some(review), Some(xml)) = (&mut self.review, &p.source_xml) {
             review.paragraph(xml, &block, p);
         }
@@ -1252,12 +1326,30 @@ impl Extractor<'_> {
             }
         }
         lists.break_paragraph_flow();
+        let mut details = json!({"type":"table_details", "rowCount":table.rows.len(), "columnCount":column_count,
+                "style":table.style, "rowStyles":table.rows.iter().map(|row| &row.style).collect::<Vec<_>>()});
+        if let Some(properties) = table
+            .source_xml
+            .as_deref()
+            .and_then(|xml| crate::xml::direct_child_tag(xml, "w:tblPr"))
+        {
+            for (name, key) in [
+                ("w:tblCaption", "caption"),
+                ("w:tblDescription", "description"),
+            ] {
+                if let Some(value) = crate::xml::direct_child_tag(properties, name)
+                    .and_then(|tag| crate::xml::get_attribute(tag, "w:val"))
+                    .filter(|v| !v.trim().is_empty())
+                {
+                    details[key] = json!(crate::xml::decode_xml_entities(&value));
+                }
+            }
+        }
         self.block(
             id.to_string(),
             BlockType::Table,
             row_text,
-            json!({"type":"table_details", "rowCount":table.rows.len(), "columnCount":column_count,
-                "style":table.style, "rowStyles":table.rows.iter().map(|row| &row.style).collect::<Vec<_>>()}),
+            details,
             children,
             parent,
         )

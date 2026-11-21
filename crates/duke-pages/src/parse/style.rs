@@ -140,6 +140,26 @@ fn text_script_flags(xml: &str) -> u8 {
     flags
 }
 
+pub(super) fn hidden_text(xml: &str) -> Option<bool> {
+    if !xml.contains("vanish") {
+        return None;
+    }
+    let name = xml
+        .trim_start()
+        .strip_prefix('<')?
+        .split([' ', '\t', '\n', '\r', '/', '>'])
+        .next()?;
+    let tag = match name {
+        "w:vanish" => xml,
+        "w:rPr" => crate::xml::direct_child_tag(xml, "w:vanish")?,
+        "w:r" => {
+            crate::xml::direct_child_tag(crate::xml::direct_child_tag(xml, "w:rPr")?, "w:vanish")?
+        }
+        _ => return None,
+    };
+    parse_on_off_attribute(tag, "vanish")
+}
+
 pub fn parse_text_style_from_xml(xml: &str, theme_fonts: &ThemeFontMap) -> Option<TextStyle> {
     cached_text_style(xml, theme_fonts, text_script_flags(xml))
 }
@@ -243,6 +263,7 @@ fn parse_text_style_with_scripts(
         double_strike: None,
         all_caps: None,
         small_caps: None,
+        hidden: hidden_text(xml),
         color: None,
         highlight: None,
         background_color: None,
@@ -279,7 +300,7 @@ fn parse_text_style_with_scripts(
         text_shadow: None,
         text_outline: None,
     };
-    let mut has_any = false;
+    let mut has_any = style.hidden.is_some();
 
     if let Some(v) = bold {
         style.bold = Some(v);
@@ -1056,6 +1077,12 @@ fn resolve_run_style_with_scripts(
     let strike = toggle_of(|s| s.strike);
     let all_caps = toggle_of(|s| s.all_caps);
     let small_caps = toggle_of(|s| s.small_caps);
+    let hidden = resolve_toggle_property(
+        default_run_style.as_ref().and_then(|s| s.hidden),
+        inherited_paragraph_run_style.and_then(|s| s.hidden),
+        inherited_run_style.and_then(|s| s.hidden),
+        hidden_text(properties.unwrap_or(run_xml)),
+    );
 
     let merged = super::util::merge_text_style_refs(&[
         default_run_style.as_ref(),
@@ -1063,7 +1090,7 @@ fn resolve_run_style_with_scripts(
         inherited_run_style,
         direct.as_deref(),
     ]);
-    let resolved = merged.map(|mut style| {
+    let resolved = merged.or_else(|| hidden.map(|_| TextStyle::default())).map(|mut style| {
         style.bold = bold;
         style.italic = italic;
         if style.double_strike != Some(true) {
@@ -1071,6 +1098,7 @@ fn resolve_run_style_with_scripts(
         }
         style.all_caps = all_caps;
         style.small_caps = small_caps;
+        style.hidden = hidden;
         super::text_effects::resolve(&mut style, &context.styles().theme_colors);
         SharedTextStyle::from(style)
     });

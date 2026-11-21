@@ -242,6 +242,7 @@ pub(crate) fn merge_text_style_refs(styles: &[Option<&TextStyle>]) -> Option<Tex
         double_strike: None,
         all_caps: None,
         small_caps: None,
+        hidden: None,
         color: None,
         highlight: None,
         background_color: None,
@@ -299,6 +300,9 @@ pub(crate) fn merge_text_style_refs(styles: &[Option<&TextStyle>]) -> Option<Tex
         }
         if merged.all_caps.is_none() {
             merged.all_caps = style.all_caps;
+        }
+        if merged.hidden.is_none() {
+            merged.hidden = style.hidden;
         }
         if merged.small_caps.is_none() {
             merged.small_caps = style.small_caps;

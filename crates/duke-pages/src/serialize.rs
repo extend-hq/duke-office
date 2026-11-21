@@ -427,7 +427,11 @@ fn run_properties_xml(style: Option<&TextStyle>, state: &ImageSerializationState
     } else if style.double_strike == Some(false) {
         fragments.push(on_off_element_xml("dstrike", Some(false)));
     }
-    for (name, value) in [("caps", style.all_caps), ("smallCaps", style.small_caps)] {
+    for (name, value) in [
+        ("caps", style.all_caps),
+        ("smallCaps", style.small_caps),
+        ("vanish", style.hidden),
+    ] {
         if value.is_some() {
             fragments.push(on_off_element_xml(name, value));
         }

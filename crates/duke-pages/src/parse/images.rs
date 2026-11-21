@@ -2057,11 +2057,13 @@ pub fn parse_run_image_block(
 ) -> Option<ImageRunNode> {
     let mut image = parse_run_image_block_inner(run_xml, context)?;
     let transform_applied = image.presentation.as_ref().is_some_and(|value| value.transform_applied);
+    let diagram = image.presentation.as_mut().and_then(|p| p.diagram.take());
     image.presentation = super::image_properties::parse_image_presentation(
         image.source_xml.as_deref().unwrap_or(run_xml), context,
     ).or(image.presentation);
     if let Some(presentation) = image.presentation.as_mut() {
         presentation.transform_applied = transform_applied;
+        presentation.diagram = diagram;
     }
     if duke_office_art::model3d::model3d_xml(image.source_xml.as_deref().unwrap_or(run_xml)).is_some() {
         image.semantic_kind = Some("model_3d".into());
@@ -2149,7 +2151,8 @@ fn parse_run_image_block_inner(
     let diagram = super::smartart::render_diagram(
         active_run_xml, width_px.unwrap_or(640.0), height_px.unwrap_or(360.0), context,
     );
-    let is_diagram = diagram.is_some();
+    let (diagram, diagram_text) = diagram.unzip();
+    let is_diagram = diagram_text.is_some();
     let standalone_shape_svg = diagram.or_else(||
         render_standalone_word_shape_svg(active_run_xml, width_px, height_px, context));
     let contains_grouped_or_standalone_shape =
@@ -2244,6 +2247,7 @@ fn parse_run_image_block_inner(
         return Some(ImageRunNode {
         model_3d: None,
             presentation: contains_grouped_or_standalone_shape.then(|| Box::new(crate::model::ImagePresentation {
+                diagram: diagram_text,
                 transform_applied: true,
                 ..Default::default()
             })),

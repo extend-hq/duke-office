@@ -1105,6 +1105,7 @@ pub fn merge_text_styles(
         double_strike: None,
         all_caps: None,
         small_caps: None,
+        hidden: None,
         color: None,
         highlight: None,
         background_color: None,
@@ -1166,6 +1167,9 @@ pub fn merge_text_styles(
         }
         if style.all_caps.is_some() {
             merged.all_caps = style.all_caps;
+        }
+        if style.hidden.is_some() {
+            merged.hidden = style.hidden;
         }
         if style.small_caps.is_some() {
             merged.small_caps = style.small_caps;
@@ -1282,6 +1286,7 @@ pub fn merge_text_styles(
         || merged.double_strike.is_some()
         || merged.all_caps.is_some()
         || merged.small_caps.is_some()
+        || merged.hidden.is_some()
         || merged.color.is_some()
         || merged.highlight.is_some()
         || merged.background_color.is_some()
@@ -1737,6 +1742,7 @@ pub(crate) fn parse_definition_style_uncached(
         double_strike: None,
         all_caps: None,
         small_caps: None,
+        hidden: None,
         color: None,
         highlight: None,
         background_color: None,
@@ -1783,6 +1789,7 @@ pub(crate) fn parse_definition_style_uncached(
     style.double_strike = double_strike;
     style.all_caps = all_caps;
     style.small_caps = small_caps;
+    style.hidden = super::style::hidden_text(xml);
 
     if style.bold.is_none() {
         if let Some(value) = drawing_bold_match {

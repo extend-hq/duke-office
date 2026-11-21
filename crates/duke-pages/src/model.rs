@@ -202,6 +202,8 @@ pub struct TextStyle {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub small_caps: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub hidden: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub color: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub highlight: Option<String>,
@@ -579,10 +581,21 @@ pub struct GroupChart {
     pub description: Option<String>,
 }
 
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DiagramText {
+    pub part_name: String,
+    pub labels: Vec<String>,
+}
+
 /// Parsed properties describe source intent independently of rendering coverage.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImagePresentation {
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub hidden: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagram: Option<DiagramText>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub group_charts: Vec<GroupChart>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

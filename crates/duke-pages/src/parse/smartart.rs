@@ -240,12 +240,55 @@ fn word_node(
     }
 }
 
+fn node_labels(data: &duke_office_art::smartart::SmartArtData) -> Vec<String> {
+    use std::collections::{HashMap, HashSet};
+    let points: HashMap<_, _> = data
+        .points
+        .iter()
+        .map(|p| (p.model_id.as_str(), p))
+        .collect();
+    let mut children: HashMap<&str, Vec<_>> = HashMap::new();
+    for edge in &data.connections {
+        if edge.kind.as_deref().unwrap_or("parOf") == "parOf" {
+            children.entry(&edge.source_id).or_default().push(edge);
+        }
+    }
+    for siblings in children.values_mut() {
+        siblings.sort_by_key(|edge| edge.source_order.unwrap_or(0));
+    }
+    let mut pending: Vec<_> = data
+        .points
+        .iter()
+        .rev()
+        .filter(|p| p.kind == "doc")
+        .collect();
+    let mut seen = HashSet::new();
+    let mut labels = Vec::new();
+    while let Some(point) = pending.pop() {
+        if !seen.insert(&point.model_id) {
+            continue;
+        }
+        if matches!(point.kind.as_str(), "node" | "asst") && !point.text.trim().is_empty() {
+            labels.push(point.text.clone());
+        }
+        if let Some(edges) = children.get(point.model_id.as_str()) {
+            pending.extend(
+                edges
+                    .iter()
+                    .rev()
+                    .filter_map(|edge| points.get(edge.destination_id.as_str()).copied()),
+            );
+        }
+    }
+    labels
+}
+
 pub(super) fn render_diagram(
     run: &str,
     width: f64,
     height: f64,
     context: &ParseContext<'_, impl Borrow<ParsedStyleSheet>>,
-) -> Option<String> {
+) -> Option<(String, crate::model::DiagramText)> {
     let references = crate::xml::extract_balanced_tag_slices(run, "dgm:relIds")
         .into_iter()
         .next()?;
@@ -253,6 +296,10 @@ pub(super) fn render_diagram(
     let data_part = context.relationships.get(&relationship)?;
     let data =
         duke_office_art::smartart::parse_smartart_data(&context.parts.get(data_part)?.content)?;
+    let text = crate::model::DiagramText {
+        part_name: data_part.clone(),
+        labels: node_labels(&data),
+    };
     let related = super::relationships::parse_relationships_from_parts(context.parts, data_part);
     let drawing_id = data.drawing_relationship_id.as_deref();
     let mut drawing_parts = Vec::new();
@@ -325,19 +372,21 @@ pub(super) fn render_diagram(
                         .warnings
                         .borrow_mut()
                         .extend(child_context.warnings.into_inner());
-                    return Some(svg.replacen("<svg ", r#"<svg data-office-art="true" "#, 1));
+                    return Some((
+                        svg.replacen("<svg ", r#"<svg data-office-art="true" "#, 1),
+                        text,
+                    ));
                 }
             }
         }
     }
     context.push_warning("SmartArt cached drawing is unavailable or unsupported; displaying semantic text without native layout");
-    let paragraphs = data
-        .points
+    let paragraphs = text
+        .labels
         .iter()
-        .filter(|point| point.kind == "node" && !point.text.is_empty())
         .take(512)
-        .map(|point| super::shapes::ParsedTextBoxParagraph {
-            text: point.text.clone(),
+        .map(|label| super::shapes::ParsedTextBoxParagraph {
+            text: label.clone(),
             style: None,
             align: None,
             images: Vec::new(),
@@ -347,11 +396,12 @@ pub(super) fn render_diagram(
     if paragraphs.is_empty() {
         return None;
     }
-    Some(
+    Some((
         super::shapes::render_bounded_text_box_svg(&paragraphs, width, height, None).replacen(
             "<svg ",
             r#"<svg data-office-art="true" "#,
             1,
         ),
-    )
+        text,
+    ))
 }
