@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.5
+
+- Respect hidden Word runs and inherited visibility in structured text while retaining the original UTF-16 source ranges.
+- Read editable SmartArt node labels in diagram order and preserve authored accessibility labels for Word tables and pictures.
+
 ## 0.6.4
 
 - Preserve embedded chart frames and their source order alongside text in grouped Word drawings.
