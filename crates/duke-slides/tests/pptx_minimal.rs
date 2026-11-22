@@ -1,6 +1,9 @@
 use std::io::{Cursor, Write};
 
-use duke_slides::{parse_presentation, ParseLimits, PresentationFormat, SlideNode};
+use duke_slides::{
+    parse_presentation, parse_presentation_bundle, parse_presentation_content,
+    ExtractPresentationBundleOptions, ExtractionLimits, ParseLimits, PresentationFormat, SlideNode,
+};
 use zip::{write::SimpleFileOptions, ZipWriter};
 
 fn minimal_pptx() -> Vec<u8> {
@@ -85,4 +88,83 @@ fn enforces_input_limit_before_decompression() {
         ..ParseLimits::default()
     };
     assert!(parse_presentation(&bytes, &limits).is_err());
+}
+
+fn pptx_with_unreadable_unused_layout() -> Vec<u8> {
+    const REL: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+    let mut output = Cursor::new(Vec::new());
+    let mut zip = ZipWriter::new(&mut output);
+    let options = SimpleFileOptions::default();
+    let parts = [
+        (
+            "ppt/presentation.xml",
+            r#"<p:presentation xmlns:p="p" xmlns:r="r"><p:sldMasterIdLst><p:sldMasterId id="1" r:id="rId1"/></p:sldMasterIdLst><p:sldIdLst><p:sldId id="256" r:id="rId2"/></p:sldIdLst><p:sldSz cx="12192000" cy="6858000"/></p:presentation>"#.to_owned(),
+        ),
+        (
+            "ppt/_rels/presentation.xml.rels",
+            format!(r#"<Relationships><Relationship Id="rId1" Type="{REL}/slideMaster" Target="slideMasters/slideMaster1.xml"/><Relationship Id="rId2" Type="{REL}/slide" Target="slides/slide1.xml"/></Relationships>"#),
+        ),
+        (
+            "ppt/slides/slide1.xml",
+            r#"<p:sld xmlns:p="p" xmlns:a="a"><p:cSld><p:spTree><p:sp><p:nvSpPr><p:cNvPr id="2" name="Body"/></p:nvSpPr><p:spPr/><p:txBody><a:p><a:r><a:t>Slide text</a:t></a:r></a:p></p:txBody></p:sp></p:spTree></p:cSld></p:sld>"#.to_owned(),
+        ),
+        (
+            "ppt/slides/_rels/slide1.xml.rels",
+            format!(r#"<Relationships><Relationship Id="rId1" Type="{REL}/slideLayout" Target="../slideLayouts/slideLayout1.xml"/></Relationships>"#),
+        ),
+        (
+            "ppt/slideLayouts/slideLayout1.xml",
+            r#"<p:sldLayout xmlns:p="p"><p:cSld><p:spTree/></p:cSld></p:sldLayout>"#.to_owned(),
+        ),
+        (
+            "ppt/slideLayouts/_rels/slideLayout1.xml.rels",
+            format!(r#"<Relationships><Relationship Id="rId1" Type="{REL}/slideMaster" Target="../slideMasters/slideMaster1.xml"/></Relationships>"#),
+        ),
+        (
+            "ppt/slideLayouts/slideLayout2.xml",
+            r#"<p:sldLayout xmlns:p="p"><p:cSld>"#.to_owned(),
+        ),
+        (
+            "ppt/slideMasters/slideMaster1.xml",
+            r#"<p:sldMaster xmlns:p="p"><p:cSld><p:spTree/></p:cSld></p:sldMaster>"#.to_owned(),
+        ),
+        (
+            "ppt/slideMasters/_rels/slideMaster1.xml.rels",
+            format!(r#"<Relationships><Relationship Id="rId1" Type="{REL}/slideLayout" Target="../slideLayouts/slideLayout1.xml"/><Relationship Id="rId2" Type="{REL}/slideLayout" Target="../slideLayouts/slideLayout2.xml"/></Relationships>"#),
+        ),
+    ];
+    for (path, xml) in parts {
+        zip.start_file(path, options).unwrap();
+        zip.write_all(xml.as_bytes()).unwrap();
+    }
+    zip.finish().unwrap();
+    output.into_inner()
+}
+
+#[test]
+fn content_extraction_reads_only_the_layouts_slides_use() {
+    let bytes = pptx_with_unreadable_unused_layout();
+    assert!(parse_presentation(&bytes, &ParseLimits::default()).is_err());
+
+    let options = ExtractPresentationBundleOptions::default();
+    let content = parse_presentation_content(&bytes, options, true).unwrap();
+    assert_eq!(content.body_text.as_deref().map(str::trim), Some("Slide text"));
+    assert_eq!(content.bundle.slides.len(), 1);
+    assert!(content.bundle.warnings.is_empty());
+}
+
+#[test]
+fn in_memory_content_keeps_the_text_limit_without_measuring_serialized_size() {
+    let bytes = minimal_pptx();
+    let limits = |max_output_bytes| ExtractPresentationBundleOptions {
+        limits: ExtractionLimits {
+            max_output_bytes,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    // Larger than the slide text and smaller than the serialized bundle.
+    assert!(parse_presentation_content(&bytes, limits(64), false).is_ok());
+    assert!(parse_presentation_bundle(&bytes, limits(64)).is_err());
+    assert!(parse_presentation_content(&bytes, limits(1), false).is_err());
 }

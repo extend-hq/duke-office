@@ -7117,10 +7117,15 @@ fn parse_cached(
         }
     }
 
-    let mut declared_master_paths = rels
-        .paths("slideMaster", "ppt/slideMasters/")
-        .cloned()
-        .collect::<Vec<_>>();
+    // Content extraction returns slides alone. Masters and layouts that no slide
+    // uses stay unread, and no master or layout nodes are built.
+    let mut declared_master_paths = if content_only {
+        Vec::new()
+    } else {
+        rels.paths("slideMaster", "ppt/slideMasters/")
+            .cloned()
+            .collect::<Vec<_>>()
+    };
     declared_master_paths.sort_unstable();
     for path in declared_master_paths {
         if master_parts.contains_key(&path) {
@@ -7187,7 +7192,7 @@ fn parse_cached(
     let empty_related_relationships = HashMap::new();
     let empty_chart_companions = HashMap::new();
     let mut masters = Vec::new();
-    for part in master_parts.values() {
+    for part in master_parts.values().filter(|_| !content_only) {
         let theme_path = related_path(&part.rels, "theme", "ppt/theme/");
         let theme = theme_path.as_ref().and_then(|path| theme_parts.get(path));
         let part_color_map = color_map(part.document.root());
@@ -7242,28 +7247,30 @@ fn parse_cached(
                 ),
             );
         }
-        if !content_only {
-            masters.push(crate::SlideMaster {
-                id: part.path.clone(),
-                name: part
-                    .document
-                    .root()
-                    .child("cSld")
-                    .and_then(|slide| slide.attr("name"))
-                    .map(str::to_owned),
-                theme_id: theme_path,
-                transition,
-                timing,
-                nodes,
-            });
-        }
+        masters.push(crate::SlideMaster {
+            id: part.path.clone(),
+            name: part
+                .document
+                .root()
+                .child("cSld")
+                .and_then(|slide| slide.attr("name"))
+                .map(str::to_owned),
+            theme_id: theme_path,
+            transition,
+            timing,
+            nodes,
+        });
     }
 
-    let layout_paths: std::collections::BTreeSet<_> = declared_layout_paths
-        .iter()
-        .chain(layout_parts.keys())
-        .cloned()
-        .collect();
+    let layout_paths: std::collections::BTreeSet<_> = if content_only {
+        Default::default()
+    } else {
+        declared_layout_paths
+            .iter()
+            .chain(layout_parts.keys())
+            .cloned()
+            .collect()
+    };
     let mut missing_layout_warnings = Vec::new();
     let mut layouts = Vec::with_capacity(layout_paths.len());
     for path in layout_paths {
@@ -7342,21 +7349,19 @@ fn parse_cached(
             (nodes, transition, timing)
         };
         document_warnings.extend(diagnostics.take());
-        if !content_only {
-            layouts.push(crate::SlideLayout {
-                id: part.path.clone(),
-                name: part
-                    .document
-                    .root()
-                    .child("cSld")
-                    .and_then(|slide| slide.attr("name"))
-                    .map(str::to_owned),
-                master_id: master_path,
-                transition,
-                timing,
-                nodes,
-            });
-        }
+        layouts.push(crate::SlideLayout {
+            id: part.path.clone(),
+            name: part
+                .document
+                .root()
+                .child("cSld")
+                .and_then(|slide| slide.attr("name"))
+                .map(str::to_owned),
+            master_id: master_path,
+            transition,
+            timing,
+            nodes,
+        });
         if retain {
             retained_layouts.insert(
                 part.path.clone(),

@@ -359,6 +359,17 @@ pub fn extract_presentation_block_input_with_limits(
     options: &ExtractPresentationBlocksOptions,
     limits: &crate::ExtractionLimits,
 ) -> Result<StructuredPresentation, String> {
+    block_input(document, options, limits, true)
+}
+
+/// `measure_output` serializes the result to enforce the output byte limit.
+/// Callers that keep the result in memory rely on the structure and text limits.
+fn block_input(
+    document: &PresentationBlockInput,
+    options: &ExtractPresentationBlocksOptions,
+    limits: &crate::ExtractionLimits,
+    measure_output: bool,
+) -> Result<StructuredPresentation, String> {
     crate::extraction_limits::validate_input(document, limits, options.include_notes)?;
     let document_id = document.document_id.as_ref().filter(|id| !id.is_empty())
         .ok_or("Presentation has no source identity; reparse the original bytes before extracting citations")?;
@@ -423,7 +434,9 @@ pub fn extract_presentation_block_input_with_limits(
         blocks,
         geometry_status: "requires_layout".into(),
     };
-    crate::extraction_limits::check_serialized_size(&result, limits.max_output_bytes)?;
+    if measure_output {
+        crate::extraction_limits::check_serialized_size(&result, limits.max_output_bytes)?;
+    }
     Ok(result)
 }
 
@@ -438,6 +451,15 @@ pub fn extract_presentation_blocks_with_limits(
     document: &PresentationDocument,
     options: &ExtractPresentationBlocksOptions,
     limits: &crate::ExtractionLimits,
+) -> Result<StructuredPresentation, String> {
+    presentation_blocks(document, options, limits, true)
+}
+
+pub(crate) fn presentation_blocks(
+    document: &PresentationDocument,
+    options: &ExtractPresentationBlocksOptions,
+    limits: &crate::ExtractionLimits,
+    measure_output: bool,
 ) -> Result<StructuredPresentation, String> {
     crate::extraction_limits::validate_model(document, limits, options.include_notes)?;
     let input = PresentationBlockInput {
@@ -463,7 +485,7 @@ pub fn extract_presentation_blocks_with_limits(
             })
             .collect(),
     };
-    let mut result = extract_presentation_block_input_with_limits(&input, options, limits)?;
+    let mut result = block_input(&input, options, limits, measure_output)?;
     if document.format == crate::PresentationFormat::Odp {
         let mut offset = 0;
         for slide in &document.slides {

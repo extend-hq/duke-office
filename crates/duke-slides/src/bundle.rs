@@ -130,7 +130,7 @@ impl PresentationContent {
     ) -> Result<Self, PresentationContentError> {
         let body_text = include_body_text.then(|| document.body_text());
         let source_assets = std::mem::take(&mut document.assets);
-        let bundle = extract_presentation_bundle(&document, options)
+        let bundle = extract_bundle(&document, options, false)
             .map_err(PresentationContentError::Extraction)?;
         Ok(Self {
             bundle,
@@ -143,6 +143,9 @@ impl PresentationContent {
 /// Extracts content with the original media bytes keyed by their source asset IDs.
 /// Source bytes use the parse limits. Bundle limits apply to the structured output
 /// and generated artwork. The raw sources are returned separately.
+///
+/// The content stays in memory, so its serialized size is not measured. The
+/// structure, word, table, text and asset limits still apply.
 pub fn parse_presentation_content(
     bytes: &[u8],
     options: ExtractPresentationBundleOptions,
@@ -185,10 +188,14 @@ struct Assets<'a> {
     bytes: usize,
     encoded_bytes: usize,
     detail_bytes: usize,
+    measure_output: bool,
 }
 
 impl Assets<'_> {
     fn record(&mut self, value: &impl Serialize) -> Result<(), String> {
+        if !self.measure_output {
+            return Ok(());
+        }
         self.detail_bytes += serialized_size(
             value,
             self.options
@@ -289,7 +296,7 @@ fn enrich_paragraphs(
 ) -> Result<(), String> {
     let mut counters = BTreeMap::new();
     for (block, paragraph) in blocks.iter_mut().zip(paragraphs) {
-        let details = paragraph_details(paragraph, &mut counters);
+        let details = paragraph_details(paragraph, &mut counters, assets.document.format);
         assets.record(&details)?;
         block.details = serde_json::to_value(details).map_err(|e| e.to_string())?;
     }
@@ -499,8 +506,20 @@ pub fn extract_presentation_bundle(
     document: &PresentationDocument,
     options: ExtractPresentationBundleOptions,
 ) -> Result<PresentationBundle, String> {
-    let mut structured =
-        crate::extract_presentation_blocks_with_limits(document, &options.blocks, &options.limits)?;
+    extract_bundle(document, options, true)
+}
+
+fn extract_bundle(
+    document: &PresentationDocument,
+    options: ExtractPresentationBundleOptions,
+    measure_output: bool,
+) -> Result<PresentationBundle, String> {
+    let mut structured = crate::structured::presentation_blocks(
+        document,
+        &options.blocks,
+        &options.limits,
+        measure_output,
+    )?;
     let mut assets = Assets {
         document,
         options: &options,
@@ -509,6 +528,7 @@ pub fn extract_presentation_bundle(
         bytes: 0,
         encoded_bytes: 0,
         detail_bytes: 0,
+        measure_output,
     };
     assets.record(&document.metadata)?;
     assets.record(&document.warnings)?;
@@ -590,6 +610,8 @@ pub fn extract_presentation_bundle(
         warnings,
         metadata: document.metadata.clone(),
     };
-    check_serialized_size(&bundle, options.limits.max_output_bytes)?;
+    if measure_output {
+        check_serialized_size(&bundle, options.limits.max_output_bytes)?;
+    }
     Ok(bundle)
 }

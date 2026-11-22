@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.1
+
+- Read only the layouts and masters that slides use during content extraction, and skip building layout and master nodes that the content result omits. Warnings from content extraction cover the slides and the parts they use.
+- Return in-memory content without serializing it to measure its size. The structure, word, table, text and asset limits still apply.
+- Omit the list label of an empty PowerPoint paragraph and keep it out of the numbering sequence.
+
 ## 0.5.10
 
 - Resolve slide-number fields in slides and notes using the presentation’s starting number and slide order.

@@ -8,7 +8,7 @@ The default XML element limit is 500,000 per part. Explicit caller limits remain
 
 For OOXML presentations, callers that inspect package parts before parsing can use `PptxPackage::open` with their limits. `read_part` returns the uncompressed bytes of a named part and retains them in the package. Calling `parse` or `extract_content` consumes the package and reuses those bytes. The document identity is the SHA-256 of the original input.
 
-`parse_presentation_content` returns the structured bundle, original encoded media keyed by source asset ID, and optional body text. Set `include_artwork` to request generated artwork. Content extraction can skip constructing drawing paths, while the presentation model retains the paths used for rendering.
+`parse_presentation_content` returns the structured bundle, original encoded media keyed by source asset ID, and optional body text. Set `include_artwork` to request generated artwork. Content extraction can skip constructing drawing paths, while the presentation model retains the paths used for rendering. It reads the layouts and masters that slides use and leaves other declared layouts and masters unread, so its warnings cover the slides and the parts they use. The content is returned in memory and its serialized size is not measured. The structure, word, table, text and asset limits still apply.
 
 Install with `cargo add duke-slides`. The Rust library target is named `duke_slides`.
 

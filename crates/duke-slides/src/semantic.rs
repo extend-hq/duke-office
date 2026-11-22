@@ -2,7 +2,10 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{TextField, TextFieldParagraphProperties, TextParagraph, TextRun, TextRunProperties};
+use crate::{
+    PresentationFormat, TextField, TextFieldParagraphProperties, TextParagraph, TextRun,
+    TextRunProperties,
+};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -58,6 +61,7 @@ pub(crate) fn run_style(run: &TextRun) -> TextRunProperties {
 pub(crate) fn paragraph_details(
     paragraph: &TextParagraph,
     counters: &mut BTreeMap<usize, usize>,
+    format: PresentationFormat,
 ) -> ParagraphDetails {
     let mut offset = 0;
     let inlines = paragraph
@@ -77,23 +81,27 @@ pub(crate) fn paragraph_details(
             }
         })
         .collect();
-    let list_label = paragraph
-        .bullet
-        .as_ref()
-        .and_then(|bullet| match bullet.kind.as_str() {
-            "character" => bullet.value.clone(),
-            "number" => {
-                let level = paragraph.level.unwrap_or(0);
-                let value = counters
-                    .get(&level)
-                    .copied()
-                    .unwrap_or(bullet.start_at.unwrap_or(1));
-                counters.retain(|key, _| *key <= level);
-                counters.insert(level, value.saturating_add(1));
-                number_label(value, bullet.value.as_deref().unwrap_or("arabicPeriod"))
-            }
-            _ => None,
-        });
+    let bullet = paragraph.bullet.as_ref().filter(|_| {
+        format != PresentationFormat::Pptx
+            || paragraph
+                .runs
+                .iter()
+                .any(|run| !run.text.is_empty() || run.field.is_some() || run.math.is_some())
+    });
+    let list_label = bullet.and_then(|bullet| match bullet.kind.as_str() {
+        "character" => bullet.value.clone(),
+        "number" => {
+            let level = paragraph.level.unwrap_or(0);
+            let value = counters
+                .get(&level)
+                .copied()
+                .unwrap_or(bullet.start_at.unwrap_or(1));
+            counters.retain(|key, _| *key <= level);
+            counters.insert(level, value.saturating_add(1));
+            number_label(value, bullet.value.as_deref().unwrap_or("arabicPeriod"))
+        }
+        _ => None,
+    });
     let list_label_style = paragraph.bullet.as_ref().map(|bullet| {
         let mut style = paragraph.runs.first().map(run_style).unwrap_or_default();
         if let Some(font) = &bullet.font_family {

@@ -361,7 +361,7 @@ dependencies = [
 
 [[package]]
 name = "duke-slides"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "base64",
  "base64-simd",
@@ -385,7 +385,7 @@ dependencies = [
 
 [[package]]
 name = "duke-slides-wasm"
-version = "0.6.0"
+version = "0.6.1"
 dependencies = [
  "duke-slides",
  "serde",
